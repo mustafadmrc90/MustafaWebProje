@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Giriş</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="auth-page">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="badge">Dashboard</div>
+        <h1>Giriş Yap</h1>
+        <p>Kullanıcı adı ve şifre ile giriş yapın.</p>
+      </div>
+
+      <% if (error) { %>
+        <div class="alert"><%= error %></div>
+      <% } %>
+
+      <form method="post" action="/login" class="auth-form">
+        <label>
+          <span>Kullanıcı Adı</span>
+          <input type="text" name="username" autocomplete="username" required />
+        </label>
+        <label>
+          <span>Şifre</span>
+          <input type="password" name="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit">Giriş</button>
+      </form>
+
+      <div class="auth-footer">
+        <small>İlk giriş için: admin / admin123</small>
+      </div>
+    </div>
+  </body>
+</html>

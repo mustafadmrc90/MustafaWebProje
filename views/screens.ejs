@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ekranlar</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard">
+    <header class="topbar">
+      <div>
+        <div class="badge">Dashboard</div>
+        <h1>Ekranlar</h1>
+        <p class="muted">Dashboard modüllerini ve ekranlarını tanımlayın.</p>
+      </div>
+      <div class="actions">
+        <a class="button-link ghost" href="/dashboard">Dashboard</a>
+        <form method="post" action="/logout">
+          <button class="ghost" type="submit">Çıkış</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Yeni Ekran</h2>
+        <form class="form-grid" method="post" action="/screens">
+          <label>
+            <span>Anahtar</span>
+            <input type="text" name="key" placeholder="reports" required />
+          </label>
+          <label>
+            <span>Ad</span>
+            <input type="text" name="name" placeholder="Raporlar" required />
+          </label>
+          <button type="submit">Ekran Ekle</button>
+        </form>
+        <% if (ok) { %>
+          <div class="alert success">Ekran eklendi.</div>
+        <% } %>
+      </section>
+
+      <section class="card span-2">
+        <h2>Mevcut Ekranlar</h2>
+        <div class="table">
+          <div class="row head two">
+            <span>Anahtar</span>
+            <span>Ad</span>
+          </div>
+          <% screens.forEach((s) => { %>
+            <div class="row two">
+              <span><%= s.key %></span>
+              <span><%= s.name %></span>
+            </div>
+          <% }) %>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

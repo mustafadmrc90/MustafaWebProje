@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yetkiler</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard">
+    <header class="topbar">
+      <div>
+        <div class="badge">Dashboard</div>
+        <h1>Yetkiler</h1>
+        <p class="muted">@<%= targetUser.username %> — <%= targetUser.display_name %></p>
+      </div>
+      <div class="actions">
+        <a class="button-link ghost" href="/users">Kullanıcılar</a>
+        <form method="post" action="/logout">
+          <button class="ghost" type="submit">Çıkış</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card span-2">
+        <h2>Ekran Yetkileri</h2>
+        <% if (ok) { %>
+          <div class="alert success">Yetkiler güncellendi.</div>
+        <% } %>
+        <div class="table">
+          <div class="row head">
+            <span>Ekran</span>
+            <span>Görüntüleme</span>
+            <span>İşlem</span>
+          </div>
+          <% screens.forEach((s) => { %>
+            <form class="row" method="post" action="/permissions/<%= targetUser.id %>">
+              <input type="hidden" name="screenId" value="<%= s.id %>" />
+              <span><%= s.name %> <small class="muted">(<%= s.key %>)</small></span>
+              <label class="switch">
+                <input type="checkbox" name="canView" <%= s.can_view ? "checked" : "" %> />
+                <span class="slider"></span>
+              </label>
+              <button type="submit" class="ghost">Kaydet</button>
+            </form>
+          <% }) %>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
