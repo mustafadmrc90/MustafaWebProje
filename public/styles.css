@@ -71,6 +71,13 @@ body {
   letter-spacing: 1px;
 }
 
+.brand-logo {
+  width: 168px;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+}
+
 .nav {
   display: grid;
   gap: 8px;
