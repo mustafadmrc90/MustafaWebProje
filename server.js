@@ -13,6 +13,11 @@ if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
 }
 
+if (isProd) {
+  // Trust Render's proxy so secure cookies are set correctly.
+  app.set("trust proxy", 1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: isProd ? { rejectUnauthorized: false } : undefined
