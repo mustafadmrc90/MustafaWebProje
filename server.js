@@ -145,7 +145,7 @@ app.post("/login", async (req, res) => {
       username: user.username,
       displayName: user.display_name
     };
-    res.redirect("/dashboard");
+    res.redirect("/dashboard?login=1");
   } catch (err) {
     console.error(err);
     res.status(500).render("login", { error: "Sunucu hatası." });
@@ -159,7 +159,69 @@ app.post("/logout", (req, res) => {
 });
 
 app.get("/dashboard", requireAuth, (req, res) => {
-  res.render("dashboard", { user: req.session.user });
+  res.render("dashboard", {
+    user: req.session.user,
+    loginSuccess: req.query.login === "1"
+  });
+});
+
+app.get("/change-password", requireAuth, (req, res) => {
+  res.render("change-password", { user: req.session.user, error: null, ok: req.query.ok === "1" });
+});
+
+app.post("/change-password", requireAuth, async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return res.status(400).render("change-password", {
+      user: req.session.user,
+      error: "Tüm alanlar zorunludur.",
+      ok: false
+    });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).render("change-password", {
+      user: req.session.user,
+      error: "Yeni şifreler eşleşmiyor.",
+      ok: false
+    });
+  }
+
+  try {
+    const result = await pool.query("SELECT password_hash FROM users WHERE id = $1", [
+      req.session.user.id
+    ]);
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(404).render("change-password", {
+        user: req.session.user,
+        error: "Kullanıcı bulunamadı.",
+        ok: false
+      });
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!ok) {
+      return res.status(401).render("change-password", {
+        user: req.session.user,
+        error: "Mevcut şifre hatalı.",
+        ok: false
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+      passwordHash,
+      req.session.user.id
+    ]);
+    res.redirect("/change-password?ok=1");
+  } catch (err) {
+    console.error(err);
+    res.status(500).render("change-password", {
+      user: req.session.user,
+      error: "Sunucu hatası.",
+      ok: false
+    });
+  }
 });
 
 app.get("/users", requireAuth, async (req, res) => {
