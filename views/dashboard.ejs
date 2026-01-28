@@ -6,101 +6,144 @@
     <title>Dashboard</title>
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard">
-    <header class="topbar hero">
-      <div class="hero-copy">
-        <div class="badge">Dashboard</div>
-        <h1>Hoş geldin, <%= user.displayName %></h1>
-        <p class="hero-subtitle">Bugün sistemin nabzı güçlü. Öne çıkan veriler burada toparlanıyor.</p>
-        <% if (loginSuccess) { %>
-          <div class="alert success hero-alert">Başarıyla giriş yapıldı.</div>
-        <% } %>
-        <div class="hero-actions">
-          <a class="button-link" href="/users">Kullanıcılar</a>
-          <a class="button-link ghost" href="/screens">Ekranlar</a>
-          <a class="button-link ghost" href="/change-password">Şifre Değiştir</a>
-        </div>
-      </div>
-      <div class="hero-panel">
-        <div class="pulse large">Canlı</div>
-        <div class="hero-stats">
-          <div class="stat-card">
-            <span class="label">Toplam Kullanıcı</span>
-            <strong>—</strong>
-            <small class="muted">Son 7 gün +%—</small>
-          </div>
-          <div class="stat-card">
-            <span class="label">Aktif Ekran</span>
-            <strong>—</strong>
-            <small class="muted">Güncel erişim</small>
-          </div>
-          <div class="stat-card">
-            <span class="label">Yetki Günc.</span>
-            <strong>—</strong>
-            <small class="muted">Son 24 saat</small>
-          </div>
-        </div>
-      </div>
-      <form method="post" action="/logout" class="hero-logout">
+  <body class="dashboard layout">
+    <aside class="sidebar">
+      <div class="brand">Nebula</div>
+      <nav class="nav">
+        <div class="nav-section">Genel</div>
+        <a class="nav-item active" href="/dashboard">Dashboard</a>
+        <a class="nav-item" href="/users">Kullanıcılar</a>
+        <a class="nav-item" href="/screens">Ekranlar</a>
+        <a class="nav-item" href="/permissions/1">Yetkiler</a>
+        <div class="nav-section">Yönetim</div>
+        <a class="nav-item" href="/change-password">Şifre Değiştir</a>
+      </nav>
+      <form method="post" action="/logout" class="sidebar-logout">
         <button class="ghost" type="submit">Çıkış</button>
       </form>
-    </header>
+    </aside>
 
-    <main class="dashboard-grid">
-      <section class="card wide-card">
-        <div class="card-header">
-          <h2>Operasyon Özeti</h2>
-          <span class="chip">Bugün</span>
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>Firmalar</h1>
+          <p>Entegrasyon ve operasyon bilgilerini bu panelden yönetin.</p>
         </div>
-        <p>Günlük performans metrikleri, kritiklik ve trend akışı bu panelde toplanır.</p>
-        <div class="overview-grid">
-          <div class="overview-item">
-            <span class="label">Sistem Etkinliği</span>
-            <strong>—</strong>
-            <small class="muted">Stabil seyir</small>
-          </div>
-          <div class="overview-item">
-            <span class="label">Yetki Talepleri</span>
-            <strong>—</strong>
-            <small class="muted">Bekleyen yok</small>
-          </div>
-          <div class="overview-item">
-            <span class="label">Son Girişler</span>
-            <strong>—</strong>
-            <small class="muted">Anlık akış</small>
-          </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+          <button class="ghost">Yenile</button>
         </div>
-      </section>
+      </header>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>Son Aktiviteler</h2>
-          <span class="chip ghost">Canlı</span>
-        </div>
-        <ul class="activity-list">
-          <li><span class="dot"></span> Yeni kullanıcı oluşturma akışı hazır.</li>
-          <li><span class="dot"></span> Ekran yetkileri senkronize edilecek.</li>
-          <li><span class="dot"></span> Güvenlik kontrolleri aktif.</li>
-        </ul>
-      </section>
+      <% if (loginSuccess) { %>
+        <div class="alert success inline-alert">Başarıyla giriş yapıldı.</div>
+      <% } %>
 
-      <section class="card">
-        <div class="card-header">
-          <h2>Sistem Durumu</h2>
-          <span class="chip">Stabil</span>
+      <div class="toolbar">
+        <div class="breadcrumb">
+          <span>Dashboard</span>
+          <span class="sep">/</span>
+          <span>Firmalar</span>
         </div>
-        <p>Bağlantı ve servis bileşenleri izlemede. Tüm servisler yeşil.</p>
-        <div class="status-grid">
-          <div class="status-item">
-            <span class="label">Veritabanı</span>
-            <strong>Aktif</strong>
-          </div>
-          <div class="status-item">
-            <span class="label">Oturumlar</span>
-            <strong>Stabil</strong>
+        <button class="button-link">Yeni Firma Tanımı</button>
+      </div>
+
+      <div class="table-card">
+        <div class="table-head">
+          <h2>Firma Listesi</h2>
+          <div class="table-actions">
+            <button class="ghost small">Copy</button>
+            <button class="ghost small">CSV</button>
+            <button class="ghost small">Excel</button>
+            <button class="ghost small">PDF</button>
+            <div class="search">
+              <input type="search" placeholder="Ara..." />
+            </div>
           </div>
         </div>
-      </section>
-    </main>
+
+        <div class="table-meta">
+          <span>Gösterilen: 1-10 / Toplam 279 kayıt</span>
+          <div class="page-size">
+            <span>Göster</span>
+            <select>
+              <option>10</option>
+              <option>25</option>
+              <option>50</option>
+            </select>
+            <span>kayıt</span>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Aktif</th>
+                <th>OBID</th>
+                <th>Firma Adı</th>
+                <th>Entegrasyon</th>
+                <th>Provider</th>
+                <th>Ödeme</th>
+                <th>Vergi No</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td><span class="pill success">Aktif</span></td>
+                <td>32347</td>
+                <td>Abana Seyahat</td>
+                <td>15 Günlük</td>
+                <td>Turkcell</td>
+                <td><span class="pill muted">Pasif</span></td>
+                <td>336.04.165</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td><span class="pill success">Aktif</span></td>
+                <td>32379</td>
+                <td>Adıyaman Ankara</td>
+                <td>15 Günlük</td>
+                <td>Turkcell</td>
+                <td><span class="pill muted">Pasif</span></td>
+                <td>336.04.255</td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <td><span class="pill success">Aktif</span></td>
+                <td>32321</td>
+                <td>Akhisar Seyahat</td>
+                <td>15 Günlük</td>
+                <td>Turkcell</td>
+                <td><span class="pill muted">Pasif</span></td>
+                <td>336.04.124</td>
+              </tr>
+              <tr>
+                <td>4</td>
+                <td><span class="pill success">Aktif</span></td>
+                <td>32344</td>
+                <td>Ali Osman Ulu</td>
+                <td>15 Günlük</td>
+                <td>Turkcell</td>
+                <td><span class="pill muted">Pasif</span></td>
+                <td>336.04.145</td>
+              </tr>
+              <tr>
+                <td>5</td>
+                <td><span class="pill success">Aktif</span></td>
+                <td>32315</td>
+                <td>Altınışık</td>
+                <td>15 Günlük</td>
+                <td>Turkcell</td>
+                <td><span class="pill muted">Pasif</span></td>
+                <td>336.04.107</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </body>
 </html>
