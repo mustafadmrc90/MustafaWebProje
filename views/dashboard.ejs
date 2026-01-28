@@ -7,53 +7,99 @@
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
   <body class="dashboard">
-    <header class="topbar">
-      <div>
+    <header class="topbar hero">
+      <div class="hero-copy">
         <div class="badge">Dashboard</div>
         <h1>Hoş geldin, <%= user.displayName %></h1>
+        <p class="hero-subtitle">Bugün sistemin nabzı güçlü. Öne çıkan veriler burada toparlanıyor.</p>
         <% if (loginSuccess) { %>
-          <div class="alert success">Başarıyla giriş yapıldı.</div>
+          <div class="alert success hero-alert">Başarıyla giriş yapıldı.</div>
         <% } %>
-      </div>
-      <form method="post" action="/logout">
-        <button class="ghost" type="submit">Çıkış</button>
-      </form>
-    </header>
-
-    <main class="grid">
-      <section class="card">
-        <h2>Genel Özet</h2>
-        <p>Bu alan daha sonra metriklerle doldurulacak.</p>
-        <div class="stats">
-          <div>
-            <span class="label">Kullanıcılar</span>
-            <strong>—</strong>
-          </div>
-          <div>
-            <span class="label">Ekranlar</span>
-            <strong>—</strong>
-          </div>
-          <div>
-            <span class="label">Yetkiler</span>
-            <strong>—</strong>
-          </div>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Yetki Yönetimi</h2>
-        <p>Kullanıcıların ekran bazlı yetkilerini buradan yönetin.</p>
-        <div class="actions">
+        <div class="hero-actions">
           <a class="button-link" href="/users">Kullanıcılar</a>
           <a class="button-link ghost" href="/screens">Ekranlar</a>
           <a class="button-link ghost" href="/change-password">Şifre Değiştir</a>
         </div>
+      </div>
+      <div class="hero-panel">
+        <div class="pulse large">Canlı</div>
+        <div class="hero-stats">
+          <div class="stat-card">
+            <span class="label">Toplam Kullanıcı</span>
+            <strong>—</strong>
+            <small class="muted">Son 7 gün +%—</small>
+          </div>
+          <div class="stat-card">
+            <span class="label">Aktif Ekran</span>
+            <strong>—</strong>
+            <small class="muted">Güncel erişim</small>
+          </div>
+          <div class="stat-card">
+            <span class="label">Yetki Günc.</span>
+            <strong>—</strong>
+            <small class="muted">Son 24 saat</small>
+          </div>
+        </div>
+      </div>
+      <form method="post" action="/logout" class="hero-logout">
+        <button class="ghost" type="submit">Çıkış</button>
+      </form>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="card wide-card">
+        <div class="card-header">
+          <h2>Operasyon Özeti</h2>
+          <span class="chip">Bugün</span>
+        </div>
+        <p>Günlük performans metrikleri, kritiklik ve trend akışı bu panelde toplanır.</p>
+        <div class="overview-grid">
+          <div class="overview-item">
+            <span class="label">Sistem Etkinliği</span>
+            <strong>—</strong>
+            <small class="muted">Stabil seyir</small>
+          </div>
+          <div class="overview-item">
+            <span class="label">Yetki Talepleri</span>
+            <strong>—</strong>
+            <small class="muted">Bekleyen yok</small>
+          </div>
+          <div class="overview-item">
+            <span class="label">Son Girişler</span>
+            <strong>—</strong>
+            <small class="muted">Anlık akış</small>
+          </div>
+        </div>
       </section>
 
       <section class="card">
-        <h2>Sistem Durumu</h2>
-        <p>Bağlantı ve performans göstergeleri için ayrılmış alan.</p>
-        <div class="pulse">Aktif</div>
+        <div class="card-header">
+          <h2>Son Aktiviteler</h2>
+          <span class="chip ghost">Canlı</span>
+        </div>
+        <ul class="activity-list">
+          <li><span class="dot"></span> Yeni kullanıcı oluşturma akışı hazır.</li>
+          <li><span class="dot"></span> Ekran yetkileri senkronize edilecek.</li>
+          <li><span class="dot"></span> Güvenlik kontrolleri aktif.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Sistem Durumu</h2>
+          <span class="chip">Stabil</span>
+        </div>
+        <p>Bağlantı ve servis bileşenleri izlemede. Tüm servisler yeşil.</p>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">Veritabanı</span>
+            <strong>Aktif</strong>
+          </div>
+          <div class="status-item">
+            <span class="label">Oturumlar</span>
+            <strong>Stabil</strong>
+          </div>
+        </div>
       </section>
     </main>
   </body>
