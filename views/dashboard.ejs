@@ -21,10 +21,6 @@
         </div>
       </header>
 
-      <% if (loginSuccess) { %>
-        <div class="alert success inline-alert">Başarıyla giriş yapıldı.</div>
-      <% } %>
-
       <div class="api-toolbar">
         <div class="api-target">
           <span class="label">Hedef URL</span>
@@ -35,7 +31,7 @@
           </select>
         </div>
         <div class="api-actions">
-          <button class="button-link">Endpoint Ekle</button>
+          <button class="button-link" id="open-endpoint-modal">Endpoint Ekle</button>
           <button class="ghost">Yenile</button>
         </div>
       </div>
@@ -46,24 +42,7 @@
             <h2>Endpointler</h2>
             <span class="pill">0 seçili</span>
           </div>
-          <div class="api-list">
-            <button class="api-item active">
-              <span class="method get">GET</span>
-              <span>/company/list</span>
-            </button>
-            <button class="api-item">
-              <span class="method post">POST</span>
-              <span>/company/create</span>
-            </button>
-            <button class="api-item">
-              <span class="method get">GET</span>
-              <span>/reports/summary</span>
-            </button>
-            <button class="api-item">
-              <span class="method put">PUT</span>
-              <span>/permissions/update</span>
-            </button>
-          </div>
+          <div class="api-list" id="endpoint-list"></div>
         </aside>
 
         <section class="api-panel">
@@ -80,6 +59,44 @@
         </section>
       </div>
     </section>
+
+    <div class="modal-backdrop" id="endpoint-modal" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>Endpoint Ekle</h2>
+          <button class="ghost small" id="close-endpoint-modal">Kapat</button>
+        </div>
+        <form id="endpoint-form" class="modal-form">
+          <label>
+            <span>Başlık</span>
+            <input type="text" name="title" placeholder="Firma Listeleme" required />
+          </label>
+          <label>
+            <span>Method</span>
+            <select name="method">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </label>
+          <label>
+            <span>Endpoint URL</span>
+            <input type="text" name="path" placeholder="/company/list" required />
+          </label>
+          <label>
+            <span>Açıklama</span>
+            <input type="text" name="description" placeholder="Opsiyonel" />
+          </label>
+          <button type="submit" class="button-link">Kaydet</button>
+        </form>
+
+        <div class="modal-list">
+          <h3>Eklenen Endpointler</h3>
+          <div class="endpoint-table" id="endpoint-table"></div>
+        </div>
+      </div>
+    </div>
     <script src="/public/app.js" defer></script>
   </body>
 </html>
