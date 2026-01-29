@@ -6,63 +6,67 @@
     <title>Kullanıcılar</title>
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard">
-    <header class="topbar">
-      <div>
-        <div class="badge">Dashboard</div>
-        <h1>Kullanıcılar</h1>
-        <p class="muted">Yetki düzenlemeleri için kullanıcı seçin.</p>
-      </div>
-      <div class="actions">
-        <a class="button-link ghost" href="/dashboard">Dashboard</a>
-        <form method="post" action="/logout">
-          <button class="ghost" type="submit">Çıkış</button>
-        </form>
-      </div>
-    </header>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
 
-    <main class="grid">
-      <section class="card span-2">
-        <h2>Yeni Kullanıcı</h2>
-        <form class="form-grid" method="post" action="/users">
-          <label>
-            <span>Kullanıcı Adı</span>
-            <input type="text" name="username" required />
-          </label>
-          <label>
-            <span>Görünen İsim</span>
-            <input type="text" name="displayName" required />
-          </label>
-          <label>
-            <span>Şifre</span>
-            <input type="password" name="password" required />
-          </label>
-          <button type="submit">Kullanıcı Ekle</button>
-        </form>
-        <% if (ok) { %>
-          <div class="alert success">Kullanıcı oluşturuldu.</div>
-        <% } %>
-      </section>
-
-      <section class="card span-2">
-        <h2>Mevcut Kullanıcılar</h2>
-        <div class="table">
-          <div class="row head">
-            <span>Kullanıcı</span>
-            <span>Görünen İsim</span>
-            <span>İşlemler</span>
-          </div>
-          <% users.forEach((u) => { %>
-            <div class="row">
-              <span>@<%= u.username %></span>
-              <span><%= u.display_name %></span>
-              <span>
-                <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
-              </span>
-            </div>
-          <% }) %>
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>Kullanıcılar</h1>
+          <p>Yetki düzenlemeleri için kullanıcıları yönetin.</p>
         </div>
-      </section>
-    </main>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <% if (ok) { %>
+        <div class="alert success inline-alert">Kullanıcı oluşturuldu.</div>
+      <% } %>
+
+      <div class="panel-grid">
+        <section class="table-card panel-card">
+          <h2>Yeni Kullanıcı</h2>
+          <form class="form-grid" method="post" action="/users">
+            <label>
+              <span>Kullanıcı Adı</span>
+              <input type="text" name="username" required />
+            </label>
+            <label>
+              <span>Görünen İsim</span>
+              <input type="text" name="displayName" required />
+            </label>
+            <label>
+              <span>Şifre</span>
+              <input type="password" name="password" required />
+            </label>
+            <button type="submit">Kullanıcı Ekle</button>
+          </form>
+        </section>
+
+        <section class="table-card panel-card">
+          <div class="table-head">
+            <h2>Mevcut Kullanıcılar</h2>
+          </div>
+          <div class="table">
+            <div class="row head">
+              <span>Kullanıcı</span>
+              <span>Görünen İsim</span>
+              <span>İşlemler</span>
+            </div>
+            <% users.forEach((u) => { %>
+              <div class="row">
+                <span>@<%= u.username %></span>
+                <span><%= u.display_name %></span>
+                <span>
+                  <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
+                </span>
+              </div>
+            <% }) %>
+          </div>
+        </section>
+      </div>
+    </section>
+    <script src="/public/app.js" defer></script>
   </body>
 </html>

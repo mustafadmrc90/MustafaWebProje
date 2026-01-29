@@ -6,27 +6,28 @@
     <title>Yetkiler</title>
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard">
-    <header class="topbar">
-      <div>
-        <div class="badge">Dashboard</div>
-        <h1>Yetkiler</h1>
-        <p class="muted">@<%= targetUser.username %> — <%= targetUser.display_name %></p>
-      </div>
-      <div class="actions">
-        <a class="button-link ghost" href="/users">Kullanıcılar</a>
-        <form method="post" action="/logout">
-          <button class="ghost" type="submit">Çıkış</button>
-        </form>
-      </div>
-    </header>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
 
-    <main class="grid">
-      <section class="card span-2">
-        <h2>Ekran Yetkileri</h2>
-        <% if (ok) { %>
-          <div class="alert success">Yetkiler güncellendi.</div>
-        <% } %>
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>Yetkiler</h1>
+          <p>@<%= targetUser.username %> — <%= targetUser.display_name %></p>
+        </div>
+        <div class="page-actions">
+          <a class="button-link ghost" href="/users">Kullanıcılar</a>
+        </div>
+      </header>
+
+      <% if (ok) { %>
+        <div class="alert success inline-alert">Yetkiler güncellendi.</div>
+      <% } %>
+
+      <section class="table-card panel-card">
+        <div class="table-head">
+          <h2>Ekran Yetkileri</h2>
+        </div>
         <div class="table">
           <div class="row head">
             <span>Ekran</span>
@@ -46,6 +47,7 @@
           <% }) %>
         </div>
       </section>
-    </main>
+    </section>
+    <script src="/public/app.js" defer></script>
   </body>
 </html>

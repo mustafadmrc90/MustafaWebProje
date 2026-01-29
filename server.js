@@ -161,12 +161,18 @@ app.post("/logout", (req, res) => {
 app.get("/dashboard", requireAuth, (req, res) => {
   res.render("dashboard", {
     user: req.session.user,
+    active: "dashboard",
     loginSuccess: req.query.login === "1"
   });
 });
 
 app.get("/change-password", requireAuth, (req, res) => {
-  res.render("change-password", { user: req.session.user, error: null, ok: req.query.ok === "1" });
+  res.render("change-password", {
+    user: req.session.user,
+    error: null,
+    ok: req.query.ok === "1",
+    active: "password"
+  });
 });
 
 app.post("/change-password", requireAuth, async (req, res) => {
@@ -229,7 +235,13 @@ app.get("/users", requireAuth, async (req, res) => {
     const result = await pool.query(
       "SELECT id, username, display_name, created_at FROM users ORDER BY id DESC"
     );
-    res.render("users", { user: req.session.user, users: result.rows, error: null, ok: req.query.ok === "1" });
+    res.render("users", {
+      user: req.session.user,
+      users: result.rows,
+      error: null,
+      ok: req.query.ok === "1",
+      active: "users"
+    });
   } catch (err) {
     console.error(err);
     res.status(500).send("Sunucu hatası");
@@ -257,7 +269,12 @@ app.post("/users", requireAuth, async (req, res) => {
 app.get("/screens", requireAuth, async (req, res) => {
   try {
     const result = await pool.query("SELECT id, key, name FROM screens ORDER BY id DESC");
-    res.render("screens", { user: req.session.user, screens: result.rows, ok: req.query.ok === "1" });
+    res.render("screens", {
+      user: req.session.user,
+      screens: result.rows,
+      ok: req.query.ok === "1",
+      active: "screens"
+    });
   } catch (err) {
     console.error(err);
     res.status(500).send("Sunucu hatası");
@@ -302,7 +319,8 @@ app.get("/permissions/:userId", requireAuth, async (req, res) => {
       user: req.session.user,
       targetUser,
       screens: screensResult.rows,
-      ok: req.query.ok === "1"
+      ok: req.query.ok === "1",
+      active: "users"
     });
   } catch (err) {
     console.error(err);

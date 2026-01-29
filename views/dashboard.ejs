@@ -7,23 +7,7 @@
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
   <body class="dashboard layout">
-    <aside class="sidebar">
-      <div class="brand">
-        <img src="/public/logo.png" alt="Bus Product" class="brand-logo" />
-      </div>
-      <nav class="nav">
-        <div class="nav-section">Genel</div>
-        <a class="nav-item active" href="/dashboard">Dashboard</a>
-        <a class="nav-item" href="/users">Kullanıcılar</a>
-        <a class="nav-item" href="/screens">Ekranlar</a>
-        <a class="nav-item" href="/permissions/1">Yetkiler</a>
-        <div class="nav-section">Yönetim</div>
-        <a class="nav-item" href="/change-password">Şifre Değiştir</a>
-      </nav>
-      <form method="post" action="/logout" class="sidebar-logout">
-        <button class="ghost" type="submit">Çıkış</button>
-      </form>
-    </aside>
+    <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
       <header class="page-header">
@@ -147,5 +131,6 @@
         </div>
       </div>
     </section>
+    <script src="/public/app.js" defer></script>
   </body>
 </html>
