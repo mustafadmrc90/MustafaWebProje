@@ -13,7 +13,7 @@
       <header class="page-header">
         <div class="page-title">
           <h1>Obus API</h1>
-          <p>Entegrasyon ve operasyon verilerini bu panelden yönetin.</p>
+          <p>API uçlarını ve ortam hedeflerini tek panelden yönetin.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -25,110 +25,59 @@
         <div class="alert success inline-alert">Başarıyla giriş yapıldı.</div>
       <% } %>
 
-      <div class="toolbar">
-        <div class="breadcrumb">
-          <span>Obus API</span>
-          <span class="sep">/</span>
-          <span>Firmalar</span>
+      <div class="api-toolbar">
+        <div class="api-target">
+          <span class="label">Hedef URL</span>
+          <select class="target-select">
+            <option>Prod (otomatik)</option>
+            <option>Stage (otomatik)</option>
+            <option>Test (otomatik)</option>
+          </select>
         </div>
-        <button class="button-link">Yeni Firma Tanımı</button>
+        <div class="api-actions">
+          <button class="button-link">Endpoint Ekle</button>
+          <button class="ghost">Yenile</button>
+        </div>
       </div>
 
-      <div class="table-card">
-        <div class="table-head">
-          <h2>Firma Listesi</h2>
-          <div class="table-actions">
-            <button class="ghost small">Copy</button>
-            <button class="ghost small">CSV</button>
-            <button class="ghost small">Excel</button>
-            <button class="ghost small">PDF</button>
-            <div class="search">
-              <input type="search" placeholder="Ara..." />
+      <div class="api-layout">
+        <aside class="api-sidebar">
+          <div class="api-sidebar-header">
+            <h2>Endpointler</h2>
+            <span class="pill">0 seçili</span>
+          </div>
+          <div class="api-list">
+            <button class="api-item active">
+              <span class="method get">GET</span>
+              <span>/company/list</span>
+            </button>
+            <button class="api-item">
+              <span class="method post">POST</span>
+              <span>/company/create</span>
+            </button>
+            <button class="api-item">
+              <span class="method get">GET</span>
+              <span>/reports/summary</span>
+            </button>
+            <button class="api-item">
+              <span class="method put">PUT</span>
+              <span>/permissions/update</span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="api-panel">
+          <div class="panel-card">
+            <h2>Endpoint Detayı</h2>
+            <p class="muted">
+              Sol listeden bir endpoint seçildiğinde detaylar burada güncellenecek.
+            </p>
+            <div class="empty-state">
+              <div class="empty-icon">API</div>
+              <p>Endpoint detayları ve yanıtları burada görünecek.</p>
             </div>
           </div>
-        </div>
-
-        <div class="table-meta">
-          <span>Gösterilen: 1-10 / Toplam 279 kayıt</span>
-          <div class="page-size">
-            <span>Göster</span>
-            <select>
-              <option>10</option>
-              <option>25</option>
-              <option>50</option>
-            </select>
-            <span>kayıt</span>
-          </div>
-        </div>
-
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Aktif</th>
-                <th>OBID</th>
-                <th>Firma Adı</th>
-                <th>Entegrasyon</th>
-                <th>Provider</th>
-                <th>Ödeme</th>
-                <th>Vergi No</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>1</td>
-                <td><span class="pill success">Aktif</span></td>
-                <td>32347</td>
-                <td>Abana Seyahat</td>
-                <td>15 Günlük</td>
-                <td>Turkcell</td>
-                <td><span class="pill muted">Pasif</span></td>
-                <td>336.04.165</td>
-              </tr>
-              <tr>
-                <td>2</td>
-                <td><span class="pill success">Aktif</span></td>
-                <td>32379</td>
-                <td>Adıyaman Ankara</td>
-                <td>15 Günlük</td>
-                <td>Turkcell</td>
-                <td><span class="pill muted">Pasif</span></td>
-                <td>336.04.255</td>
-              </tr>
-              <tr>
-                <td>3</td>
-                <td><span class="pill success">Aktif</span></td>
-                <td>32321</td>
-                <td>Akhisar Seyahat</td>
-                <td>15 Günlük</td>
-                <td>Turkcell</td>
-                <td><span class="pill muted">Pasif</span></td>
-                <td>336.04.124</td>
-              </tr>
-              <tr>
-                <td>4</td>
-                <td><span class="pill success">Aktif</span></td>
-                <td>32344</td>
-                <td>Ali Osman Ulu</td>
-                <td>15 Günlük</td>
-                <td>Turkcell</td>
-                <td><span class="pill muted">Pasif</span></td>
-                <td>336.04.145</td>
-              </tr>
-              <tr>
-                <td>5</td>
-                <td><span class="pill success">Aktif</span></td>
-                <td>32315</td>
-                <td>Altınışık</td>
-                <td>15 Günlük</td>
-                <td>Turkcell</td>
-                <td><span class="pill muted">Pasif</span></td>
-                <td>336.04.107</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        </section>
       </div>
     </section>
     <script src="/public/app.js" defer></script>
