@@ -81,9 +81,24 @@
     localStorage.setItem("endpoints", JSON.stringify(items));
   };
 
+  const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
+
+  const normalizeEndpoints = (items) =>
+    items.map((item) => ({
+      body: item.body || "{}",
+      headers: item.headers || "{\n  \"Content-Type\": \"application/json\"\n}",
+      params: item.params || "{}",
+      targetUrl: item.targetUrl || "",
+      ...item
+    }));
+
   const seedIfEmpty = () => {
     const existing = loadEndpoints();
-    if (existing.length) return existing;
+    if (existing.length) {
+      const normalized = normalizeEndpoints(existing);
+      saveEndpoints(normalized);
+      return normalized;
+    }
     const seeded = [
       {
         id: "getsession",
@@ -91,7 +106,8 @@
         method: "POST",
         path: "/GetSession",
         description: "Session başlatma",
-        body: `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`,
+        targetUrl: "",
+        body: defaultBody,
         headers: "{\n  \"Content-Type\": \"application/json\"\n}",
         params: "{}"
       }
@@ -173,6 +189,7 @@
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const form = document.querySelector("#endpoint-form");
     const list = document.querySelector("#endpoint-list");
+    const targetSelect = document.querySelector(".target-select");
 
     let endpoints = seedIfEmpty();
     let selected = endpoints[0]?.id;
@@ -216,7 +233,8 @@
         method: data.get("method")?.toString().toUpperCase() || "GET",
         path: data.get("path")?.toString().trim() || "/",
         description: data.get("description")?.toString().trim() || "",
-        body: "{}",
+        targetUrl: data.get("targetUrl")?.toString().trim() || "",
+        body: defaultBody,
         headers: "{\n  \"Content-Type\": \"application/json\"\n}",
         params: "{}"
       };
@@ -225,6 +243,29 @@
       renderSidebar(endpoints, item.id);
       renderTable(endpoints);
       renderDetails(item);
+      if (targetSelect) {
+        const urls = Array.from(
+          new Set(
+            endpoints
+              .map((endpoint) => endpoint.targetUrl?.trim())
+              .filter((value) => value)
+          )
+        );
+        targetSelect.innerHTML = "";
+        if (!urls.length) {
+          const option = document.createElement("option");
+          option.textContent = "Seçiniz";
+          option.value = "";
+          targetSelect.appendChild(option);
+        } else {
+          urls.forEach((url) => {
+            const option = document.createElement("option");
+            option.textContent = url;
+            option.value = url;
+            targetSelect.appendChild(option);
+          });
+        }
+      }
       form.reset();
       closeModal();
     });
@@ -243,6 +284,30 @@
     bindSave(document.querySelector("#endpoint-params"), "params");
 
     initTabs();
+
+    if (targetSelect) {
+      const targets = Array.from(
+        new Set(
+          endpoints
+            .map((item) => item.targetUrl?.trim())
+            .filter((value) => value)
+        )
+      );
+      targetSelect.innerHTML = "";
+      if (!targets.length) {
+        const option = document.createElement("option");
+        option.textContent = "Seçiniz";
+        option.value = "";
+        targetSelect.appendChild(option);
+      } else {
+        targets.forEach((url) => {
+          const option = document.createElement("option");
+          option.textContent = url;
+          option.value = url;
+          targetSelect.appendChild(option);
+        });
+      }
+    }
   };
 
   initEndpointUI();
