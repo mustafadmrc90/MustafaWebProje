@@ -25,9 +25,7 @@
         <div class="api-target">
           <span class="label">Hedef URL</span>
           <select class="target-select">
-            <option>Prod (otomatik)</option>
-            <option>Stage (otomatik)</option>
-            <option>Test (otomatik)</option>
+            <option>Seçiniz</option>
           </select>
         </div>
         <div class="api-actions">
@@ -47,13 +45,33 @@
 
         <section class="api-panel">
           <div class="panel-card">
-            <h2>Endpoint Detayı</h2>
-            <p class="muted">
-              Sol listeden bir endpoint seçildiğinde detaylar burada güncellenecek.
-            </p>
-            <div class="empty-state">
-              <div class="empty-icon">API</div>
-              <p>Endpoint detayları ve yanıtları burada görünecek.</p>
+            <div class="endpoint-header">
+              <div>
+                <h2 id="endpoint-title">GetSession</h2>
+                <p class="muted" id="endpoint-path">POST /GetSession</p>
+              </div>
+              <span class="pill" id="endpoint-method">POST</span>
+            </div>
+
+            <div class="request-tabs">
+              <button class="tab active" data-tab="body">Body</button>
+              <button class="tab" data-tab="headers">Headers</button>
+              <button class="tab" data-tab="params">Params</button>
+            </div>
+
+            <div class="request-body tab-panel active" data-panel="body">
+              <label class="label">Body (JSON)</label>
+              <textarea id="endpoint-body" class="code-input" rows="12"></textarea>
+            </div>
+
+            <div class="request-body tab-panel" data-panel="headers">
+              <label class="label">Headers</label>
+              <textarea id="endpoint-headers" class="code-input" rows="8" placeholder='{"Content-Type":"application/json"}'></textarea>
+            </div>
+
+            <div class="request-body tab-panel" data-panel="params">
+              <label class="label">Params</label>
+              <textarea id="endpoint-params" class="code-input" rows="6" placeholder='{"page":1,"size":10}'></textarea>
             </div>
           </div>
         </section>

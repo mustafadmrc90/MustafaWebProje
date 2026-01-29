@@ -1,7 +1,6 @@
 (() => {
   const sidebar = document.querySelector(".sidebar");
   const content = document.querySelector(".content");
-  const modal = document.querySelector("#endpoint-modal");
 
   if (!sidebar || !content) return;
 
@@ -30,6 +29,7 @@
     content.innerHTML = next.innerHTML;
     document.title = doc.title || document.title;
     setActive(new URL(url).pathname);
+    initEndpointUI();
 
     if (push) {
       history.pushState({}, "", url);
@@ -69,61 +69,117 @@
     navigate(window.location.href, { push: false });
   });
 
-  if (modal) {
+  const loadEndpoints = () => {
+    try {
+      return JSON.parse(localStorage.getItem("endpoints") || "[]");
+    } catch {
+      return [];
+    }
+  };
+
+  const saveEndpoints = (items) => {
+    localStorage.setItem("endpoints", JSON.stringify(items));
+  };
+
+  const seedIfEmpty = () => {
+    const existing = loadEndpoints();
+    if (existing.length) return existing;
+    const seeded = [
+      {
+        id: "getsession",
+        title: "GetSession",
+        method: "POST",
+        path: "/GetSession",
+        description: "Session başlatma",
+        body: `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`,
+        headers: "{\n  \"Content-Type\": \"application/json\"\n}",
+        params: "{}"
+      }
+    ];
+    saveEndpoints(seeded);
+    return seeded;
+  };
+
+  const renderSidebar = (items, selectedId) => {
+    const list = document.querySelector("#endpoint-list");
+    if (!list) return;
+    list.innerHTML = "";
+    items.forEach((item) => {
+      const button = document.createElement("button");
+      const isActive = item.id === selectedId;
+      button.className = `api-item${isActive ? " active" : ""}`;
+      button.dataset.endpointId = item.id;
+      button.innerHTML = `<span class="method ${item.method.toLowerCase()}">${item.method}</span><span>${item.path}</span>`;
+      list.appendChild(button);
+    });
+  };
+
+  const renderTable = (items) => {
+    const table = document.querySelector("#endpoint-table");
+    if (!table) return;
+    table.innerHTML = "";
+    if (!items.length) {
+      table.innerHTML = `<div class="endpoint-row"><span class="desc">Henüz endpoint eklenmedi.</span></div>`;
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "endpoint-row";
+      row.innerHTML = `
+        <span class="method ${item.method.toLowerCase()}">${item.method}</span>
+        <div>
+          <div class="path">${item.path}</div>
+          <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
+        </div>
+        <span></span>
+      `;
+      table.appendChild(row);
+    });
+  };
+
+  const renderDetails = (item) => {
+    const title = document.querySelector("#endpoint-title");
+    const path = document.querySelector("#endpoint-path");
+    const method = document.querySelector("#endpoint-method");
+    const body = document.querySelector("#endpoint-body");
+    const headers = document.querySelector("#endpoint-headers");
+    const params = document.querySelector("#endpoint-params");
+    if (!title || !path || !method || !body || !headers || !params) return;
+    title.textContent = item.title;
+    path.textContent = `${item.method} ${item.path}`;
+    method.textContent = item.method;
+    body.value = item.body || "";
+    headers.value = item.headers || "";
+    params.value = item.params || "";
+  };
+
+  const initTabs = () => {
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab;
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        document.querySelectorAll(".tab-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.panel === target);
+        });
+      });
+    });
+  };
+
+  const initEndpointUI = () => {
+    const modal = document.querySelector("#endpoint-modal");
+    if (!modal) return;
     const openBtn = document.querySelector("#open-endpoint-modal");
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const form = document.querySelector("#endpoint-form");
     const list = document.querySelector("#endpoint-list");
-    const table = document.querySelector("#endpoint-table");
 
-    const loadEndpoints = () => {
-      try {
-        return JSON.parse(localStorage.getItem("endpoints") || "[]");
-      } catch {
-        return [];
-      }
-    };
+    let endpoints = seedIfEmpty();
+    let selected = endpoints[0]?.id;
 
-    const saveEndpoints = (items) => {
-      localStorage.setItem("endpoints", JSON.stringify(items));
-    };
-
-    const renderSidebar = (items) => {
-      if (!list) return;
-      list.innerHTML = "";
-      items.forEach((item, index) => {
-        const button = document.createElement("button");
-        button.className = `api-item${index === 0 ? " active" : ""}`;
-        button.innerHTML = `<span class="method ${item.method.toLowerCase()}">${item.method}</span><span>${item.path}</span>`;
-        list.appendChild(button);
-      });
-    };
-
-    const renderTable = (items) => {
-      if (!table) return;
-      table.innerHTML = "";
-      if (!items.length) {
-        table.innerHTML = `<div class="endpoint-row"><span class="desc">Henüz endpoint eklenmedi.</span></div>`;
-        return;
-      }
-      items.forEach((item) => {
-        const row = document.createElement("div");
-        row.className = "endpoint-row";
-        row.innerHTML = `
-          <span class="method ${item.method.toLowerCase()}">${item.method}</span>
-          <div>
-            <div class="path">${item.path}</div>
-            <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
-          </div>
-          <span></span>
-        `;
-        table.appendChild(row);
-      });
-    };
-
-    const endpoints = loadEndpoints();
-    renderSidebar(endpoints);
+    renderSidebar(endpoints, selected);
     renderTable(endpoints);
+    if (endpoints[0]) renderDetails(endpoints[0]);
 
     const openModal = () => {
       modal.classList.add("active");
@@ -141,21 +197,53 @@
       if (event.target === modal) closeModal();
     });
 
+    list?.addEventListener("click", (event) => {
+      const item = event.target.closest(".api-item");
+      if (!item) return;
+      selected = item.dataset.endpointId;
+      renderSidebar(endpoints, selected);
+      const current = endpoints.find((e) => e.id === selected);
+      if (current) renderDetails(current);
+    });
+
     form?.addEventListener("submit", (event) => {
       event.preventDefault();
       const data = new FormData(form);
+      const id = `${Date.now()}`;
       const item = {
+        id,
         title: data.get("title")?.toString().trim() || "Endpoint",
         method: data.get("method")?.toString().toUpperCase() || "GET",
         path: data.get("path")?.toString().trim() || "/",
-        description: data.get("description")?.toString().trim() || ""
+        description: data.get("description")?.toString().trim() || "",
+        body: "{}",
+        headers: "{\n  \"Content-Type\": \"application/json\"\n}",
+        params: "{}"
       };
-      const next = [item, ...loadEndpoints()];
-      saveEndpoints(next);
-      renderSidebar(next);
-      renderTable(next);
+      endpoints = [item, ...endpoints];
+      saveEndpoints(endpoints);
+      renderSidebar(endpoints, item.id);
+      renderTable(endpoints);
+      renderDetails(item);
       form.reset();
       closeModal();
     });
-  }
+
+    const bindSave = (field, key) => {
+      field?.addEventListener("input", () => {
+        const current = endpoints.find((e) => e.id === selected);
+        if (!current) return;
+        current[key] = field.value;
+        saveEndpoints(endpoints);
+      });
+    };
+
+    bindSave(document.querySelector("#endpoint-body"), "body");
+    bindSave(document.querySelector("#endpoint-headers"), "headers");
+    bindSave(document.querySelector("#endpoint-params"), "params");
+
+    initTabs();
+  };
+
+  initEndpointUI();
 })();

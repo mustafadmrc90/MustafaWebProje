@@ -304,6 +304,64 @@ body {
   gap: 12px;
 }
 
+.endpoint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.endpoint-header h2 {
+  margin: 0;
+}
+
+.request-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tab {
+  border: 1px solid #d6dde7;
+  background: #fff;
+  color: #1f2735;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #1f2735;
+  color: #fff;
+  border-color: #1f2735;
+}
+
+.request-body {
+  display: grid;
+  gap: 8px;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: grid;
+}
+
+.code-input {
+  margin: 0;
+  background: #0f1622;
+  color: #e6edf7;
+  padding: 16px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  border: none;
+  font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  resize: vertical;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
