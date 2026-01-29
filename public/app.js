@@ -90,6 +90,17 @@
       params: item.params || "{}",
       targetUrl: item.targetUrl || "",
       ...item
+    }))
+    .map((item) => {
+      const trimmedPath = item.path?.trim() || "/";
+      if (!item.targetUrl && /^https?:\/\//i.test(trimmedPath)) {
+        return {
+          ...item,
+          targetUrl: trimmedPath,
+          path: "/"
+        };
+      }
+      return item;
     }));
 
   const seedIfEmpty = () => {
