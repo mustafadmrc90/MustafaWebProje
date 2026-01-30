@@ -219,11 +219,24 @@
       modal.setAttribute("aria-hidden", "true");
     };
 
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = "true";
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target && target.id === "open-endpoint-modal") {
+          openModal();
+        }
+        if (target && target.id === "close-endpoint-modal") {
+          closeModal();
+        }
+        if (target === modal) {
+          closeModal();
+        }
+      });
+    }
+
     openBtn?.addEventListener("click", openModal);
     closeBtn?.addEventListener("click", closeModal);
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) closeModal();
-    });
 
     list?.addEventListener("click", (event) => {
       const item = event.target.closest(".api-item");
