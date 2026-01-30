@@ -219,18 +219,20 @@
       modal.setAttribute("aria-hidden", "true");
     };
 
-    if (!modal.dataset.bound) {
-      modal.dataset.bound = "true";
+    if (!window.__endpointModalBound) {
+      window.__endpointModalBound = true;
       document.addEventListener("click", (event) => {
-        const target = event.target;
-        if (target && target.id === "open-endpoint-modal") {
-          openModal();
+        const openTarget = event.target.closest("#open-endpoint-modal");
+        const closeTarget = event.target.closest("#close-endpoint-modal");
+        const currentModal = document.querySelector("#endpoint-modal");
+        if (!currentModal) return;
+        if (openTarget) {
+          currentModal.classList.add("active");
+          currentModal.setAttribute("aria-hidden", "false");
         }
-        if (target && target.id === "close-endpoint-modal") {
-          closeModal();
-        }
-        if (target === modal) {
-          closeModal();
+        if (closeTarget || event.target === currentModal) {
+          currentModal.classList.remove("active");
+          currentModal.setAttribute("aria-hidden", "true");
         }
       });
     }
