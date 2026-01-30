@@ -641,6 +641,13 @@ th {
   color: var(--muted);
 }
 
+.auth-form .remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
 .auth-form input {
   padding: 12px 14px;
   border-radius: 12px;
