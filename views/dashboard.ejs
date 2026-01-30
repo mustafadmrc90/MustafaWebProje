@@ -77,49 +77,48 @@
           </div>
         </section>
       </div>
-    </section>
+      <div class="modal-backdrop" id="endpoint-modal" aria-hidden="true">
+        <div class="modal">
+          <div class="modal-header">
+            <h2>Endpoint Ekle</h2>
+            <button class="ghost small" id="close-endpoint-modal">Kapat</button>
+          </div>
+          <form id="endpoint-form" class="modal-form">
+            <label>
+              <span>Başlık</span>
+              <input type="text" name="title" placeholder="Firma Listeleme" required />
+            </label>
+            <label>
+              <span>Hedef URL</span>
+              <input type="text" name="targetUrl" placeholder="https://api.example.com" />
+            </label>
+            <label>
+              <span>Method</span>
+              <select name="method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </label>
+            <label>
+              <span>Endpoint URL</span>
+              <input type="text" name="path" placeholder="/company/list" required />
+            </label>
+            <label>
+              <span>Açıklama</span>
+              <input type="text" name="description" placeholder="Opsiyonel" />
+            </label>
+            <button type="submit" class="button-link">Kaydet</button>
+          </form>
 
-    <div class="modal-backdrop" id="endpoint-modal" aria-hidden="true">
-      <div class="modal">
-        <div class="modal-header">
-          <h2>Endpoint Ekle</h2>
-          <button class="ghost small" id="close-endpoint-modal">Kapat</button>
-        </div>
-        <form id="endpoint-form" class="modal-form">
-          <label>
-            <span>Başlık</span>
-            <input type="text" name="title" placeholder="Firma Listeleme" required />
-          </label>
-          <label>
-            <span>Hedef URL</span>
-            <input type="text" name="targetUrl" placeholder="https://api.example.com" />
-          </label>
-          <label>
-            <span>Method</span>
-            <select name="method">
-              <option value="GET">GET</option>
-              <option value="POST">POST</option>
-              <option value="PUT">PUT</option>
-              <option value="DELETE">DELETE</option>
-            </select>
-          </label>
-          <label>
-            <span>Endpoint URL</span>
-            <input type="text" name="path" placeholder="/company/list" required />
-          </label>
-          <label>
-            <span>Açıklama</span>
-            <input type="text" name="description" placeholder="Opsiyonel" />
-          </label>
-          <button type="submit" class="button-link">Kaydet</button>
-        </form>
-
-        <div class="modal-list">
-          <h3>Eklenen Endpointler</h3>
-          <div class="endpoint-table" id="endpoint-table"></div>
+          <div class="modal-list">
+            <h3>Eklenen Endpointler</h3>
+            <div class="endpoint-table" id="endpoint-table"></div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
     <script src="/public/app.js" defer></script>
   </body>
 </html>
