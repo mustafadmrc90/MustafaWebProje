@@ -26,6 +26,7 @@ const pool = new Pool({
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
+app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
@@ -63,6 +64,22 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       key TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_endpoints (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      target_url TEXT,
+      description TEXT,
+      body TEXT,
+      headers TEXT,
+      params TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
 
@@ -355,6 +372,68 @@ app.get("/health", async (req, res) => {
     await pool.query("SELECT 1");
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.get("/api/endpoints", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, title, method, path, target_url, description, body, headers, params
+       FROM api_endpoints
+       ORDER BY id DESC`
+    );
+    res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.post("/api/endpoints", requireAuth, async (req, res) => {
+  const { title, method, path, targetUrl, description, body, headers, params } = req.body;
+  if (!title || !method || !path) {
+    return res.status(400).json({ ok: false, error: "Eksik alan" });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO api_endpoints (title, method, path, target_url, description, body, headers, params)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, title, method, path, target_url, description, body, headers, params`,
+      [
+        title.trim(),
+        method.trim().toUpperCase(),
+        path.trim(),
+        targetUrl ? targetUrl.trim() : null,
+        description ? description.trim() : null,
+        body || "{}",
+        headers || "{\n  \"Content-Type\": \"application/json\"\n}",
+        params || "{}"
+      ]
+    );
+    res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ ok: false, error: "Geçersiz id" });
+  }
+  const { body, headers, params } = req.body;
+  try {
+    await pool.query(
+      `UPDATE api_endpoints
+       SET body = $1, headers = $2, params = $3, updated_at = now()
+       WHERE id = $4`,
+      [body || "{}", headers || "{\n  \"Content-Type\": \"application/json\"\n}", params || "{}", id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ ok: false });
   }
 });

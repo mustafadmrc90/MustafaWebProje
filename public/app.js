@@ -69,28 +69,45 @@
     navigate(window.location.href, { push: false });
   });
 
-  const loadEndpoints = () => {
-    try {
-      return JSON.parse(localStorage.getItem("endpoints") || "[]");
-    } catch {
-      return [];
-    }
+  const loadEndpoints = async () => {
+    const response = await fetch("/api/endpoints");
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.items || [];
   };
 
-  const saveEndpoints = (items) => {
-    localStorage.setItem("endpoints", JSON.stringify(items));
+  const saveEndpoint = async (payload) => {
+    const response = await fetch("/api/endpoints", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.item || null;
+  };
+
+  const updateEndpoint = async (id, payload) => {
+    await fetch(`/api/endpoints/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
   };
 
   const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
 
   const normalizeEndpoints = (items) =>
-    items.map((item) => ({
-      body: item.body || "{}",
-      headers: item.headers || "{\n  \"Content-Type\": \"application/json\"\n}",
-      params: item.params || "{}",
-      targetUrl: item.targetUrl || "",
-      ...item
-    }))
+    items.map((item) => {
+      const targetUrl = item.targetUrl || item.target_url || "";
+      return {
+        body: item.body || "{}",
+        headers: item.headers || "{\n  \"Content-Type\": \"application/json\"\n}",
+        params: item.params || "{}",
+        targetUrl,
+        ...item
+      };
+    })
     .map((item) => {
       const trimmedPath = item.path?.trim() || "/";
       if (!item.targetUrl && /^https?:\/\//i.test(trimmedPath)) {
@@ -103,16 +120,14 @@
       return item;
     }));
 
-  const seedIfEmpty = () => {
-    const existing = loadEndpoints();
+  const seedIfEmpty = async () => {
+    const existing = await loadEndpoints();
     if (existing.length) {
-      const normalized = normalizeEndpoints(existing);
-      saveEndpoints(normalized);
-      return normalized;
+      return normalizeEndpoints(existing);
     }
     const seeded = [
       {
-        id: "getsession",
+        id: null,
         title: "GetSession",
         method: "POST",
         path: "/GetSession",
@@ -123,8 +138,8 @@
         params: "{}"
       }
     ];
-    saveEndpoints(seeded);
-    return seeded;
+    const created = await saveEndpoint(seeded[0]);
+    return created ? normalizeEndpoints([created]) : normalizeEndpoints(seeded);
   };
 
   const renderSidebar = (items, selectedId) => {
@@ -193,7 +208,7 @@
     });
   };
 
-  const initEndpointUI = () => {
+  const initEndpointUI = async () => {
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;
     const openBtn = document.querySelector("#open-endpoint-modal");
@@ -202,7 +217,7 @@
     const list = document.querySelector("#endpoint-list");
     const targetSelect = document.querySelector(".target-select");
 
-    let endpoints = seedIfEmpty();
+    let endpoints = await seedIfEmpty();
     let selected = endpoints[0]?.id;
 
     renderSidebar(endpoints, selected);
@@ -249,12 +264,10 @@
       if (current) renderDetails(current);
     });
 
-    form?.addEventListener("submit", (event) => {
+    form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(form);
-      const id = `${Date.now()}`;
       const item = {
-        id,
         title: data.get("title")?.toString().trim() || "Endpoint",
         method: data.get("method")?.toString().toUpperCase() || "GET",
         path: data.get("path")?.toString().trim() || "/",
@@ -264,11 +277,12 @@
         headers: "{\n  \"Content-Type\": \"application/json\"\n}",
         params: "{}"
       };
-      endpoints = [item, ...endpoints];
-      saveEndpoints(endpoints);
-      renderSidebar(endpoints, item.id);
+      const created = await saveEndpoint(item);
+      if (!created) return;
+      endpoints = [created, ...endpoints];
+      renderSidebar(endpoints, created.id);
       renderTable(endpoints);
-      renderDetails(item);
+      renderDetails(created);
       if (targetSelect) {
         const urls = Array.from(
           new Set(
@@ -297,11 +311,19 @@
     });
 
     const bindSave = (field, key) => {
+      let timer;
       field?.addEventListener("input", () => {
         const current = endpoints.find((e) => e.id === selected);
         if (!current) return;
         current[key] = field.value;
-        saveEndpoints(endpoints);
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          updateEndpoint(current.id, {
+            body: current.body,
+            headers: current.headers,
+            params: current.params
+          });
+        }, 500);
       });
     };
 
