@@ -434,7 +434,8 @@ body {
   z-index: 1000;
 }
 
-.modal-backdrop.active {
+.modal-backdrop.active,
+.modal-backdrop:target {
   display: flex;
 }
 
