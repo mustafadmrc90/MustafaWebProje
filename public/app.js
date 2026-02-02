@@ -200,6 +200,32 @@
     params.value = item.params || "";
   };
 
+  const renderTargets = (endpoints) => {
+    const targetSelect = document.querySelector(".target-select");
+    if (!targetSelect) return;
+    const targets = Array.from(
+      new Set(
+        endpoints
+          .map((item) => item.targetUrl?.trim())
+          .filter((value) => value)
+      )
+    );
+    targetSelect.innerHTML = "";
+    if (!targets.length) {
+      const option = document.createElement("option");
+      option.textContent = "Seçiniz";
+      option.value = "";
+      targetSelect.appendChild(option);
+      return;
+    }
+    targets.forEach((url) => {
+      const option = document.createElement("option");
+      option.textContent = url;
+      option.value = url;
+      targetSelect.appendChild(option);
+    });
+  };
+
   const initTabs = () => {
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {
@@ -220,13 +246,13 @@
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const form = document.querySelector("#endpoint-form");
     const list = document.querySelector("#endpoint-list");
-    const targetSelect = document.querySelector(".target-select");
 
     let endpoints = await seedIfEmpty();
     let selected = endpoints[0]?.id;
 
     renderSidebar(endpoints, selected);
     renderTable(endpoints);
+    renderTargets(endpoints);
     if (endpoints[0]) renderDetails(endpoints[0]);
 
     const openModal = () => {
@@ -284,33 +310,13 @@
       };
       const created = await saveEndpoint(item);
       if (!created) return;
-      endpoints = [created, ...endpoints];
-      renderSidebar(endpoints, created.id);
+      endpoints = normalizeEndpoints(await loadEndpoints());
+      const nextSelected = endpoints[0]?.id || created.id;
+      renderSidebar(endpoints, nextSelected);
       renderTable(endpoints);
-      renderDetails(created);
-      if (targetSelect) {
-        const urls = Array.from(
-          new Set(
-            endpoints
-              .map((endpoint) => endpoint.targetUrl?.trim())
-              .filter((value) => value)
-          )
-        );
-        targetSelect.innerHTML = "";
-        if (!urls.length) {
-          const option = document.createElement("option");
-          option.textContent = "Seçiniz";
-          option.value = "";
-          targetSelect.appendChild(option);
-        } else {
-          urls.forEach((url) => {
-            const option = document.createElement("option");
-            option.textContent = url;
-            option.value = url;
-            targetSelect.appendChild(option);
-          });
-        }
-      }
+      renderTargets(endpoints);
+      const current = endpoints.find((e) => e.id === nextSelected) || created;
+      renderDetails(current);
       form.reset();
       closeModal();
     });
@@ -338,29 +344,7 @@
 
     initTabs();
 
-    if (targetSelect) {
-      const targets = Array.from(
-        new Set(
-          endpoints
-            .map((item) => item.targetUrl?.trim())
-            .filter((value) => value)
-        )
-      );
-      targetSelect.innerHTML = "";
-      if (!targets.length) {
-        const option = document.createElement("option");
-        option.textContent = "Seçiniz";
-        option.value = "";
-        targetSelect.appendChild(option);
-      } else {
-        targets.forEach((url) => {
-          const option = document.createElement("option");
-          option.textContent = url;
-          option.value = url;
-          targetSelect.appendChild(option);
-        });
-      }
-    }
+    renderTargets(endpoints);
   };
 
   initEndpointUI();
