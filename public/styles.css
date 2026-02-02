@@ -363,6 +363,11 @@ body {
   gap: 12px;
 }
 
+.endpoint-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .endpoint-header h2 {
   margin: 0;
 }
