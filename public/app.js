@@ -336,17 +336,5 @@
     }
   };
 
-  if (!window.__sidebarToggleBound) {
-    window.__sidebarToggleBound = true;
-    document.addEventListener("click", (event) => {
-      const button = event.target.closest(".nav-section-toggle");
-      if (!button) return;
-      const section = button.dataset.section;
-      const group = document.querySelector(`.nav-group[data-group="${section}"]`);
-      if (group) {
-        group.classList.toggle("collapsed");
-      }
-    });
-  }
   initEndpointUI();
 })();
