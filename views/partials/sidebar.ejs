@@ -3,7 +3,7 @@
     <img src="/public/logo.png?v=2" alt="Bus Product" class="brand-logo" />
   </div>
   <nav class="nav">
-    <div class="nav-section">Genel</div>
+    <button class="nav-section-toggle" type="button" data-section="general" aria-expanded="true">Genel</button>
     <div class="nav-group" data-group="general">
       <a class="nav-item <%= active === 'dashboard' ? 'active' : '' %>" data-route="dashboard" href="/dashboard">
         Obus API
@@ -15,7 +15,7 @@
         Ekranlar
       </a>
     </div>
-    <div class="nav-section">Yönetim</div>
+    <button class="nav-section-toggle" type="button" data-section="admin" aria-expanded="true">Yönetim</button>
     <div class="nav-group" data-group="admin">
       <a class="nav-item <%= active === 'password' ? 'active' : '' %>" data-route="password" href="/change-password">
         Şifre Değiştir
