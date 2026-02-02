@@ -272,6 +272,10 @@ body {
   align-items: start;
 }
 
+.api-layout.single {
+  grid-template-columns: 1fr;
+}
+
 .api-sidebar {
   background: #1f2735;
   color: #e6edf7;
