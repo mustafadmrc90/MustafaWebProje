@@ -496,6 +496,11 @@ body {
   font-size: 13px;
 }
 
+.endpoint-inline-list {
+  display: grid;
+  gap: 8px;
+}
+
 .endpoint-row .path {
   color: #1f2735;
 }

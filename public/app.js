@@ -157,25 +157,30 @@
   };
 
   const renderTable = (items) => {
-    const table = document.querySelector("#endpoint-table");
-    if (!table) return;
-    table.innerHTML = "";
-    if (!items.length) {
-      table.innerHTML = `<div class="endpoint-row"><span class="desc">Henüz endpoint eklenmedi.</span></div>`;
-      return;
-    }
-    items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "endpoint-row";
-      row.innerHTML = `
-        <span class="method ${item.method.toLowerCase()}">${item.method}</span>
-        <div>
-          <div class="path">${item.path}</div>
-          <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
-        </div>
-        <span></span>
-      `;
-      table.appendChild(row);
+    const tables = [
+      document.querySelector("#endpoint-table"),
+      document.querySelector("#endpoint-table-inline")
+    ].filter(Boolean);
+    if (!tables.length) return;
+    tables.forEach((table) => {
+      table.innerHTML = "";
+      if (!items.length) {
+        table.innerHTML = `<div class="endpoint-row"><span class="desc">Henüz endpoint eklenmedi.</span></div>`;
+        return;
+      }
+      items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "endpoint-row";
+        row.innerHTML = `
+          <span class="method ${item.method.toLowerCase()}">${item.method}</span>
+          <div>
+            <div class="path">${item.path}</div>
+            <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
+          </div>
+          <span></span>
+        `;
+        table.appendChild(row);
+      });
     });
   };
 
