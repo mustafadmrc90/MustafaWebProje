@@ -336,19 +336,5 @@
     }
   };
 
-  if (!window.__sidebarAccordionBound) {
-    window.__sidebarAccordionBound = true;
-    document.addEventListener("click", (event) => {
-      const toggle = event.target.closest(".nav-section-toggle");
-      if (!toggle) return;
-      const section = toggle.dataset.section;
-      const group = document.querySelector(`.nav-group[data-group="${section}"]`);
-      if (!group) return;
-      group.classList.toggle("collapsed");
-      const expanded = !group.classList.contains("collapsed");
-      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-    });
-  }
-
   initEndpointUI();
 })();

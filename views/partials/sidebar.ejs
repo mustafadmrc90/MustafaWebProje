@@ -3,24 +3,28 @@
     <img src="/public/logo.png?v=2" alt="Bus Product" class="brand-logo" />
   </div>
   <nav class="nav">
-    <button class="nav-section-toggle" type="button" data-section="general" aria-expanded="true">Genel</button>
-    <div class="nav-group" data-group="general">
-      <a class="nav-item <%= active === 'dashboard' ? 'active' : '' %>" data-route="dashboard" href="/dashboard">
-        Obus API
-      </a>
-      <a class="nav-item <%= active === 'users' ? 'active' : '' %>" data-route="users" href="/users">
-        Kullanıcılar
-      </a>
-      <a class="nav-item <%= active === 'screens' ? 'active' : '' %>" data-route="screens" href="/screens">
-        Ekranlar
-      </a>
-    </div>
-    <button class="nav-section-toggle" type="button" data-section="admin" aria-expanded="true">Yönetim</button>
-    <div class="nav-group" data-group="admin">
-      <a class="nav-item <%= active === 'password' ? 'active' : '' %>" data-route="password" href="/change-password">
-        Şifre Değiştir
-      </a>
-    </div>
+    <details class="nav-accordion" open>
+      <summary class="nav-section-toggle">Genel</summary>
+      <div class="nav-group">
+        <a class="nav-item <%= active === 'dashboard' ? 'active' : '' %>" data-route="dashboard" href="/dashboard">
+          Obus API
+        </a>
+        <a class="nav-item <%= active === 'users' ? 'active' : '' %>" data-route="users" href="/users">
+          Kullanıcılar
+        </a>
+        <a class="nav-item <%= active === 'screens' ? 'active' : '' %>" data-route="screens" href="/screens">
+          Ekranlar
+        </a>
+      </div>
+    </details>
+    <details class="nav-accordion">
+      <summary class="nav-section-toggle">Yönetim</summary>
+      <div class="nav-group">
+        <a class="nav-item <%= active === 'password' ? 'active' : '' %>" data-route="password" href="/change-password">
+          Şifre Değiştir
+        </a>
+      </div>
+    </details>
   </nav>
   <form method="post" action="/logout" class="sidebar-logout">
     <button class="ghost" type="submit">Çıkış</button>

@@ -110,8 +110,27 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.nav-group.collapsed {
+.nav-accordion {
+  display: grid;
+  gap: 8px;
+}
+
+.nav-accordion summary {
+  list-style: none;
+}
+
+.nav-accordion summary::-webkit-details-marker {
   display: none;
+}
+
+.nav-accordion summary::after {
+  content: "▾";
+  float: right;
+  color: rgba(230, 237, 247, 0.6);
+}
+
+.nav-accordion:not([open]) summary::after {
+  content: "▸";
 }
 
 .nav-group {
