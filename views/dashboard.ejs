@@ -11,17 +11,6 @@
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
-      <header class="page-header">
-        <div class="page-title">
-          <h1>Obus API</h1>
-          <p>API uçlarını ve ortam hedeflerini tek panelden yönetin.</p>
-        </div>
-        <div class="page-actions">
-          <div class="user-pill"><%= user.displayName %></div>
-          <button class="ghost">Yenile</button>
-        </div>
-      </header>
-
       <div class="api-toolbar">
         <div class="api-target">
           <span class="label">Hedef URL</span>
@@ -29,17 +18,13 @@
             <option>Seçiniz</option>
           </select>
         </div>
-        <div class="api-actions">
-          <button class="button-link" id="open-endpoint-modal">Endpoint Ekle</button>
-          <button class="ghost">Yenile</button>
-        </div>
       </div>
 
       <div class="api-layout">
         <aside class="api-sidebar">
           <div class="api-sidebar-header">
             <h2>Endpointler</h2>
-            <span class="pill">0 seçili</span>
+            <button class="ghost small api-add" id="open-endpoint-modal">Endpoint Ekle</button>
           </div>
           <div class="api-list" id="endpoint-list"></div>
         </aside>
