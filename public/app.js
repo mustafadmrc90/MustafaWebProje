@@ -336,5 +336,18 @@
     }
   };
 
+  const initSidebarToggles = () => {
+    document.querySelectorAll(".nav-section-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        const section = button.dataset.section;
+        const group = document.querySelector(`.nav-group[data-group="${section}"]`);
+        if (group) {
+          group.classList.toggle("collapsed");
+        }
+      });
+    });
+  };
+
+  initSidebarToggles();
   initEndpointUI();
 })();
