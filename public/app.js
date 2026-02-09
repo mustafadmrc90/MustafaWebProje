@@ -169,11 +169,20 @@
     .map((item) => {
       const trimmedPath = item.path?.trim() || "/";
       if (!item.targetUrl && /^https?:\/\//i.test(trimmedPath)) {
-        return {
-          ...item,
-          targetUrl: trimmedPath,
-          path: "/"
-        };
+        try {
+          const parsed = new URL(trimmedPath);
+          return {
+            ...item,
+            targetUrl: parsed.origin,
+            path: `${parsed.pathname}${parsed.search}` || "/"
+          };
+        } catch (err) {
+          return {
+            ...item,
+            targetUrl: trimmedPath,
+            path: "/"
+          };
+        }
       }
       return item;
     });
@@ -367,6 +376,20 @@
     const normalizedTargetUrl = (targetUrl || "").trim();
     const normalizedPath = (path || "").trim() || "/";
 
+    if (/^https?:\/\//i.test(normalizedTargetUrl)) {
+      try {
+        const parsedTarget = new URL(normalizedTargetUrl);
+        if (parsedTarget.pathname !== "/" && normalizedPath === "/") {
+          return {
+            targetUrl: parsedTarget.origin,
+            path: `${parsedTarget.pathname}${parsedTarget.search}` || "/"
+          };
+        }
+      } catch (err) {
+        // Ignore invalid target URL and keep the current value for validation.
+      }
+    }
+
     if (/^https?:\/\//i.test(normalizedPath)) {
       try {
         const parsed = new URL(normalizedPath);
@@ -509,6 +532,7 @@
       if (!Number.isInteger(Number(endpointId))) return;
       selected = Number(endpointId);
       renderTable(endpoints, selected);
+      renderTargets(endpoints);
       const current = endpoints.find((e) => Number(e.id) === selected);
       if (!current) return;
       renderDetails(current, { headers: headerEditor, params: paramEditor });
@@ -537,26 +561,22 @@
       modal.setAttribute("aria-hidden", "true");
     };
 
-    if (!window.__endpointModalBound) {
-      window.__endpointModalBound = true;
-      document.addEventListener("click", (event) => {
-        const openTarget = event.target.closest("#open-endpoint-modal");
-        const closeTarget = event.target.closest("#close-endpoint-modal");
-        const currentModal = document.querySelector("#endpoint-modal");
-        if (!currentModal) return;
-        if (openTarget) {
-          currentModal.classList.add("active");
-          currentModal.setAttribute("aria-hidden", "false");
-        }
-        if (closeTarget || event.target === currentModal) {
-          currentModal.classList.remove("active");
-          currentModal.setAttribute("aria-hidden", "true");
-        }
-      });
+    openBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      openModal();
+    });
+    closeBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      closeModal();
+    });
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        closeModal();
+      }
+    });
+    if (window.location.hash === "#endpoint-modal") {
+      openModal();
     }
-
-    openBtn?.addEventListener("click", openModal);
-    closeBtn?.addEventListener("click", closeModal);
 
     const onEndpointClick = (event) => {
       const row = event.target.closest(".endpoint-row[data-endpoint-id]");
