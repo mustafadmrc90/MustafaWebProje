@@ -367,17 +367,32 @@
 
   const normalizeEndpointAddress = ({ targetUrl, path }) => {
     const normalizedTargetUrl = (targetUrl || "").trim();
-    const normalizedPath = (path || "").trim() || "/";
+    let normalizedPath = (path || "").trim() || "/";
 
     if (/^https?:\/\//i.test(normalizedTargetUrl)) {
       try {
         const parsedTarget = new URL(normalizedTargetUrl);
-        if (parsedTarget.pathname !== "/" && normalizedPath === "/") {
-          return {
-            targetUrl: parsedTarget.origin,
-            path: `${parsedTarget.pathname}${parsedTarget.search}` || "/"
-          };
+        const basePath =
+          parsedTarget.pathname && parsedTarget.pathname !== "/"
+            ? parsedTarget.pathname.replace(/\/+$/, "")
+            : "";
+
+        if (basePath) {
+          if (normalizedPath === "/") {
+            normalizedPath = `${basePath}${parsedTarget.search || ""}` || "/";
+          } else if (
+            normalizedPath.startsWith("/") &&
+            normalizedPath !== basePath &&
+            !normalizedPath.startsWith(`${basePath}/`)
+          ) {
+            normalizedPath = `${basePath}${normalizedPath}`;
+          }
         }
+
+        return {
+          targetUrl: parsedTarget.origin,
+          path: normalizedPath || "/"
+        };
       } catch (err) {
         // Ignore invalid target URL and keep the current value for validation.
       }
@@ -866,8 +881,15 @@
         }
         const formatted = prettifyResponse(data.body || "");
         const badgeClass = data.ok ? "success" : "muted";
+        const allowHeader = data?.headers?.allow || data?.headers?.Allow || "";
+        let statusLine = data.ok ? "Tamamlandı" : "Yanıt hata döndü";
+        if (!data.ok && Number(data.status) === 405) {
+          statusLine = allowHeader
+            ? `405 Method Not Allowed (Allow: ${allowHeader})`
+            : "405 Method Not Allowed (method/path kontrol et)";
+        }
         setResponseState({
-          statusText: data.ok ? "Tamamlandı" : "Yanıt hata döndü",
+          statusText: statusLine,
           badgeText: `${data.status} ${data.statusText}`,
           badgeClass,
           body: formatted || "{}",
