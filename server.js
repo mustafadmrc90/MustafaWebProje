@@ -448,21 +448,63 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
   if (!Number.isInteger(id)) {
     return res.status(400).json({ ok: false, error: "Geçersiz id" });
   }
-  const { body, headers, params, targetUrl } = req.body;
+  const { title, method, path, description, body, headers, params, targetUrl } = req.body || {};
   try {
-    await pool.query(
+    const existingResult = await pool.query(
+      `SELECT id, title, method, path, target_url, description, body, headers, params
+       FROM api_endpoints
+       WHERE id = $1`,
+      [id]
+    );
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: "Endpoint bulunamadı." });
+    }
+
+    const nextTitle =
+      typeof title === "string" && title.trim() ? title.trim() : existing.title;
+    const nextMethod =
+      typeof method === "string" && method.trim() ? method.trim().toUpperCase() : existing.method;
+    const nextPath = typeof path === "string" && path.trim() ? path.trim() : existing.path;
+    const nextDescription =
+      description === undefined
+        ? existing.description
+        : String(description || "").trim() || null;
+    const nextBody = body === undefined ? existing.body : body || "{}";
+    const nextHeaders =
+      headers === undefined
+        ? existing.headers
+        : headers || "{\n  \"Content-Type\": \"application/json\"\n}";
+    const nextParams = params === undefined ? existing.params : params || "{}";
+    const nextTargetUrl =
+      targetUrl === undefined ? existing.target_url : String(targetUrl || "").trim() || null;
+
+    const result = await pool.query(
       `UPDATE api_endpoints
-       SET body = $1, headers = $2, params = $3, target_url = $4, updated_at = now()
-       WHERE id = $5`,
+       SET title = $1,
+           method = $2,
+           path = $3,
+           description = $4,
+           body = $5,
+           headers = $6,
+           params = $7,
+           target_url = $8,
+           updated_at = now()
+       WHERE id = $9
+       RETURNING id, title, method, path, target_url, description, body, headers, params`,
       [
-        body || "{}",
-        headers || "{\n  \"Content-Type\": \"application/json\"\n}",
-        params || "{}",
-        targetUrl ? targetUrl.trim() : null,
+        nextTitle,
+        nextMethod,
+        nextPath,
+        nextDescription,
+        nextBody,
+        nextHeaders,
+        nextParams,
+        nextTargetUrl,
         id
       ]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, item: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false });

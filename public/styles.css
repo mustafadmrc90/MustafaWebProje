@@ -475,6 +475,12 @@ body {
   border: 1px solid #d6dde7;
 }
 
+.fixed-body .code-input {
+  background: #ffffff;
+  color: #1f2735;
+  border: 1px solid #d6dde7;
+}
+
 .kv-table {
   display: grid;
   gap: 8px;
@@ -723,6 +729,11 @@ body {
 .endpoint-row .desc {
   color: #7b8796;
   font-size: 12px;
+}
+
+.endpoint-row-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .empty-state {

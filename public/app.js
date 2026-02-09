@@ -154,14 +154,16 @@
   };
 
   const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
+  const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
+  const defaultParams = "{}";
 
   const normalizeEndpoints = (items) =>
     items.map((item) => {
       const targetUrl = item.targetUrl || item.target_url || "";
       return {
-        body: item.body || "{}",
-        headers: item.headers || "{\n  \"Content-Type\": \"application/json\"\n}",
-        params: item.params || "{}",
+        body: item.body || defaultBody,
+        headers: item.headers || defaultHeaders,
+        params: item.params || defaultParams,
         targetUrl,
         ...item
       };
@@ -199,8 +201,8 @@
       description: "Session başlatma",
       targetUrl: "",
       body: defaultBody,
-      headers: "{\n  \"Content-Type\": \"application/json\"\n}",
-      params: "{}"
+      headers: defaultHeaders,
+      params: defaultParams
     };
     const created = await saveEndpoint(seeded);
     return created ? normalizeEndpoints([created]) : [];
@@ -219,16 +221,13 @@
         return;
       }
       items.forEach((item) => {
-        const row = document.createElement("button");
-        row.type = "button";
+        const row = document.createElement("div");
         const itemId = Number(item.id);
         const selectable = Number.isInteger(itemId);
         const isActive = selectable && itemId === Number(selectedId);
         row.className = `endpoint-row selectable${isActive ? " active" : ""}`;
         if (selectable) {
           row.dataset.endpointId = String(itemId);
-        } else {
-          row.disabled = true;
         }
         row.innerHTML = `
           <span class="method ${(item.method || "GET").toLowerCase()}">${item.method || "GET"}</span>
@@ -236,7 +235,13 @@
             <div class="path">${item.path}</div>
             <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
           </div>
-          <span></span>
+          <div class="endpoint-row-actions">
+            ${
+              selectable
+                ? `<button type="button" class="ghost small endpoint-edit" data-endpoint-id="${itemId}">Düzenle</button>`
+                : ""
+            }
+          </div>
         `;
         table.appendChild(row);
       });
@@ -247,15 +252,17 @@
     const title = document.querySelector("#endpoint-title");
     const path = document.querySelector("#endpoint-path");
     const method = document.querySelector("#endpoint-method");
+    const body = document.querySelector("#endpoint-body");
     const headers = document.querySelector("#endpoint-headers");
     const params = document.querySelector("#endpoint-params");
     const targetInput = document.querySelector("#target-url-input");
-    if (!title || !path || !method || !headers || !params) return;
+    if (!title || !path || !method || !body || !headers || !params) return;
     title.textContent = item.title;
     path.textContent = `${item.method} ${item.path}`;
     method.textContent = item.method;
-    headers.value = item.headers || "{}";
-    params.value = item.params || "{}";
+    body.value = item.body || defaultBody;
+    headers.value = item.headers || defaultHeaders;
+    params.value = item.params || defaultParams;
     if (editors?.headers) editors.headers.render();
     if (editors?.params) editors.params.render();
     if (targetInput) {
@@ -473,7 +480,9 @@
     if (!modal) return;
     const openBtn = document.querySelector("#open-endpoint-modal");
     const closeBtn = document.querySelector("#close-endpoint-modal");
+    const modalTitle = document.querySelector("#endpoint-modal-title");
     const form = document.querySelector("#endpoint-form");
+    const submitBtn = document.querySelector("#endpoint-submit-button");
     const sendBtn = document.querySelector("#send-request");
     const statusText = document.querySelector("#request-status");
     const responseStatus = document.querySelector("#response-status");
@@ -489,10 +498,10 @@
     const addParamRow = document.querySelector("#add-param-row");
     const headersTextarea = document.querySelector("#endpoint-headers");
     const paramsTextarea = document.querySelector("#endpoint-params");
+    const bodyTextarea = document.querySelector("#endpoint-body");
     const copyHeadersJson = document.querySelector("#copy-headers-json");
     const copyParamsJson = document.querySelector("#copy-params-json");
     const copyBodyBtn = document.querySelector("#copy-body");
-    const fixedBodyContent = document.querySelector("#fixed-body-content");
     const endpointTables = [
       document.querySelector("#endpoint-table"),
       document.querySelector("#endpoint-table-inline")
@@ -500,6 +509,7 @@
 
     let endpoints = await seedIfEmpty();
     let selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
+    let editingEndpointId = null;
 
     const headerEditor = initRowEditor({
       rowsContainer: headersRows,
@@ -513,6 +523,41 @@
       textarea: paramsTextarea,
       copyJsonButton: copyParamsJson
     });
+
+    const getEndpointById = (id) => endpoints.find((item) => Number(item.id) === Number(id));
+
+    const setModalMode = (mode, item = null) => {
+      const isEdit = mode === "edit" && item;
+      editingEndpointId = isEdit ? Number(item.id) : null;
+
+      if (modalTitle) {
+        modalTitle.textContent = isEdit ? "Endpoint Düzenle" : "Endpoint Ekle";
+      }
+      if (submitBtn) {
+        submitBtn.textContent = isEdit ? "Güncelle" : "Kaydet";
+      }
+
+      if (!form) return;
+      const titleField = form.elements.namedItem("title");
+      const targetField = form.elements.namedItem("targetUrl");
+      const methodField = form.elements.namedItem("method");
+      const pathField = form.elements.namedItem("path");
+      const descriptionField = form.elements.namedItem("description");
+
+      if (!isEdit) {
+        form.reset();
+        if (targetField && targetInput?.value) {
+          targetField.value = targetInput.value;
+        }
+        return;
+      }
+
+      if (titleField) titleField.value = item.title || "";
+      if (targetField) targetField.value = item.targetUrl || "";
+      if (methodField) methodField.value = (item.method || "GET").toUpperCase();
+      if (pathField) pathField.value = item.path || "/";
+      if (descriptionField) descriptionField.value = item.description || "";
+    };
 
     const renderSelected = async (endpointId) => {
       if (!Number.isInteger(Number(endpointId))) return;
@@ -549,6 +594,7 @@
 
     openBtn?.addEventListener("click", (event) => {
       event.preventDefault();
+      setModalMode("create");
       openModal();
     });
     closeBtn?.addEventListener("click", (event) => {
@@ -561,10 +607,19 @@
       }
     });
     if (window.location.hash === "#endpoint-modal") {
+      setModalMode("create");
       openModal();
     }
 
     const onEndpointClick = (event) => {
+      const editBtn = event.target.closest(".endpoint-edit[data-endpoint-id]");
+      if (editBtn) {
+        const current = getEndpointById(editBtn.dataset.endpointId);
+        if (!current) return;
+        setModalMode("edit", current);
+        openModal();
+        return;
+      }
       const row = event.target.closest(".endpoint-row[data-endpoint-id]");
       if (!row) return;
       renderSelected(row.dataset.endpointId);
@@ -591,9 +646,37 @@
         description: data.get("description")?.toString().trim() || "",
         targetUrl: normalized.targetUrl,
         body: defaultBody,
-        headers: "{\n  \"Content-Type\": \"application/json\"\n}",
-        params: "{}"
+        headers: defaultHeaders,
+        params: defaultParams
       };
+
+      const isEdit = Number.isInteger(Number(editingEndpointId));
+      if (isEdit) {
+        const current = getEndpointById(editingEndpointId);
+        if (!current) {
+          if (statusText) statusText.textContent = "Düzenlenecek endpoint bulunamadı.";
+          return;
+        }
+        const updated = await updateEndpoint(Number(editingEndpointId), {
+          ...item,
+          body: current.body || defaultBody,
+          headers: current.headers || defaultHeaders,
+          params: current.params || defaultParams
+        });
+        if (!updated) {
+          if (statusText) statusText.textContent = "Endpoint güncellenemedi.";
+          return;
+        }
+        endpoints = normalizeEndpoints(await loadEndpoints());
+        selected = Number(editingEndpointId);
+        renderTable(endpoints, selected);
+        renderTargets(endpoints);
+        await renderSelected(selected);
+        if (statusText) statusText.textContent = "Endpoint güncellendi.";
+        closeModal();
+        return;
+      }
+
       const created = await saveEndpoint(item);
       if (!created) {
         if (statusText) statusText.textContent = "Endpoint kaydedilemedi.";
@@ -637,12 +720,13 @@
 
     bindSave(document.querySelector("#endpoint-headers"), "headers");
     bindSave(document.querySelector("#endpoint-params"), "params");
+    bindSave(bodyTextarea, "body");
 
-    if (fixedBodyContent && !fixedBodyContent.textContent.trim()) {
-      fixedBodyContent.textContent = defaultBody;
+    if (bodyTextarea && !bodyTextarea.value.trim()) {
+      bodyTextarea.value = defaultBody;
     }
     copyBodyBtn?.addEventListener("click", async () => {
-      const text = fixedBodyContent?.textContent || defaultBody;
+      const text = bodyTextarea?.value || defaultBody;
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
       } else {
@@ -706,7 +790,7 @@
       }
       const headersText = document.querySelector("#endpoint-headers")?.value || "";
       const paramsText = document.querySelector("#endpoint-params")?.value || "";
-      const bodyText = defaultBody;
+      const bodyText = bodyTextarea?.value || "";
       const headers = parseJsonField(headersText, "Headers");
       const params = parseJsonField(paramsText, "Params");
       return {
@@ -753,13 +837,30 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        const data = await response.json();
-        if (!data || data.error) {
+
+        let data = null;
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          try {
+            data = await response.json();
+          } catch (err) {
+            data = null;
+          }
+        } else {
+          const text = await response.text();
+          data = {
+            ok: false,
+            error: `Sunucu yanıtı JSON değil (${response.status})`,
+            details: text || ""
+          };
+        }
+
+        if (!response.ok || !data || data.error) {
           setResponseState({
-            statusText: data?.error || "İstek başarısız.",
+            statusText: data?.error || `İstek başarısız (${response.status}).`,
             badgeText: "Hata",
             badgeClass: "muted",
-            body: data?.details || "{}"
+            body: data?.details || data?.body || "{}"
           });
           return;
         }

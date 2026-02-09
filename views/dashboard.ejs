@@ -50,10 +50,15 @@
               <label class="label">Body (JSON)</label>
               <div class="fixed-body">
                 <div class="fixed-body-header">
-                  <span class="muted">Sabit Body</span>
+                  <span class="muted">İstek Body</span>
                   <button class="ghost small" id="copy-body" type="button">Kopyala</button>
                 </div>
-                <pre class="code-output" id="fixed-body-content">{
+                <textarea
+                  id="endpoint-body"
+                  class="code-input"
+                  rows="10"
+                  spellcheck="false"
+                >{
   "type": 1,
   "connection": {
     "ip-address": "212.156.219.182",
@@ -62,7 +67,7 @@
   "browser": {
     "name": "Chrome"
   }
-}</pre>
+}</textarea>
               </div>
             </div>
 
@@ -161,7 +166,7 @@
       <div class="modal-backdrop" id="endpoint-modal" aria-hidden="true">
         <div class="modal">
           <div class="modal-header">
-            <h2>Endpoint Ekle</h2>
+            <h2 id="endpoint-modal-title">Endpoint Ekle</h2>
             <button class="ghost small" id="close-endpoint-modal" type="button">Kapat</button>
           </div>
           <form id="endpoint-form" class="modal-form">
@@ -190,7 +195,7 @@
               <span>Açıklama</span>
               <input type="text" name="description" placeholder="Opsiyonel" />
             </label>
-            <button type="submit" class="button-link">Kaydet</button>
+            <button type="submit" class="button-link" id="endpoint-submit-button">Kaydet</button>
           </form>
 
           <div class="modal-list">
