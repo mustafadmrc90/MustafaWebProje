@@ -18,9 +18,15 @@ if (isProd) {
   app.set("trust proxy", 1);
 }
 
+const shouldUseSsl =
+  isProd ||
+  process.env.DATABASE_SSL === "true" ||
+  /render\.com/i.test(process.env.DATABASE_URL || "") ||
+  /sslmode=require/i.test(process.env.DATABASE_URL || "");
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isProd ? { rejectUnauthorized: false } : undefined
+  ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined
 });
 
 app.set("view engine", "ejs");
@@ -80,6 +86,25 @@ async function initDb() {
       params TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_requests (
+      id SERIAL PRIMARY KEY,
+      endpoint_id INTEGER NOT NULL,
+      target_url TEXT NOT NULL,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      headers TEXT,
+      params TEXT,
+      body TEXT,
+      response_status INTEGER,
+      response_text TEXT,
+      response_headers TEXT,
+      duration_ms INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
     )
   `);
 
@@ -423,14 +448,215 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
   if (!Number.isInteger(id)) {
     return res.status(400).json({ ok: false, error: "Geçersiz id" });
   }
-  const { body, headers, params } = req.body;
+  const { body, headers, params, targetUrl } = req.body;
   try {
     await pool.query(
       `UPDATE api_endpoints
-       SET body = $1, headers = $2, params = $3, updated_at = now()
-       WHERE id = $4`,
-      [body || "{}", headers || "{\n  \"Content-Type\": \"application/json\"\n}", params || "{}", id]
+       SET body = $1, headers = $2, params = $3, target_url = $4, updated_at = now()
+       WHERE id = $5`,
+      [
+        body || "{}",
+        headers || "{\n  \"Content-Type\": \"application/json\"\n}",
+        params || "{}",
+        targetUrl ? targetUrl.trim() : null,
+        id
+      ]
     );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.post("/api/execute", requireAuth, async (req, res) => {
+  const { endpointId, targetUrl, path, method, headers, params, body } = req.body || {};
+  if (!targetUrl && !path) {
+    return res.status(400).json({ ok: false, error: "Hedef URL eksik." });
+  }
+  if (!Number.isInteger(Number(endpointId))) {
+    return res.status(400).json({ ok: false, error: "Endpoint seçilmeli." });
+  }
+
+  let url;
+  try {
+    if (path && /^https?:\/\//i.test(path)) {
+      url = new URL(path);
+    } else if (targetUrl) {
+      url = new URL(path || "", targetUrl);
+    } else {
+      url = new URL(path);
+    }
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: "Geçersiz URL." });
+  }
+
+  if (params && typeof params === "object") {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => url.searchParams.append(key, String(item)));
+      } else {
+        url.searchParams.set(key, String(value));
+      }
+    });
+  }
+
+  const finalHeaders = {};
+  if (headers && typeof headers === "object") {
+    Object.entries(headers).forEach(([key, value]) => {
+      if (!key) return;
+      finalHeaders[key] = String(value);
+    });
+  }
+
+  const httpMethod = (method || "GET").toUpperCase();
+  const hasBody =
+    body !== undefined &&
+    body !== null &&
+    String(body).trim().length > 0 &&
+    httpMethod !== "GET" &&
+    httpMethod !== "HEAD";
+
+  if (hasBody) {
+    const hasContentType = Object.keys(finalHeaders).some(
+      (key) => key.toLowerCase() === "content-type"
+    );
+    if (!hasContentType) {
+      finalHeaders["Content-Type"] = "application/json";
+    }
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: httpMethod,
+      headers: finalHeaders,
+      body: hasBody ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+      signal: controller.signal
+    });
+
+    const text = await response.text();
+    clearTimeout(timeout);
+
+    const durationMs = Date.now() - startedAt;
+    try {
+      await pool.query(
+        `INSERT INTO api_requests
+         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          Number(endpointId),
+          url.origin,
+          httpMethod,
+          url.pathname,
+          JSON.stringify(finalHeaders),
+          params ? JSON.stringify(params) : "{}",
+          body ? String(body) : "",
+          response.status,
+          text,
+          JSON.stringify(Object.fromEntries(response.headers.entries())),
+          durationMs
+        ]
+      );
+    } catch (err) {
+      console.error("Request log insert error:", err);
+    }
+
+    res.json({
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url,
+      durationMs,
+      body: text,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    try {
+      await pool.query(
+        `INSERT INTO api_requests
+         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          Number(endpointId),
+          url.origin,
+          httpMethod,
+          url.pathname,
+          JSON.stringify(finalHeaders),
+          params ? JSON.stringify(params) : "{}",
+          body ? String(body) : "",
+          null,
+          err.message || "İstek hatası.",
+          "{}",
+          Date.now() - startedAt
+        ]
+      );
+    } catch (logErr) {
+      console.error("Request log insert error:", logErr);
+    }
+    res.status(502).json({
+      ok: false,
+      error: "İstek hatası.",
+      details: err.message
+    });
+  }
+});
+
+app.get("/api/requests/:endpointId", requireAuth, async (req, res) => {
+  const endpointId = Number(req.params.endpointId);
+  if (!Number.isInteger(endpointId)) {
+    return res.status(400).json({ ok: false, error: "Geçersiz endpoint." });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id, method, path, target_url, response_status, duration_ms, created_at, body, headers, params, response_text
+       FROM api_requests
+       WHERE endpoint_id = $1
+       ORDER BY id DESC
+       LIMIT 50`,
+      [endpointId]
+    );
+    res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.get("/api/requests/item/:id", requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ ok: false, error: "Geçersiz kayıt." });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id, endpoint_id, method, path, target_url, headers, params, body,
+              response_status, response_text, response_headers, duration_ms, created_at
+       FROM api_requests
+       WHERE id = $1`,
+      [id]
+    );
+    const item = result.rows[0];
+    if (!item) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı." });
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.delete("/api/requests/:endpointId", requireAuth, async (req, res) => {
+  const endpointId = Number(req.params.endpointId);
+  if (!Number.isInteger(endpointId)) {
+    return res.status(400).json({ ok: false, error: "Geçersiz endpoint." });
+  }
+  try {
+    await pool.query("DELETE FROM api_requests WHERE endpoint_id = $1", [endpointId]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
