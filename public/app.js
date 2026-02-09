@@ -250,7 +250,17 @@
     if (editors?.headers) editors.headers.render();
     if (editors?.params) editors.params.render();
     if (targetSelect) {
-      targetSelect.value = item.targetUrl || "";
+      const targetValue = (item.targetUrl || "").trim();
+      if (targetValue) {
+        const hasOption = Array.from(targetSelect.options).some((option) => option.value === targetValue);
+        if (!hasOption) {
+          const option = document.createElement("option");
+          option.textContent = targetValue;
+          option.value = targetValue;
+          targetSelect.appendChild(option);
+        }
+      }
+      targetSelect.value = targetValue;
     }
   };
 
@@ -329,6 +339,7 @@
   const renderTargets = (endpoints) => {
     const targetSelect = document.querySelector("#target-url-select");
     if (!targetSelect) return;
+    const currentValue = targetSelect.value?.trim() || "";
     const targets = Array.from(
       new Set(
         endpoints
@@ -347,6 +358,34 @@
       option.value = url;
       targetSelect.appendChild(option);
     });
+    if (currentValue && targets.includes(currentValue)) {
+      targetSelect.value = currentValue;
+    }
+  };
+
+  const normalizeEndpointAddress = ({ targetUrl, path }) => {
+    const normalizedTargetUrl = (targetUrl || "").trim();
+    const normalizedPath = (path || "").trim() || "/";
+
+    if (/^https?:\/\//i.test(normalizedPath)) {
+      try {
+        const parsed = new URL(normalizedPath);
+        return {
+          targetUrl: normalizedTargetUrl || parsed.origin,
+          path: `${parsed.pathname}${parsed.search}` || "/"
+        };
+      } catch (err) {
+        return {
+          targetUrl: normalizedTargetUrl,
+          path: normalizedPath
+        };
+      }
+    }
+
+    return {
+      targetUrl: normalizedTargetUrl,
+      path: normalizedPath
+    };
   };
 
   const renderHistory = (items) => {
@@ -529,12 +568,22 @@
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(form);
+      const normalized = normalizeEndpointAddress({
+        targetUrl: data.get("targetUrl")?.toString() || "",
+        path: data.get("path")?.toString() || ""
+      });
+      if (!normalized.targetUrl) {
+        if (statusText) {
+          statusText.textContent = "Hedef URL zorunlu. (veya Endpoint URL alanına tam URL yazın)";
+        }
+        return;
+      }
       const item = {
         title: data.get("title")?.toString().trim() || "Endpoint",
         method: data.get("method")?.toString().toUpperCase() || "GET",
-        path: data.get("path")?.toString().trim() || "/",
+        path: normalized.path,
         description: data.get("description")?.toString().trim() || "",
-        targetUrl: data.get("targetUrl")?.toString().trim() || "",
+        targetUrl: normalized.targetUrl,
         body: defaultBody,
         headers: "{\n  \"Content-Type\": \"application/json\"\n}",
         params: "{}"
@@ -635,9 +684,11 @@
         throw new Error("Endpoint bulunamadı.");
       }
       const method = (current.method || "GET").toUpperCase();
-      const path = current.path || "/";
-      const targetUrlValue = targetSelect?.value || current.targetUrl || "";
-      if (!targetUrlValue && !/^https?:\/\//i.test(path)) {
+      const normalized = normalizeEndpointAddress({
+        targetUrl: targetSelect?.value || current.targetUrl || "",
+        path: current.path || "/"
+      });
+      if (!normalized.targetUrl) {
         throw new Error("Hedef URL seçilmeli.");
       }
       const headersText = document.querySelector("#endpoint-headers")?.value || "";
@@ -648,8 +699,8 @@
       return {
         endpointId: Number(current.id),
         method,
-        path,
-        targetUrl: targetUrlValue,
+        path: normalized.path,
+        targetUrl: normalized.targetUrl,
         headers,
         params,
         body: bodyText.trim() ? bodyText : ""
