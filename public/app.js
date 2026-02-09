@@ -69,52 +69,88 @@
     navigate(window.location.href, { push: false });
   });
 
+  const parseJsonResponse = async (response) => {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) return null;
+    try {
+      return await response.json();
+    } catch (err) {
+      return null;
+    }
+  };
+
   const loadEndpoints = async () => {
-    const response = await fetch("/api/endpoints");
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.items || [];
+    try {
+      const response = await fetch("/api/endpoints");
+      if (!response.ok) return [];
+      const data = await parseJsonResponse(response);
+      return data?.items || [];
+    } catch (err) {
+      return [];
+    }
   };
 
   const saveEndpoint = async (payload) => {
-    const response = await fetch("/api/endpoints", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.item || null;
+    try {
+      const response = await fetch("/api/endpoints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) return null;
+      const data = await parseJsonResponse(response);
+      return data?.item || null;
+    } catch (err) {
+      return null;
+    }
   };
 
   const loadRequests = async (endpointId) => {
-    if (!endpointId) return [];
-    const response = await fetch(`/api/requests/${endpointId}`);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.items || [];
+    if (!Number.isInteger(Number(endpointId))) return [];
+    try {
+      const response = await fetch(`/api/requests/${endpointId}`);
+      if (!response.ok) return [];
+      const data = await parseJsonResponse(response);
+      return data?.items || [];
+    } catch (err) {
+      return [];
+    }
   };
 
   const loadRequestDetail = async (id) => {
-    if (!id) return null;
-    const response = await fetch(`/api/requests/item/${id}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.item || null;
+    if (!Number.isInteger(Number(id))) return null;
+    try {
+      const response = await fetch(`/api/requests/item/${id}`);
+      if (!response.ok) return null;
+      const data = await parseJsonResponse(response);
+      return data?.item || null;
+    } catch (err) {
+      return null;
+    }
   };
 
   const clearRequests = async (endpointId) => {
-    if (!endpointId) return false;
-    const response = await fetch(`/api/requests/${endpointId}`, { method: "DELETE" });
-    return response.ok;
+    if (!Number.isInteger(Number(endpointId))) return false;
+    try {
+      const response = await fetch(`/api/requests/${endpointId}`, { method: "DELETE" });
+      return response.ok;
+    } catch (err) {
+      return false;
+    }
   };
 
   const updateEndpoint = async (id, payload) => {
-    await fetch(`/api/endpoints/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    if (!Number.isInteger(Number(id))) return false;
+    try {
+      const response = await fetch(`/api/endpoints/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      return response.ok;
+    } catch (err) {
+      return false;
+    }
   };
 
   const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
@@ -140,45 +176,28 @@
         };
       }
       return item;
-    }));
+    });
 
   const seedIfEmpty = async () => {
     const existing = await loadEndpoints();
     if (existing.length) {
       return normalizeEndpoints(existing);
     }
-    const seeded = [
-      {
-        id: null,
-        title: "GetSession",
-        method: "POST",
-        path: "/GetSession",
-        description: "Session başlatma",
-        targetUrl: "",
-        body: defaultBody,
-        headers: "{\n  \"Content-Type\": \"application/json\"\n}",
-        params: "{}"
-      }
-    ];
-    const created = await saveEndpoint(seeded[0]);
-    return created ? normalizeEndpoints([created]) : normalizeEndpoints(seeded);
+    const seeded = {
+      title: "GetSession",
+      method: "POST",
+      path: "/GetSession",
+      description: "Session başlatma",
+      targetUrl: "",
+      body: defaultBody,
+      headers: "{\n  \"Content-Type\": \"application/json\"\n}",
+      params: "{}"
+    };
+    const created = await saveEndpoint(seeded);
+    return created ? normalizeEndpoints([created]) : [];
   };
 
-  const renderSidebar = (items, selectedId) => {
-    const list = document.querySelector("#endpoint-list");
-    if (!list) return;
-    list.innerHTML = "";
-    items.forEach((item) => {
-      const button = document.createElement("button");
-      const isActive = Number(item.id) === Number(selectedId);
-      button.className = `api-item${isActive ? " active" : ""}`;
-      button.dataset.endpointId = item.id;
-      button.innerHTML = `<span class="method ${item.method.toLowerCase()}">${item.method}</span><span>${item.path}</span>`;
-      list.appendChild(button);
-    });
-  };
-
-  const renderTable = (items) => {
+  const renderTable = (items, selectedId) => {
     const tables = [
       document.querySelector("#endpoint-table"),
       document.querySelector("#endpoint-table-inline")
@@ -191,10 +210,19 @@
         return;
       }
       items.forEach((item) => {
-        const row = document.createElement("div");
-        row.className = "endpoint-row";
+        const row = document.createElement("button");
+        row.type = "button";
+        const itemId = Number(item.id);
+        const selectable = Number.isInteger(itemId);
+        const isActive = selectable && itemId === Number(selectedId);
+        row.className = `endpoint-row selectable${isActive ? " active" : ""}`;
+        if (selectable) {
+          row.dataset.endpointId = String(itemId);
+        } else {
+          row.disabled = true;
+        }
         row.innerHTML = `
-          <span class="method ${item.method.toLowerCase()}">${item.method}</span>
+          <span class="method ${(item.method || "GET").toLowerCase()}">${item.method || "GET"}</span>
           <div>
             <div class="path">${item.path}</div>
             <div class="desc">${item.title}${item.description ? " — " + item.description : ""}</div>
@@ -398,7 +426,6 @@
     const openBtn = document.querySelector("#open-endpoint-modal");
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const form = document.querySelector("#endpoint-form");
-    const list = document.querySelector("#endpoint-list");
     const sendBtn = document.querySelector("#send-request");
     const statusText = document.querySelector("#request-status");
     const responseStatus = document.querySelector("#response-status");
@@ -418,9 +445,13 @@
     const copyParamsJson = document.querySelector("#copy-params-json");
     const copyBodyBtn = document.querySelector("#copy-body");
     const fixedBodyContent = document.querySelector("#fixed-body-content");
+    const endpointTables = [
+      document.querySelector("#endpoint-table"),
+      document.querySelector("#endpoint-table-inline")
+    ].filter(Boolean);
 
     let endpoints = await seedIfEmpty();
-    let selected = endpoints[0]?.id ?? null;
+    let selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
 
     const headerEditor = initRowEditor({
       rowsContainer: headersRows,
@@ -435,10 +466,25 @@
       copyJsonButton: copyParamsJson
     });
 
-    renderSidebar(endpoints, selected);
-    renderTable(endpoints);
+    const renderSelected = async (endpointId) => {
+      if (!Number.isInteger(Number(endpointId))) return;
+      selected = Number(endpointId);
+      renderTable(endpoints, selected);
+      const current = endpoints.find((e) => Number(e.id) === selected);
+      if (!current) return;
+      renderDetails(current, { headers: headerEditor, params: paramEditor });
+      renderHistory(await loadRequests(selected));
+      renderHistoryDetail(null);
+    };
+
+    renderTable(endpoints, selected);
     renderTargets(endpoints);
-    if (endpoints[0]) renderDetails(endpoints[0], { headers: headerEditor, params: paramEditor });
+    if (selected !== null) {
+      const current = endpoints.find((e) => Number(e.id) === selected);
+      if (current) {
+        renderDetails(current, { headers: headerEditor, params: paramEditor });
+      }
+    }
     renderHistory(await loadRequests(selected));
     renderHistoryDetail(null);
 
@@ -473,16 +519,12 @@
     openBtn?.addEventListener("click", openModal);
     closeBtn?.addEventListener("click", closeModal);
 
-    list?.addEventListener("click", (event) => {
-      const item = event.target.closest(".api-item");
-      if (!item) return;
-      selected = Number(item.dataset.endpointId);
-      renderSidebar(endpoints, selected);
-      const current = endpoints.find((e) => e.id === selected);
-      if (current) renderDetails(current, { headers: headerEditor, params: paramEditor });
-      loadRequests(selected).then(renderHistory);
-      renderHistoryDetail(null);
-    });
+    const onEndpointClick = (event) => {
+      const row = event.target.closest(".endpoint-row[data-endpoint-id]");
+      if (!row) return;
+      renderSelected(row.dataset.endpointId);
+    };
+    endpointTables.forEach((table) => table.addEventListener("click", onEndpointClick));
 
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -498,16 +540,24 @@
         params: "{}"
       };
       const created = await saveEndpoint(item);
-      if (!created) return;
+      if (!created) {
+        if (statusText) statusText.textContent = "Endpoint kaydedilemedi.";
+        return;
+      }
       endpoints = normalizeEndpoints(await loadEndpoints());
-      const nextSelected = endpoints[0]?.id || created.id;
-      renderSidebar(endpoints, nextSelected);
-      renderTable(endpoints);
+      selected = Number.isInteger(Number(created.id)) ? Number(created.id) : null;
+      if (selected === null) {
+        selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
+      }
+      renderTable(endpoints, selected);
       renderTargets(endpoints);
-      const current = endpoints.find((e) => e.id === nextSelected) || created;
-      renderDetails(current, { headers: headerEditor, params: paramEditor });
-      loadRequests(nextSelected).then(renderHistory);
+      const current = endpoints.find((e) => Number(e.id) === Number(selected));
+      if (current) {
+        renderDetails(current, { headers: headerEditor, params: paramEditor });
+      }
+      renderHistory(await loadRequests(selected));
       renderHistoryDetail(null);
+      if (statusText) statusText.textContent = "Endpoint kaydedildi.";
       form.reset();
       closeModal();
     });
@@ -515,8 +565,8 @@
     const bindSave = (field, key) => {
       let timer;
       field?.addEventListener("input", () => {
-        const current = endpoints.find((e) => e.id === selected);
-        if (!current) return;
+        const current = endpoints.find((e) => Number(e.id) === Number(selected));
+        if (!current || !Number.isInteger(Number(current.id))) return;
         current[key] = field.value;
         clearTimeout(timer);
         timer = setTimeout(() => {
@@ -546,8 +596,8 @@
     });
 
     targetSelect?.addEventListener("change", () => {
-      const current = endpoints.find((e) => e.id === selected);
-      if (!current) return;
+      const current = endpoints.find((e) => Number(e.id) === Number(selected));
+      if (!current || !Number.isInteger(Number(current.id))) return;
       current.targetUrl = targetSelect.value;
       updateEndpoint(current.id, {
         body: current.body,
@@ -578,8 +628,12 @@
     };
 
     const buildPayload = () => {
-      const current = endpoints.find((e) => e.id === selected) || endpoints[0];
-      if (!current) throw new Error("Endpoint bulunamadı.");
+      const current =
+        endpoints.find((e) => Number(e.id) === Number(selected)) ||
+        endpoints.find((e) => Number.isInteger(Number(e.id)));
+      if (!current || !Number.isInteger(Number(current.id))) {
+        throw new Error("Endpoint bulunamadı.");
+      }
       const method = (current.method || "GET").toUpperCase();
       const path = current.path || "/";
       const targetUrlValue = targetSelect?.value || current.targetUrl || "";
@@ -592,7 +646,7 @@
       const headers = parseJsonField(headersText, "Headers");
       const params = parseJsonField(paramsText, "Params");
       return {
-        endpointId: current.id,
+        endpointId: Number(current.id),
         method,
         path,
         targetUrl: targetUrlValue,

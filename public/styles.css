@@ -689,6 +689,27 @@ body {
   font-size: 13px;
 }
 
+.endpoint-row.selectable {
+  width: 100%;
+  border: 1px solid transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.endpoint-row.selectable:hover {
+  background: #edf2fa;
+  border-color: #d6dde7;
+}
+
+.endpoint-row.selectable.active {
+  background: #e7f0ff;
+  border-color: #0f6bdc;
+}
+
 .endpoint-inline-list {
   display: grid;
   gap: 8px;
