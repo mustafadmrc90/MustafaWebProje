@@ -249,7 +249,7 @@
     const method = document.querySelector("#endpoint-method");
     const headers = document.querySelector("#endpoint-headers");
     const params = document.querySelector("#endpoint-params");
-    const targetSelect = document.querySelector("#target-url-select");
+    const targetInput = document.querySelector("#target-url-input");
     if (!title || !path || !method || !headers || !params) return;
     title.textContent = item.title;
     path.textContent = `${item.method} ${item.path}`;
@@ -258,18 +258,8 @@
     params.value = item.params || "{}";
     if (editors?.headers) editors.headers.render();
     if (editors?.params) editors.params.render();
-    if (targetSelect) {
-      const targetValue = (item.targetUrl || "").trim();
-      if (targetValue) {
-        const hasOption = Array.from(targetSelect.options).some((option) => option.value === targetValue);
-        if (!hasOption) {
-          const option = document.createElement("option");
-          option.textContent = targetValue;
-          option.value = targetValue;
-          targetSelect.appendChild(option);
-        }
-      }
-      targetSelect.value = targetValue;
+    if (targetInput) {
+      targetInput.value = (item.targetUrl || "").trim();
     }
   };
 
@@ -346,9 +336,10 @@
   };
 
   const renderTargets = (endpoints) => {
-    const targetSelect = document.querySelector("#target-url-select");
-    if (!targetSelect) return;
-    const currentValue = targetSelect.value?.trim() || "";
+    const targetInput = document.querySelector("#target-url-input");
+    const targetList = document.querySelector("#target-url-list");
+    if (!targetInput || !targetList) return;
+    const currentValue = targetInput.value?.trim() || "";
     const targets = Array.from(
       new Set(
         endpoints
@@ -356,19 +347,14 @@
           .filter((value) => value)
       )
     );
-    targetSelect.innerHTML = "";
-    const placeholder = document.createElement("option");
-    placeholder.textContent = "Seçiniz";
-    placeholder.value = "";
-    targetSelect.appendChild(placeholder);
+    targetList.innerHTML = "";
     targets.forEach((url) => {
       const option = document.createElement("option");
-      option.textContent = url;
       option.value = url;
-      targetSelect.appendChild(option);
+      targetList.appendChild(option);
     });
     if (currentValue && targets.includes(currentValue)) {
-      targetSelect.value = currentValue;
+      targetInput.value = currentValue;
     }
   };
 
@@ -494,7 +480,7 @@
     const responseBody = document.querySelector("#response-body");
     const responseUrl = document.querySelector("#response-url");
     const responseTime = document.querySelector("#response-time");
-    const targetSelect = document.querySelector("#target-url-select");
+    const targetInput = document.querySelector("#target-url-input");
     const historyList = document.querySelector("#request-history");
     const clearHistoryBtn = document.querySelector("#clear-history");
     const headersRows = document.querySelector("#headers-rows");
@@ -664,17 +650,24 @@
       }
     });
 
-    targetSelect?.addEventListener("change", () => {
+    const saveTargetUrl = () => {
       const current = endpoints.find((e) => Number(e.id) === Number(selected));
       if (!current || !Number.isInteger(Number(current.id))) return;
-      current.targetUrl = targetSelect.value;
+      current.targetUrl = (targetInput?.value || "").trim();
+      renderTargets(endpoints);
       updateEndpoint(current.id, {
         body: current.body,
         headers: current.headers,
         params: current.params,
         targetUrl: current.targetUrl
       });
+    };
+    let targetTimer;
+    targetInput?.addEventListener("input", () => {
+      clearTimeout(targetTimer);
+      targetTimer = setTimeout(saveTargetUrl, 350);
     });
+    targetInput?.addEventListener("change", saveTargetUrl);
 
     const setResponseState = (state) => {
       if (statusText) statusText.textContent = state.statusText || "";
@@ -705,7 +698,7 @@
       }
       const method = (current.method || "GET").toUpperCase();
       const normalized = normalizeEndpointAddress({
-        targetUrl: targetSelect?.value || current.targetUrl || "",
+        targetUrl: targetInput?.value || current.targetUrl || "",
         path: current.path || "/"
       });
       if (!normalized.targetUrl) {

@@ -23,10 +23,15 @@
             </div>
 
             <div class="endpoint-meta">
-              <label class="label" for="target-url-select">Hedef URL</label>
-              <select id="target-url-select">
-                <option value="">Seçiniz</option>
-              </select>
+              <label class="label" for="target-url-input">Hedef URL</label>
+              <input
+                id="target-url-input"
+                list="target-url-list"
+                type="url"
+                inputmode="url"
+                placeholder="https://api.example.com"
+              />
+              <datalist id="target-url-list"></datalist>
             </div>
 
             <div class="endpoint-actions">
