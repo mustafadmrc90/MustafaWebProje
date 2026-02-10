@@ -36,6 +36,13 @@
               </div>
 
               <div class="login-profile-panel endpoint-login-profile-panel">
+                <div class="login-profile-row">
+                  <select id="login-profile-select">
+                    <option value="">Manuel seçim</option>
+                  </select>
+                  <button type="button" class="ghost small" id="save-login-profile">Kaydet</button>
+                  <button type="button" class="ghost small" id="delete-login-profile">Sil</button>
+                </div>
                 <div class="login-profile-fields">
                   <label class="login-profile-field">
                     <span>Partner Code</span>
@@ -65,11 +72,6 @@
                     />
                   </label>
                 </div>
-                <div class="login-profile-actions">
-                  <button type="button" class="ghost small" id="save-login-profile">Kaydet</button>
-                  <button type="button" class="ghost small" id="delete-login-profile">Sil</button>
-                </div>
-                <div class="login-profile-list" id="login-profile-list"></div>
                 <span class="login-profile-status" id="login-profile-status"></span>
               </div>
             </div>
