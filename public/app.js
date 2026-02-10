@@ -194,6 +194,44 @@
     }
   };
 
+  const reorderEndpointList = async (orderedIds) => {
+    const ids = Array.isArray(orderedIds)
+      ? orderedIds.map((value) => Number(value)).filter((id) => Number.isInteger(id))
+      : [];
+    if (!ids.length) {
+      return { ok: false, items: [], error: "Sıralama listesi boş." };
+    }
+    try {
+      const response = await fetch("/api/endpoints/reorder", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ ids })
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || data?.ok === false) {
+        return {
+          ok: false,
+          items: [],
+          error: getApiErrorMessage(response, data, "Sıralama kaydedilemedi")
+        };
+      }
+      return {
+        ok: true,
+        items: Array.isArray(data?.items) ? data.items : [],
+        error: null
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        items: [],
+        error: err.message || "Sıralama kaydedilemedi."
+      };
+    }
+  };
+
   const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
   const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
   const defaultParams = "{}";
@@ -269,6 +307,8 @@
         row.className = `endpoint-row selectable${isActive ? " active" : ""}`;
         if (selectable) {
           row.dataset.endpointId = String(itemId);
+          row.draggable = true;
+          row.classList.add("draggable");
         }
         row.innerHTML = `
           <span class="method ${(item.method || "GET").toLowerCase()}">${item.method || "GET"}</span>
@@ -279,7 +319,7 @@
           <div class="endpoint-row-actions">
             ${
               selectable
-                ? `<button type="button" class="ghost small endpoint-edit" data-endpoint-id="${itemId}">Düzenle</button>`
+                ? `<button type="button" class="ghost small endpoint-edit" data-endpoint-id="${itemId}" draggable="false">Düzenle</button>`
                 : ""
             }
           </div>
@@ -568,6 +608,8 @@
     let endpoints = await seedIfEmpty();
     let selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
     let editingEndpointId = null;
+    let draggingEndpointId = null;
+    let suppressEndpointClickUntil = 0;
 
     const headerEditor = initRowEditor({
       rowsContainer: headersRows,
@@ -583,6 +625,25 @@
     });
 
     const getEndpointById = (id) => endpoints.find((item) => Number(item.id) === Number(id));
+
+    const clearDragState = () => {
+      endpointTables.forEach((table) => {
+        table
+          .querySelectorAll(".endpoint-row.dragging, .endpoint-row.drag-over")
+          .forEach((row) => row.classList.remove("dragging", "drag-over"));
+      });
+    };
+
+    const moveEndpoint = (fromId, toId) => {
+      if (!Number.isInteger(Number(fromId)) || !Number.isInteger(Number(toId))) return false;
+      if (Number(fromId) === Number(toId)) return false;
+      const fromIndex = endpoints.findIndex((item) => Number(item.id) === Number(fromId));
+      const toIndex = endpoints.findIndex((item) => Number(item.id) === Number(toId));
+      if (fromIndex < 0 || toIndex < 0) return false;
+      const [moved] = endpoints.splice(fromIndex, 1);
+      endpoints.splice(toIndex, 0, moved);
+      return true;
+    };
 
     const setModalFormStatus = (message = "", kind = "") => {
       if (!modalFormStatus) return;
@@ -684,6 +745,9 @@
     }
 
     const onEndpointClick = (event) => {
+      if (Date.now() < suppressEndpointClickUntil) {
+        return;
+      }
       const table = event.currentTarget;
       const editBtn = event.target.closest(".endpoint-edit[data-endpoint-id]");
       if (editBtn) {
@@ -701,6 +765,88 @@
       renderSelected(row.dataset.endpointId);
     };
     endpointTables.forEach((table) => table.addEventListener("click", onEndpointClick));
+
+    const onEndpointDragStart = (event) => {
+      const row = event.target.closest(".endpoint-row.selectable[data-endpoint-id]");
+      if (!row || event.target.closest(".endpoint-edit")) return;
+      const endpointId = Number(row.dataset.endpointId);
+      if (!Number.isInteger(endpointId)) return;
+      draggingEndpointId = endpointId;
+      clearDragState();
+      row.classList.add("dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", String(endpointId));
+      }
+    };
+
+    const onEndpointDragOver = (event) => {
+      if (!Number.isInteger(draggingEndpointId)) return;
+      const row = event.target.closest(".endpoint-row.selectable[data-endpoint-id]");
+      if (!row) return;
+      const overId = Number(row.dataset.endpointId);
+      if (!Number.isInteger(overId) || overId === draggingEndpointId) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+      endpointTables.forEach((table) => {
+        table.querySelectorAll(".endpoint-row.drag-over").forEach((item) => {
+          item.classList.remove("drag-over");
+        });
+      });
+      row.classList.add("drag-over");
+    };
+
+    const onEndpointDrop = async (event) => {
+      if (!Number.isInteger(draggingEndpointId)) return;
+      const row = event.target.closest(".endpoint-row.selectable[data-endpoint-id]");
+      if (!row) return;
+      event.preventDefault();
+      const dropId = Number(row.dataset.endpointId);
+      const moved = moveEndpoint(draggingEndpointId, dropId);
+      clearDragState();
+      draggingEndpointId = null;
+      if (!moved) return;
+
+      suppressEndpointClickUntil = Date.now() + 250;
+      renderTable(endpoints, selected);
+      renderTargets(endpoints);
+
+      const orderedIds = endpoints
+        .map((item) => Number(item.id))
+        .filter((id) => Number.isInteger(id));
+      const { ok, items, error } = await reorderEndpointList(orderedIds);
+      if (!ok) {
+        if (statusText) statusText.textContent = error || "Endpoint sıralaması kaydedilemedi.";
+        const refreshed = normalizeEndpoints(await loadEndpoints());
+        if (refreshed.length) {
+          endpoints = refreshed;
+        }
+        renderTable(endpoints, selected);
+        renderTargets(endpoints);
+        return;
+      }
+
+      if (Array.isArray(items) && items.length) {
+        endpoints = normalizeEndpoints(items);
+      }
+      renderTable(endpoints, selected);
+      renderTargets(endpoints);
+      if (statusText) statusText.textContent = "Endpoint sırası güncellendi.";
+    };
+
+    const onEndpointDragEnd = () => {
+      clearDragState();
+      draggingEndpointId = null;
+    };
+
+    endpointTables.forEach((table) => {
+      table.addEventListener("dragstart", onEndpointDragStart);
+      table.addEventListener("dragover", onEndpointDragOver);
+      table.addEventListener("drop", onEndpointDrop);
+      table.addEventListener("dragend", onEndpointDragEnd);
+    });
 
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -886,68 +1032,109 @@
       }
     };
 
-    const buildPayload = () => {
-      const current =
-        endpoints.find((e) => Number(e.id) === Number(selected)) ||
-        endpoints.find((e) => Number.isInteger(Number(e.id)));
-      if (!current || !Number.isInteger(Number(current.id))) {
+    const normalizeTokenName = (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    const applyTemplateValue = (input, variables = {}) => {
+      if (typeof input !== "string") return input;
+      return input.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, token) => {
+        const normalizedToken = normalizeTokenName(token);
+        if (normalizedToken === "sessionid" && variables.sessionId !== undefined) {
+          return String(variables.sessionId);
+        }
+        if (normalizedToken === "deviceid" && variables.deviceId !== undefined) {
+          return String(variables.deviceId);
+        }
+        return match;
+      });
+    };
+
+    const applyTemplateObject = (value, variables = {}) => {
+      if (typeof value === "string") {
+        return applyTemplateValue(value, variables);
+      }
+      if (Array.isArray(value)) {
+        return value.map((item) => applyTemplateObject(item, variables));
+      }
+      if (value && typeof value === "object") {
+        return Object.entries(value).reduce((acc, [key, item]) => {
+          acc[key] = applyTemplateObject(item, variables);
+          return acc;
+        }, {});
+      }
+      return value;
+    };
+
+    const getCurrentEndpoint = () =>
+      endpoints.find((item) => Number(item.id) === Number(selected)) ||
+      endpoints.find((item) => Number.isInteger(Number(item.id)));
+
+    const getEndpointSearchText = (item) =>
+      `${item?.title || ""} ${item?.path || ""} ${item?.description || ""}`.toLowerCase();
+
+    const findEndpointByToken = (token) =>
+      endpoints.find((item) => getEndpointSearchText(item).includes(String(token || "").toLowerCase()));
+
+    const buildPayloadForEndpoint = (endpoint, options = {}) => {
+      const endpointId = Number(endpoint?.id);
+      if (!Number.isInteger(endpointId)) {
         throw new Error("Endpoint bulunamadı.");
       }
-      const method = (current.method || "GET").toUpperCase();
+      const {
+        templateVariables = {},
+        targetUrlOverride = "",
+        preferEditorValues = false
+      } = options;
+      const endpointName = endpoint.title || endpoint.path || "Endpoint";
+      const method = (endpoint.method || "GET").toUpperCase();
+
+      const headersSource = preferEditorValues
+        ? document.querySelector("#endpoint-headers")?.value || endpoint.headers || ""
+        : endpoint.headers || "";
+      const paramsSource = preferEditorValues
+        ? document.querySelector("#endpoint-params")?.value || endpoint.params || ""
+        : endpoint.params || "";
+      const bodySource = preferEditorValues ? bodyTextarea?.value || endpoint.body || "" : endpoint.body || "";
+
       const normalized = normalizeEndpointAddress({
-        targetUrl: targetInput?.value || current.targetUrl || "",
-        path: current.path || "/"
+        targetUrl: targetUrlOverride || endpoint.targetUrl || "",
+        path: endpoint.path || "/"
       });
       if (!normalized.targetUrl) {
         throw new Error("Hedef URL seçilmeli.");
       }
-      const headersText = document.querySelector("#endpoint-headers")?.value || "";
-      const paramsText = document.querySelector("#endpoint-params")?.value || "";
-      const bodyText = bodyTextarea?.value || "";
-      const headers = parseJsonField(headersText, "Headers");
-      const params = parseJsonField(paramsText, "Params");
+
+      const headers = applyTemplateObject(
+        parseJsonField(headersSource, `${endpointName} Headers`),
+        templateVariables
+      );
+      const params = applyTemplateObject(
+        parseJsonField(paramsSource, `${endpointName} Params`),
+        templateVariables
+      );
+      const body = applyTemplateValue(bodySource.trim() ? bodySource : "", templateVariables);
+
       return {
-        endpointId: Number(current.id),
+        endpointId,
         method,
         path: normalized.path,
         targetUrl: normalized.targetUrl,
         headers,
         params,
-        body: bodyText.trim() ? bodyText : ""
+        body
       };
     };
 
-    const prettifyResponse = (payload) => {
-      try {
-        return JSON.stringify(JSON.parse(payload), null, 2);
-      } catch (err) {
-        return payload || "";
-      }
-    };
-
-    sendBtn?.addEventListener("click", async () => {
-      setResponseState({
-        statusText: "İstek gönderiliyor...",
-        badgeText: "İşleniyor",
-        badgeClass: "muted",
-        body: "..."
-      });
-      let payload;
-      try {
-        payload = buildPayload();
-      } catch (err) {
-        setResponseState({
-          statusText: err.message,
-          badgeText: "Hata",
-          badgeClass: "muted",
-          body: "{}"
-        });
-        return;
-      }
+    const executePayload = async (payload) => {
       try {
         const response = await fetch("/api/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
           body: JSON.stringify(payload)
         });
 
@@ -969,14 +1156,179 @@
         }
 
         if (!response.ok || !data || data.error) {
+          return {
+            ok: false,
+            error: data?.error || `İstek başarısız (${response.status}).`,
+            data: data || null,
+            details: data?.details || data?.body || "{}"
+          };
+        }
+        return {
+          ok: true,
+          data
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: "İstek hatası.",
+          details: err.message || "{}",
+          data: null
+        };
+      }
+    };
+
+    const ensureSuccessfulStep = (stepName, result) => {
+      if (!result.ok) {
+        throw new Error(`${stepName} başarısız: ${result.error || "İstek tamamlanamadı."}`);
+      }
+      if (!result.data?.ok) {
+        const statusCode = Number(result.data?.status) || 0;
+        const statusTextLabel = result.data?.statusText || "Yanıt hatalı";
+        throw new Error(`${stepName} başarısız: ${statusCode} ${statusTextLabel}`.trim());
+      }
+      return result.data;
+    };
+
+    const findNestedValue = (node, keySet) => {
+      if (!node) return undefined;
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          const found = findNestedValue(item, keySet);
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      }
+      if (typeof node !== "object") return undefined;
+
+      for (const [key, value] of Object.entries(node)) {
+        if (keySet.has(normalizeTokenName(key)) && value !== undefined && value !== null && `${value}`.trim()) {
+          return String(value);
+        }
+      }
+      for (const value of Object.values(node)) {
+        const found = findNestedValue(value, keySet);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+
+    const extractSessionVariables = (responseBody) => {
+      if (!responseBody || typeof responseBody !== "string") {
+        return { sessionId: "", deviceId: "" };
+      }
+      let parsed = null;
+      try {
+        parsed = JSON.parse(responseBody);
+      } catch (err) {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== "object") {
+        return { sessionId: "", deviceId: "" };
+      }
+      const sessionId = findNestedValue(parsed, new Set(["sessionid"])) || "";
+      const deviceId = findNestedValue(parsed, new Set(["deviceid"])) || "";
+      return { sessionId, deviceId };
+    };
+
+    const prettifyResponse = (payload) => {
+      try {
+        return JSON.stringify(JSON.parse(payload), null, 2);
+      } catch (err) {
+        return payload || "";
+      }
+    };
+
+    sendBtn?.addEventListener("click", async () => {
+      setResponseState({
+        statusText: "İstek gönderiliyor...",
+        badgeText: "İşleniyor",
+        badgeClass: "muted",
+        body: "..."
+      });
+
+      try {
+        const current = getCurrentEndpoint();
+        if (!current || !Number.isInteger(Number(current.id))) {
+          throw new Error("Endpoint bulunamadı.");
+        }
+
+        let templateVariables = {};
+        const isUserLogin = getEndpointSearchText(current).includes("userlogin");
+
+        if (isUserLogin) {
           setResponseState({
-            statusText: data?.error || `İstek başarısız (${response.status}).`,
+            statusText: "GetSession çalıştırılıyor...",
+            badgeText: "Ön Hazırlık",
+            badgeClass: "muted",
+            body: "..."
+          });
+
+          const getSessionEndpoint = findEndpointByToken("getsession");
+          if (!getSessionEndpoint) {
+            throw new Error("GetSession endpoint'i bulunamadı.");
+          }
+          const getSessionPayload = buildPayloadForEndpoint(getSessionEndpoint, {
+            preferEditorValues: Number(getSessionEndpoint.id) === Number(selected),
+            targetUrlOverride:
+              Number(getSessionEndpoint.id) === Number(selected)
+                ? targetInput?.value || getSessionEndpoint.targetUrl || ""
+                : getSessionEndpoint.targetUrl || ""
+          });
+          const getSessionResult = await executePayload(getSessionPayload);
+          const getSessionData = ensureSuccessfulStep("GetSession", getSessionResult);
+          const extracted = extractSessionVariables(getSessionData.body || "");
+          if (!extracted.sessionId || !extracted.deviceId) {
+            throw new Error("GetSession yanıtında session-id ve device-id bulunamadı.");
+          }
+          templateVariables = extracted;
+
+          setResponseState({
+            statusText: "GetParameter çalıştırılıyor...",
+            badgeText: "Ön Hazırlık",
+            badgeClass: "muted",
+            body: "..."
+          });
+
+          const getParameterEndpoint = findEndpointByToken("getparameter");
+          if (!getParameterEndpoint) {
+            throw new Error("GetParameter endpoint'i bulunamadı.");
+          }
+          const getParameterPayload = buildPayloadForEndpoint(getParameterEndpoint, {
+            templateVariables,
+            preferEditorValues: Number(getParameterEndpoint.id) === Number(selected),
+            targetUrlOverride:
+              Number(getParameterEndpoint.id) === Number(selected)
+                ? targetInput?.value || getParameterEndpoint.targetUrl || ""
+                : getParameterEndpoint.targetUrl || ""
+          });
+          const getParameterResult = await executePayload(getParameterPayload);
+          ensureSuccessfulStep("GetParameter", getParameterResult);
+
+          setResponseState({
+            statusText: "UserLogin çalıştırılıyor...",
+            badgeText: "İşleniyor",
+            badgeClass: "muted",
+            body: "..."
+          });
+        }
+
+        const payload = buildPayloadForEndpoint(current, {
+          templateVariables,
+          preferEditorValues: true,
+          targetUrlOverride: targetInput?.value || current.targetUrl || ""
+        });
+        const execution = await executePayload(payload);
+        if (!execution.ok || !execution.data) {
+          setResponseState({
+            statusText: execution.error || "İstek başarısız.",
             badgeText: "Hata",
             badgeClass: "muted",
-            body: data?.details || data?.body || "{}"
+            body: execution.details || "{}"
           });
           return;
         }
+
+        const data = execution.data;
         const formatted = prettifyResponse(data.body || "");
         const badgeClass = data.ok ? "success" : "muted";
         const allowHeader = data?.headers?.allow || data?.headers?.Allow || "";
@@ -995,14 +1347,14 @@
           time: data.durationMs ? `Süre: ${data.durationMs} ms` : ""
         });
         if (hasHistoryPanel) {
-          loadRequests(selected).then(renderHistory);
+          loadRequests(Number(current.id)).then(renderHistory);
         }
       } catch (err) {
         setResponseState({
-          statusText: "İstek hatası.",
+          statusText: err.message || "İstek hatası.",
           badgeText: "Hata",
           badgeClass: "muted",
-          body: err.message || "{}"
+          body: "{}"
         });
       }
     });

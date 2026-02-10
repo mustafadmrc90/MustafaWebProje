@@ -417,7 +417,7 @@ body {
 
 .request-editor-column {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
   min-height: var(--request-panels-height);
 }
@@ -453,6 +453,7 @@ body {
 .request-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
@@ -806,9 +807,26 @@ body {
   cursor: pointer;
 }
 
+.endpoint-row.draggable {
+  cursor: grab;
+}
+
+.endpoint-row.draggable:active {
+  cursor: grabbing;
+}
+
+.endpoint-row.dragging {
+  opacity: 0.65;
+}
+
 .endpoint-row.selectable:hover {
   background: #edf2fa;
   border-color: #d6dde7;
+}
+
+.endpoint-row.selectable.drag-over {
+  border-color: #0f6bdc;
+  box-shadow: 0 0 0 1px rgba(15, 107, 220, 0.18);
 }
 
 .endpoint-row.selectable.active {

@@ -50,6 +50,11 @@
               </div>
 
               <div class="request-column request-editor-column">
+                <div class="request-actions">
+                  <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
+                  <span class="muted" id="request-status"></span>
+                </div>
+
                 <div class="request-tabs">
                   <button class="tab active" data-tab="body">Body</button>
                   <button class="tab" data-tab="headers">Headers</button>
@@ -125,11 +130,6 @@
                       placeholder='{"page":1,"size":10}'
                     ></textarea>
                   </div>
-                </div>
-
-                <div class="request-actions">
-                  <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
-                  <span class="muted" id="request-status"></span>
                 </div>
               </div>
 

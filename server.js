@@ -84,6 +84,7 @@ async function initDb() {
       body TEXT,
       headers TEXT,
       params TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
@@ -97,8 +98,22 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS body TEXT,
       ADD COLUMN IF NOT EXISTS headers TEXT,
       ADD COLUMN IF NOT EXISTS params TEXT,
+      ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  // Fill sort order for legacy rows where this value is missing/default.
+  await pool.query(`
+    WITH ranked AS (
+      SELECT id, row_number() OVER (ORDER BY id DESC) AS ord
+      FROM api_endpoints
+    )
+    UPDATE api_endpoints AS target
+    SET sort_order = ranked.ord
+    FROM ranked
+    WHERE target.id = ranked.id
+      AND (target.sort_order IS NULL OR target.sort_order = 0)
   `);
 
   await pool.query(`
@@ -432,9 +447,9 @@ app.get("/health", async (req, res) => {
 app.get("/api/endpoints", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, title, method, path, target_url, description, body, headers, params
+      `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
        FROM api_endpoints
-       ORDER BY id DESC`
+       ORDER BY sort_order ASC, id DESC`
     );
     res.json({ ok: true, items: result.rows });
   } catch (err) {
@@ -450,9 +465,12 @@ app.post("/api/endpoints", requireAuth, async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `INSERT INTO api_endpoints (title, method, path, target_url, description, body, headers, params)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, title, method, path, target_url, description, body, headers, params`,
+      `INSERT INTO api_endpoints (title, method, path, target_url, description, body, headers, params, sort_order)
+       VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8,
+         COALESCE((SELECT MIN(sort_order) - 1 FROM api_endpoints), 1)
+       )
+       RETURNING id, title, method, path, target_url, description, body, headers, params, sort_order`,
       [
         title.trim(),
         method.trim().toUpperCase(),
@@ -471,15 +489,70 @@ app.post("/api/endpoints", requireAuth, async (req, res) => {
   }
 });
 
+app.post("/api/endpoints/reorder", requireAuth, async (req, res) => {
+  const ids =
+    Array.isArray(req.body?.ids) && req.body.ids.length
+      ? req.body.ids.map((value) => Number(value)).filter((id) => Number.isInteger(id))
+      : [];
+
+  if (!ids.length) {
+    return res.status(400).json({ ok: false, error: "Sıralama için endpoint id listesi gerekli." });
+  }
+
+  try {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length !== ids.length) {
+      return res.status(400).json({ ok: false, error: "Endpoint listesinde tekrar eden id var." });
+    }
+
+    const totalResult = await pool.query("SELECT COUNT(*)::int AS count FROM api_endpoints");
+    const total = totalResult.rows[0]?.count || 0;
+    if (uniqueIds.length !== total) {
+      return res.status(400).json({ ok: false, error: "Tüm endpointler sıralama listesinde olmalı." });
+    }
+
+    const checkResult = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM api_endpoints WHERE id = ANY($1::int[])",
+      [uniqueIds]
+    );
+    if (checkResult.rows[0]?.count !== total) {
+      return res.status(400).json({ ok: false, error: "Geçersiz endpoint id listesi." });
+    }
+
+    await pool.query(
+      `UPDATE api_endpoints AS target
+       SET sort_order = ordered.ord::int,
+           updated_at = now()
+       FROM (
+         SELECT id, ord
+         FROM unnest($1::int[]) WITH ORDINALITY AS list(id, ord)
+       ) AS ordered
+       WHERE target.id = ordered.id`,
+      [uniqueIds]
+    );
+
+    const result = await pool.query(
+      `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
+       FROM api_endpoints
+       ORDER BY sort_order ASC, id DESC`
+    );
+    res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Endpoint sıralaması güncellenemedi." });
+  }
+});
+
 app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     return res.status(400).json({ ok: false, error: "Geçersiz id" });
   }
-  const { title, method, path, description, body, headers, params, targetUrl } = req.body || {};
+  const { title, method, path, description, body, headers, params, targetUrl, sortOrder } =
+    req.body || {};
   try {
     const existingResult = await pool.query(
-      `SELECT id, title, method, path, target_url, description, body, headers, params
+      `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
        FROM api_endpoints
        WHERE id = $1`,
       [id]
@@ -506,6 +579,10 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
     const nextParams = params === undefined ? existing.params : params || "{}";
     const nextTargetUrl =
       targetUrl === undefined ? existing.target_url : String(targetUrl || "").trim() || null;
+    const nextSortOrder =
+      sortOrder === undefined || !Number.isInteger(Number(sortOrder))
+        ? existing.sort_order
+        : Number(sortOrder);
 
     const result = await pool.query(
       `UPDATE api_endpoints
@@ -516,10 +593,11 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
            body = $5,
            headers = $6,
            params = $7,
-           target_url = $8,
+            target_url = $8,
+           sort_order = $9,
            updated_at = now()
-       WHERE id = $9
-       RETURNING id, title, method, path, target_url, description, body, headers, params`,
+       WHERE id = $10
+       RETURNING id, title, method, path, target_url, description, body, headers, params, sort_order`,
       [
         nextTitle,
         nextMethod,
@@ -529,6 +607,7 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
         nextHeaders,
         nextParams,
         nextTargetUrl,
+        nextSortOrder,
         id
       ]
     );
