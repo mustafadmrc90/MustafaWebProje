@@ -258,6 +258,22 @@ body {
   gap: 6px;
 }
 
+.endpoint-meta.endpoint-meta-grid {
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.15fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.endpoint-target-group {
+  display: grid;
+  gap: 6px;
+}
+
+.endpoint-login-profile-panel {
+  height: 100%;
+  align-content: start;
+}
+
 .endpoint-meta select,
 .endpoint-meta input {
   border-radius: 12px;
@@ -426,7 +442,7 @@ body {
 
 .request-editor-column {
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
   min-height: var(--request-panels-height);
 }
@@ -476,20 +492,11 @@ body {
   gap: 8px;
 }
 
-.login-profile-row {
+.login-profile-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto;
   gap: 8px;
-  align-items: center;
-}
-
-.login-profile-row select {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d6dde7;
-  padding: 7px 10px;
-  font-size: 12px;
-  background: #fff;
+  justify-content: flex-start;
 }
 
 .login-profile-fields {
@@ -530,6 +537,48 @@ body {
 
 .login-profile-status.success {
   color: #246f45;
+}
+
+.login-profile-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  max-height: 112px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.login-profile-item {
+  border: 1px solid #d6dde7;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2735;
+  padding: 7px 8px;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.login-profile-item strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.login-profile-item span {
+  font-size: 10px;
+  color: #6b7785;
+}
+
+.login-profile-item.active {
+  border-color: #0f6bdc;
+  background: #e7f0ff;
+}
+
+.login-profile-empty {
+  font-size: 11px;
+  color: #6b7785;
+  padding: 4px 0;
 }
 
 .response-panel {
@@ -994,12 +1043,11 @@ body {
   gap: 6px;
 }
 
-.api-panel .login-profile-row,
+.api-panel .login-profile-actions,
 .api-panel .login-profile-fields {
   gap: 6px;
 }
 
-.api-panel .login-profile-row select,
 .api-panel .login-profile-field input {
   border-radius: 8px;
   padding: 6px 8px;
@@ -1009,6 +1057,11 @@ body {
 .api-panel .login-profile-field span,
 .api-panel .login-profile-status {
   font-size: 10px;
+}
+
+.api-panel .login-profile-item {
+  border-radius: 8px;
+  padding: 6px 7px;
 }
 
 .api-panel .endpoint-list-card,
@@ -1843,7 +1896,7 @@ button.ghost {
     min-height: 0;
   }
 
-  .login-profile-row {
+  .endpoint-meta.endpoint-meta-grid {
     grid-template-columns: 1fr;
   }
 

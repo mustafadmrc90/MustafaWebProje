@@ -22,16 +22,56 @@
               <span class="pill" id="endpoint-method">POST</span>
             </div>
 
-            <div class="endpoint-meta">
-              <label class="label" for="target-url-input">Hedef URL</label>
-              <input
-                id="target-url-input"
-                list="target-url-list"
-                type="url"
-                inputmode="url"
-                placeholder="https://api.example.com"
-              />
-              <datalist id="target-url-list"></datalist>
+            <div class="endpoint-meta endpoint-meta-grid">
+              <div class="endpoint-target-group">
+                <label class="label" for="target-url-input">Hedef URL</label>
+                <input
+                  id="target-url-input"
+                  list="target-url-list"
+                  type="url"
+                  inputmode="url"
+                  placeholder="https://api.example.com"
+                />
+                <datalist id="target-url-list"></datalist>
+              </div>
+
+              <div class="login-profile-panel endpoint-login-profile-panel">
+                <div class="login-profile-fields">
+                  <label class="login-profile-field">
+                    <span>Partner Code</span>
+                    <input
+                      type="text"
+                      id="login-partner-code"
+                      placeholder="partner-code"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="login-profile-field">
+                    <span>Branch Id</span>
+                    <input
+                      type="text"
+                      id="login-branch-id"
+                      placeholder="branch-id"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="login-profile-field">
+                    <span>Profil Adı</span>
+                    <input
+                      type="text"
+                      id="login-profile-name"
+                      placeholder="Opsiyonel"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+                <div class="login-profile-actions">
+                  <button type="button" class="ghost small" id="save-login-profile">Kaydet</button>
+                  <button type="button" class="ghost small" id="delete-login-profile">Sil</button>
+                </div>
+                <div class="login-profile-list" id="login-profile-list"></div>
+                <span class="login-profile-status" id="login-profile-status"></span>
+              </div>
             </div>
 
             <div class="endpoint-actions">
@@ -53,46 +93,6 @@
                 <div class="request-actions">
                   <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
                   <span class="muted" id="request-status"></span>
-                </div>
-
-                <div class="login-profile-panel">
-                  <div class="login-profile-row">
-                    <select id="login-profile-select">
-                      <option value="">Manuel seçim</option>
-                    </select>
-                    <button type="button" class="ghost small" id="save-login-profile">Kaydet</button>
-                    <button type="button" class="ghost small" id="delete-login-profile">Sil</button>
-                  </div>
-                  <div class="login-profile-fields">
-                    <label class="login-profile-field">
-                      <span>Partner Code</span>
-                      <input
-                        type="text"
-                        id="login-partner-code"
-                        placeholder="partner-code"
-                        autocomplete="off"
-                      />
-                    </label>
-                    <label class="login-profile-field">
-                      <span>Branch Id</span>
-                      <input
-                        type="text"
-                        id="login-branch-id"
-                        placeholder="branch-id"
-                        autocomplete="off"
-                      />
-                    </label>
-                    <label class="login-profile-field">
-                      <span>Profil Adı</span>
-                      <input
-                        type="text"
-                        id="login-profile-name"
-                        placeholder="Opsiyonel"
-                        autocomplete="off"
-                      />
-                    </label>
-                  </div>
-                  <span class="login-profile-status" id="login-profile-status"></span>
                 </div>
 
                 <div class="request-tabs">

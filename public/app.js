@@ -616,12 +616,12 @@
     const responseUrl = document.querySelector("#response-url");
     const responseTime = document.querySelector("#response-time");
     const targetInput = document.querySelector("#target-url-input");
-    const loginProfileSelect = document.querySelector("#login-profile-select");
     const loginPartnerCodeInput = document.querySelector("#login-partner-code");
     const loginBranchIdInput = document.querySelector("#login-branch-id");
     const loginProfileNameInput = document.querySelector("#login-profile-name");
     const saveLoginProfileBtn = document.querySelector("#save-login-profile");
     const deleteLoginProfileBtn = document.querySelector("#delete-login-profile");
+    const loginProfileList = document.querySelector("#login-profile-list");
     const loginProfileStatus = document.querySelector("#login-profile-status");
     const historyList = document.querySelector("#request-history");
     const clearHistoryBtn = document.querySelector("#clear-history");
@@ -704,31 +704,57 @@
       }
     };
 
-    const renderLoginProfileOptions = () => {
-      if (!loginProfileSelect) return;
-      const normalizedActiveId = String(activeLoginProfileId || "");
-      loginProfileSelect.innerHTML = "";
+    const getLoginProfileLabel = (profile) =>
+      profile.name || `${profile.partnerCode || "-"} / ${profile.branchId || "-"}`;
 
-      const manualOption = document.createElement("option");
-      manualOption.value = "";
-      manualOption.textContent = "Manuel seçim";
-      loginProfileSelect.appendChild(manualOption);
+    const renderLoginProfileList = () => {
+      if (!loginProfileList) return;
+      loginProfileList.innerHTML = "";
+
+      const manualItem = document.createElement("button");
+      manualItem.type = "button";
+      manualItem.className = `login-profile-item${activeLoginProfileId ? "" : " active"}`;
+      manualItem.dataset.profileId = "";
+      manualItem.innerHTML = "<strong>Manuel</strong><span>Geçici değer kullan</span>";
+      loginProfileList.appendChild(manualItem);
+
+      if (!loginProfiles.length) {
+        const empty = document.createElement("span");
+        empty.className = "login-profile-empty";
+        empty.textContent = "Kayıtlı profil yok.";
+        loginProfileList.appendChild(empty);
+        return;
+      }
 
       loginProfiles.forEach((profile) => {
-        const option = document.createElement("option");
-        option.value = profile.id;
-        const generatedName =
-          profile.name || `${profile.partnerCode || "-"} / ${profile.branchId || "-"}`;
-        option.textContent = generatedName;
-        loginProfileSelect.appendChild(option);
+        const item = document.createElement("button");
+        item.type = "button";
+        item.dataset.profileId = profile.id;
+        item.className = `login-profile-item${
+          String(profile.id) === String(activeLoginProfileId) ? " active" : ""
+        }`;
+        item.innerHTML = `<strong>${getLoginProfileLabel(profile)}</strong><span>${profile.partnerCode} / ${profile.branchId}</span>`;
+        loginProfileList.appendChild(item);
       });
+    };
 
-      if (normalizedActiveId && loginProfiles.some((item) => item.id === normalizedActiveId)) {
-        loginProfileSelect.value = normalizedActiveId;
+    const selectLoginProfile = (profileId, options = {}) => {
+      const { keepManualInputs = false } = options;
+      const normalizedId = String(profileId || "");
+      if (normalizedId && loginProfiles.some((item) => String(item.id) === normalizedId)) {
+        activeLoginProfileId = normalizedId;
       } else {
         activeLoginProfileId = "";
-        loginProfileSelect.value = "";
       }
+
+      const profile = getActiveLoginProfile();
+      if (profile) {
+        fillLoginProfileInputs(profile);
+      } else if (!keepManualInputs) {
+        fillLoginProfileInputs(null);
+      }
+
+      renderLoginProfileList();
     };
 
     const getSelectedUserLoginVariables = () => ({
@@ -813,10 +839,10 @@
     }
 
     if (loginProfiles.length) {
-      activeLoginProfileId = loginProfiles[0].id;
-      fillLoginProfileInputs(loginProfiles[0]);
+      selectLoginProfile(loginProfiles[0].id);
+    } else {
+      selectLoginProfile("", { keepManualInputs: true });
     }
-    renderLoginProfileOptions();
     setLoginProfileStatus("");
 
     const openModal = () => {
@@ -954,12 +980,10 @@
       table.addEventListener("dragend", onEndpointDragEnd);
     });
 
-    loginProfileSelect?.addEventListener("change", () => {
-      activeLoginProfileId = String(loginProfileSelect.value || "");
-      const profile = getActiveLoginProfile();
-      if (profile) {
-        fillLoginProfileInputs(profile);
-      }
+    loginProfileList?.addEventListener("click", (event) => {
+      const profileItem = event.target.closest(".login-profile-item[data-profile-id]");
+      if (!profileItem) return;
+      selectLoginProfile(profileItem.dataset.profileId, { keepManualInputs: true });
       setLoginProfileStatus("");
     });
 
@@ -998,7 +1022,7 @@
       }
 
       if (!saveLoginProfiles()) return;
-      renderLoginProfileOptions();
+      selectLoginProfile(activeLoginProfileId, { keepManualInputs: true });
       setLoginProfileStatus("Profil kaydedildi.", "success");
     });
 
@@ -1010,8 +1034,11 @@
       loginProfiles = loginProfiles.filter((item) => item.id !== activeLoginProfileId);
       activeLoginProfileId = "";
       if (!saveLoginProfiles()) return;
-      renderLoginProfileOptions();
-      fillLoginProfileInputs(null);
+      if (loginProfiles.length) {
+        selectLoginProfile(loginProfiles[0].id);
+      } else {
+        selectLoginProfile("", { keepManualInputs: false });
+      }
       setLoginProfileStatus("Profil silindi.", "success");
     });
 
