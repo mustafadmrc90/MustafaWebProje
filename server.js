@@ -89,6 +89,18 @@ async function initDb() {
     )
   `);
 
+  // Backward-compatible schema upgrades for existing databases.
+  await pool.query(`
+    ALTER TABLE api_endpoints
+      ADD COLUMN IF NOT EXISTS target_url TEXT,
+      ADD COLUMN IF NOT EXISTS description TEXT,
+      ADD COLUMN IF NOT EXISTS body TEXT,
+      ADD COLUMN IF NOT EXISTS headers TEXT,
+      ADD COLUMN IF NOT EXISTS params TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS api_requests (
       id SERIAL PRIMARY KEY,
@@ -106,6 +118,19 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE api_requests
+      ADD COLUMN IF NOT EXISTS target_url TEXT,
+      ADD COLUMN IF NOT EXISTS headers TEXT,
+      ADD COLUMN IF NOT EXISTS params TEXT,
+      ADD COLUMN IF NOT EXISTS body TEXT,
+      ADD COLUMN IF NOT EXISTS response_status INTEGER,
+      ADD COLUMN IF NOT EXISTS response_text TEXT,
+      ADD COLUMN IF NOT EXISTS response_headers TEXT,
+      ADD COLUMN IF NOT EXISTS duration_ms INTEGER,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   `);
 
   await pool.query(`
@@ -148,6 +173,9 @@ initDb().catch((err) => {
 
 function requireAuth(req, res, next) {
   if (!req.session.user) {
+    if (req.path.startsWith("/api/")) {
+      return res.status(401).json({ ok: false, error: "Oturum süresi doldu." });
+    }
     return res.redirect("/login");
   }
   next();
@@ -411,7 +439,7 @@ app.get("/api/endpoints", requireAuth, async (req, res) => {
     res.json({ ok: true, items: result.rows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false });
+    res.status(500).json({ ok: false, error: "Endpoint listesi alınamadı." });
   }
 });
 
@@ -439,7 +467,7 @@ app.post("/api/endpoints", requireAuth, async (req, res) => {
     res.json({ ok: true, item: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false });
+    res.status(500).json({ ok: false, error: "Endpoint kaydedilemedi." });
   }
 });
 
@@ -507,7 +535,7 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
     res.json({ ok: true, item: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false });
+    res.status(500).json({ ok: false, error: "Endpoint güncellenemedi." });
   }
 });
 

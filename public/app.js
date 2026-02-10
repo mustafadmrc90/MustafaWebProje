@@ -79,12 +79,27 @@
     }
   };
 
+  const getApiErrorMessage = (response, data, fallback) => {
+    if (data?.error) return data.error;
+    if (response?.status === 401) {
+      return "Oturum süresi doldu. Lütfen tekrar giriş yapın.";
+    }
+    if (response?.redirected && /\/login(?:$|[?#])/.test(response.url || "")) {
+      return "Oturum süresi doldu. Lütfen tekrar giriş yapın.";
+    }
+    return `${fallback} (${response?.status || 0})`;
+  };
+
   const loadEndpoints = async () => {
     try {
-      const response = await fetch("/api/endpoints");
-      if (!response.ok) return [];
+      const response = await fetch("/api/endpoints", {
+        headers: { Accept: "application/json" }
+      });
       const data = await parseJsonResponse(response);
-      return data?.items || [];
+      if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
+        return [];
+      }
+      return data.items;
     } catch (err) {
       return [];
     }
@@ -94,18 +109,27 @@
     try {
       const response = await fetch("/api/endpoints", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
         body: JSON.stringify(payload)
       });
       const data = await parseJsonResponse(response);
-      if (!response.ok) {
+      if (!response.ok || data?.ok === false) {
         return {
           item: null,
-          error: data?.error || `Kaydetme hatası (${response.status})`
+          error: getApiErrorMessage(response, data, "Kaydetme hatası")
+        };
+      }
+      if (!data?.item) {
+        return {
+          item: null,
+          error: "Sunucudan geçerli kayıt yanıtı alınamadı."
         };
       }
       return {
-        item: data?.item || null,
+        item: data.item,
         error: null
       };
     } catch (err) {
@@ -155,10 +179,16 @@
     try {
       const response = await fetch(`/api/endpoints/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
         body: JSON.stringify(payload)
       });
-      return response.ok;
+      if (!response.ok) return false;
+      const data = await parseJsonResponse(response);
+      if (data && data.ok === false) return false;
+      return true;
     } catch (err) {
       return false;
     }
@@ -509,6 +539,7 @@
     const modalTitle = document.querySelector("#endpoint-modal-title");
     const form = document.querySelector("#endpoint-form");
     const submitBtn = document.querySelector("#endpoint-submit-button");
+    const modalFormStatus = document.querySelector("#endpoint-form-status");
     const sendBtn = document.querySelector("#send-request");
     const statusText = document.querySelector("#request-status");
     const responseStatus = document.querySelector("#response-status");
@@ -553,9 +584,17 @@
 
     const getEndpointById = (id) => endpoints.find((item) => Number(item.id) === Number(id));
 
+    const setModalFormStatus = (message = "", kind = "") => {
+      if (!modalFormStatus) return;
+      modalFormStatus.textContent = message;
+      modalFormStatus.className = `form-feedback${kind ? ` ${kind}` : ""}`;
+      modalFormStatus.hidden = !message;
+    };
+
     const setModalMode = (mode, item = null) => {
       const isEdit = mode === "edit" && item;
       editingEndpointId = isEdit ? Number(item.id) : null;
+      setModalFormStatus("", "");
 
       if (modalTitle) {
         modalTitle.textContent = isEdit ? "Endpoint Düzenle" : "Endpoint Ekle";
@@ -659,72 +698,113 @@
 
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const data = new FormData(form);
-      const normalized = normalizeEndpointAddress({
-        targetUrl: data.get("targetUrl")?.toString() || "",
-        path: data.get("path")?.toString() || ""
-      });
-      const item = {
-        title: data.get("title")?.toString().trim() || "Endpoint",
-        method: data.get("method")?.toString().toUpperCase() || "GET",
-        path: normalized.path,
-        description: data.get("description")?.toString().trim() || "",
-        targetUrl: normalized.targetUrl,
-        body: defaultBody,
-        headers: defaultHeaders,
-        params: defaultParams
-      };
-
-      const isEdit = Number.isInteger(Number(editingEndpointId));
-      if (isEdit) {
-        const current = getEndpointById(editingEndpointId);
-        if (!current) {
-          if (statusText) statusText.textContent = "Düzenlenecek endpoint bulunamadı.";
-          return;
-        }
-        const updated = await updateEndpoint(Number(editingEndpointId), {
-          ...item,
-          body: current.body || defaultBody,
-          headers: current.headers || defaultHeaders,
-          params: current.params || defaultParams
+      setModalFormStatus("", "");
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const data = new FormData(form);
+        const normalized = normalizeEndpointAddress({
+          targetUrl: data.get("targetUrl")?.toString() || "",
+          path: data.get("path")?.toString() || ""
         });
-        if (!updated) {
-          if (statusText) statusText.textContent = "Endpoint güncellenemedi.";
+        if (!normalized.targetUrl) {
+          const msg = "Hedef URL zorunlu.";
+          if (statusText) statusText.textContent = msg;
+          setModalFormStatus(msg, "error");
           return;
         }
-        endpoints = normalizeEndpoints(await loadEndpoints());
-        selected = Number(editingEndpointId);
+
+        const item = {
+          title: data.get("title")?.toString().trim() || "Endpoint",
+          method: data.get("method")?.toString().toUpperCase() || "GET",
+          path: normalized.path,
+          description: data.get("description")?.toString().trim() || "",
+          targetUrl: normalized.targetUrl,
+          body: defaultBody,
+          headers: defaultHeaders,
+          params: defaultParams
+        };
+
+        const isEdit = Number.isInteger(Number(editingEndpointId));
+        if (isEdit) {
+          const current = getEndpointById(editingEndpointId);
+          if (!current) {
+            const msg = "Düzenlenecek endpoint bulunamadı.";
+            if (statusText) statusText.textContent = msg;
+            setModalFormStatus(msg, "error");
+            return;
+          }
+          const updated = await updateEndpoint(Number(editingEndpointId), {
+            ...item,
+            body: current.body || defaultBody,
+            headers: current.headers || defaultHeaders,
+            params: current.params || defaultParams
+          });
+          if (!updated) {
+            const msg = "Endpoint güncellenemedi.";
+            if (statusText) statusText.textContent = msg;
+            setModalFormStatus(msg, "error");
+            return;
+          }
+          const refreshed = normalizeEndpoints(await loadEndpoints());
+          if (refreshed.length) {
+            endpoints = refreshed;
+          }
+          selected = Number(editingEndpointId);
+          renderTable(endpoints, selected);
+          renderTargets(endpoints);
+          await renderSelected(selected);
+          if (statusText) statusText.textContent = "Endpoint güncellendi.";
+          setModalFormStatus("Kayıt başarılı.", "success");
+          setTimeout(() => {
+            closeModal();
+            setModalFormStatus("", "");
+          }, 500);
+          return;
+        }
+
+        const { item: created, error: saveError } = await saveEndpoint(item);
+        if (!created) {
+          const msg = saveError || "Endpoint kaydedilemedi.";
+          if (statusText) statusText.textContent = msg;
+          setModalFormStatus(msg, "error");
+          return;
+        }
+        const refreshed = normalizeEndpoints(await loadEndpoints());
+        if (refreshed.length) {
+          endpoints = refreshed;
+        } else {
+          const deduped = endpoints.filter((entry) => Number(entry.id) !== Number(created.id));
+          endpoints = normalizeEndpoints([created, ...deduped]);
+        }
+
+        selected = Number.isInteger(Number(created.id)) ? Number(created.id) : null;
+        if (selected === null) {
+          selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
+        }
         renderTable(endpoints, selected);
         renderTargets(endpoints);
-        await renderSelected(selected);
-        if (statusText) statusText.textContent = "Endpoint güncellendi.";
-        closeModal();
-        return;
+        const current = endpoints.find((e) => Number(e.id) === Number(selected));
+        if (current) {
+          renderDetails(current, { headers: headerEditor, params: paramEditor });
+        }
+        if (hasHistoryPanel) {
+          renderHistory(await loadRequests(selected));
+          renderHistoryDetail(null);
+        }
+        if (statusText) statusText.textContent = "Endpoint kaydedildi.";
+        setModalFormStatus("Kayıt başarılı.", "success");
+        form.reset();
+        setTimeout(() => {
+          closeModal();
+          setModalFormStatus("", "");
+        }, 500);
+      } catch (err) {
+        const msg = err?.message || "Endpoint kaydedilemedi.";
+        if (statusText) statusText.textContent = msg;
+        setModalFormStatus(msg, "error");
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
-
-      const { item: created, error: saveError } = await saveEndpoint(item);
-      if (!created) {
-        if (statusText) statusText.textContent = saveError || "Endpoint kaydedilemedi.";
-        return;
-      }
-      endpoints = normalizeEndpoints(await loadEndpoints());
-      selected = Number.isInteger(Number(created.id)) ? Number(created.id) : null;
-      if (selected === null) {
-        selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
-      }
-      renderTable(endpoints, selected);
-      renderTargets(endpoints);
-      const current = endpoints.find((e) => Number(e.id) === Number(selected));
-      if (current) {
-        renderDetails(current, { headers: headerEditor, params: paramEditor });
-      }
-      if (hasHistoryPanel) {
-        renderHistory(await loadRequests(selected));
-        renderHistoryDetail(null);
-      }
-      if (statusText) statusText.textContent = "Endpoint kaydedildi.";
-      form.reset();
-      closeModal();
     });
 
     const bindSave = (field, key) => {
