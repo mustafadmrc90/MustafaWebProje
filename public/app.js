@@ -105,6 +105,56 @@
     }
   };
 
+  const loadTargetUrls = async () => {
+    try {
+      const response = await fetch("/api/targets", {
+        headers: { Accept: "application/json" }
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
+        return [];
+      }
+      return data.items;
+    } catch (err) {
+      return [];
+    }
+  };
+
+  const saveTargetUrlRecord = async (url) => {
+    try {
+      const response = await fetch("/api/targets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ url })
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || data?.ok === false) {
+        return {
+          item: null,
+          error: getApiErrorMessage(response, data, "Hedef URL kaydedilemedi")
+        };
+      }
+      if (!data?.item) {
+        return {
+          item: null,
+          error: "Sunucudan geçerli hedef URL kaydı alınamadı."
+        };
+      }
+      return {
+        item: data.item,
+        error: null
+      };
+    } catch (err) {
+      return {
+        item: null,
+        error: err.message || "Hedef URL kaydedilemedi."
+      };
+    }
+  };
+
   const saveEndpoint = async (payload) => {
     try {
       const response = await fetch("/api/endpoints", {
@@ -236,6 +286,7 @@
   const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
   const defaultParams = "{}";
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
+  const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
 
   const loadLoginProfilesFromStorage = () => {
@@ -260,6 +311,28 @@
   const saveLoginProfilesToStorage = (profiles) => {
     try {
       window.localStorage.setItem(loginProfilesStorageKey, JSON.stringify(profiles || []));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const loadSelectedTargetUrlFromStorage = () => {
+    try {
+      return String(window.localStorage.getItem(selectedTargetUrlStorageKey) || "").trim();
+    } catch (err) {
+      return "";
+    }
+  };
+
+  const saveSelectedTargetUrlToStorage = (url) => {
+    try {
+      const value = String(url || "").trim();
+      if (value) {
+        window.localStorage.setItem(selectedTargetUrlStorageKey, value);
+      } else {
+        window.localStorage.removeItem(selectedTargetUrlStorageKey);
+      }
       return true;
     } catch (err) {
       return false;
@@ -389,7 +462,6 @@
     const body = document.querySelector("#endpoint-body");
     const headers = document.querySelector("#endpoint-headers");
     const params = document.querySelector("#endpoint-params");
-    const targetInput = document.querySelector("#target-url-input");
     if (!title || !path || !method || !body || !headers) return;
     title.textContent = item.title;
     path.textContent = `${item.method} ${item.path}`;
@@ -401,9 +473,6 @@
     }
     if (editors?.headers) editors.headers.render();
     if (editors?.params && params) editors.params.render();
-    if (targetInput) {
-      targetInput.value = (item.targetUrl || "").trim();
-    }
   };
 
   const parseJsonSafe = (value) => {
@@ -478,26 +547,36 @@
     return { render, syncRows };
   };
 
-  const renderTargets = (endpoints) => {
+  const renderTargets = (targets, selectedValue = "") => {
     const targetInput = document.querySelector("#target-url-input");
     const targetList = document.querySelector("#target-url-list");
     if (!targetInput || !targetList) return;
-    const currentValue = targetInput.value?.trim() || "";
-    const targets = Array.from(
+    const currentValue = String(targetInput.value || "").trim();
+    const preferredValue = String(selectedValue || "").trim();
+    const options = Array.from(
       new Set(
-        endpoints
-          .map((item) => item.targetUrl?.trim())
+        (targets || [])
+          .map((item) => (typeof item === "string" ? item : item?.url))
+          .map((value) => String(value || "").trim())
           .filter((value) => value)
       )
     );
     targetList.innerHTML = "";
-    targets.forEach((url) => {
+    options.forEach((url) => {
       const option = document.createElement("option");
       option.value = url;
       targetList.appendChild(option);
     });
-    if (currentValue && targets.includes(currentValue)) {
+    if (preferredValue) {
+      targetInput.value = preferredValue;
+      return;
+    }
+    if (currentValue) {
       targetInput.value = currentValue;
+      return;
+    }
+    if (options.length) {
+      targetInput.value = options[0];
     }
   };
 
@@ -629,7 +708,7 @@
   const initEndpointUI = async () => {
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;
-    const openBtn = document.querySelector("#open-endpoint-modal");
+    const addTargetBtn = document.querySelector("#open-endpoint-modal");
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const modalTitle = document.querySelector("#endpoint-modal-title");
     const form = document.querySelector("#endpoint-form");
@@ -668,6 +747,16 @@
     const hasHistoryPanel = Boolean(historyList);
 
     let endpoints = await seedIfEmpty();
+    let targetUrls = await loadTargetUrls();
+    let selectedTargetUrl = loadSelectedTargetUrlFromStorage();
+    if (!selectedTargetUrl) {
+      const legacyTargetUrl = endpoints
+        .map((item) => String(item.targetUrl || "").trim())
+        .find((value) => value);
+      if (legacyTargetUrl) {
+        selectedTargetUrl = legacyTargetUrl;
+      }
+    }
     let selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
     let editingEndpointId = null;
     let draggingEndpointId = null;
@@ -791,6 +880,22 @@
       return saved;
     };
 
+    const getActiveTargetUrl = () => String(targetInput?.value || "").trim();
+
+    const persistSelectedTargetUrl = (value) => {
+      selectedTargetUrl = String(value || "").trim();
+      saveSelectedTargetUrlToStorage(selectedTargetUrl);
+      return selectedTargetUrl;
+    };
+
+    const refreshTargetOptions = (preferred = "") => {
+      renderTargets(targetUrls, preferred || selectedTargetUrl || "");
+      const current = getActiveTargetUrl();
+      if (current) {
+        persistSelectedTargetUrl(current);
+      }
+    };
+
     const setModalFormStatus = (message = "", kind = "") => {
       if (!modalFormStatus) return;
       modalFormStatus.textContent = message;
@@ -812,21 +917,16 @@
 
       if (!form) return;
       const titleField = form.elements.namedItem("title");
-      const targetField = form.elements.namedItem("targetUrl");
       const methodField = form.elements.namedItem("method");
       const pathField = form.elements.namedItem("path");
       const descriptionField = form.elements.namedItem("description");
 
       if (!isEdit) {
         form.reset();
-        if (targetField && targetInput?.value) {
-          targetField.value = targetInput.value;
-        }
         return;
       }
 
       if (titleField) titleField.value = item.title || "";
-      if (targetField) targetField.value = item.targetUrl || "";
       if (methodField) methodField.value = (item.method || "GET").toUpperCase();
       if (pathField) pathField.value = item.path || "/";
       if (descriptionField) descriptionField.value = item.description || "";
@@ -836,7 +936,7 @@
       if (!Number.isInteger(Number(endpointId))) return;
       selected = Number(endpointId);
       renderTable(endpoints, selected);
-      renderTargets(endpoints);
+      refreshTargetOptions();
       const current = endpoints.find((e) => Number(e.id) === selected);
       if (!current) return;
       renderDetails(current, { headers: headerEditor, params: paramEditor });
@@ -848,7 +948,7 @@
     };
 
     renderTable(endpoints, selected);
-    renderTargets(endpoints);
+    refreshTargetOptions(selectedTargetUrl || (targetUrls[0]?.url || ""));
     if (selected !== null) {
       const current = endpoints.find((e) => Number(e.id) === selected);
       if (current) {
@@ -878,11 +978,28 @@
       setModalMode("create");
     };
 
-    openBtn?.addEventListener("click", (event) => {
+    addTargetBtn?.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      setModalMode("create");
-      openModal();
+      const initialValue = getActiveTargetUrl() || selectedTargetUrl || "https://";
+      const draft = window.prompt("Kaydedilecek Hedef URL", initialValue);
+      if (draft === null) return;
+      const nextUrl = String(draft || "").trim();
+      if (!nextUrl) {
+        if (statusText) statusText.textContent = "Hedef URL boş olamaz.";
+        return;
+      }
+      if (statusText) statusText.textContent = "Hedef URL kaydediliyor...";
+      const { item, error } = await saveTargetUrlRecord(nextUrl);
+      if (!item) {
+        if (statusText) statusText.textContent = error || "Hedef URL kaydedilemedi.";
+        return;
+      }
+      targetUrls = await loadTargetUrls();
+      const savedUrl = String(item.url || "").trim();
+      persistSelectedTargetUrl(savedUrl);
+      refreshTargetOptions(savedUrl);
+      if (statusText) statusText.textContent = "Hedef URL kaydedildi.";
     });
     closeBtn?.addEventListener("click", (event) => {
       event.preventDefault();
@@ -965,7 +1082,7 @@
 
       suppressEndpointClickUntil = Date.now() + 250;
       renderTable(endpoints, selected);
-      renderTargets(endpoints);
+      refreshTargetOptions();
 
       const orderedIds = endpoints
         .map((item) => Number(item.id))
@@ -978,7 +1095,7 @@
           endpoints = refreshed;
         }
         renderTable(endpoints, selected);
-        renderTargets(endpoints);
+        refreshTargetOptions();
         return;
       }
 
@@ -986,7 +1103,7 @@
         endpoints = normalizeEndpoints(items);
       }
       renderTable(endpoints, selected);
-      renderTargets(endpoints);
+      refreshTargetOptions();
       if (statusText) statusText.textContent = "Endpoint sırası güncellendi.";
     };
 
@@ -1071,23 +1188,24 @@
       if (submitBtn) submitBtn.disabled = true;
       try {
         const data = new FormData(form);
-        const normalized = normalizeEndpointAddress({
-          targetUrl: data.get("targetUrl")?.toString() || "",
-          path: data.get("path")?.toString() || ""
-        });
-        if (!normalized.targetUrl) {
-          const msg = "Hedef URL zorunlu.";
+        const rawPath = data.get("path")?.toString().trim() || "";
+        if (!rawPath) {
+          const msg = "Endpoint URL zorunlu.";
           if (statusText) statusText.textContent = msg;
           setModalFormStatus(msg, "error");
           return;
         }
+        const normalized = normalizeEndpointAddress({
+          targetUrl: "",
+          path: rawPath
+        });
 
         const item = {
           title: data.get("title")?.toString().trim() || "Endpoint",
           method: data.get("method")?.toString().toUpperCase() || "GET",
           path: normalized.path,
           description: data.get("description")?.toString().trim() || "",
-          targetUrl: normalized.targetUrl,
+          targetUrl: null,
           body: defaultBody,
           headers: defaultHeaders,
           params: defaultParams
@@ -1120,7 +1238,7 @@
           }
           selected = Number(editingEndpointId);
           renderTable(endpoints, selected);
-          renderTargets(endpoints);
+          refreshTargetOptions();
           await renderSelected(selected);
           if (statusText) statusText.textContent = "Endpoint güncellendi.";
           setModalFormStatus("Kayıt başarılı.", "success");
@@ -1151,7 +1269,7 @@
           selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
         }
         renderTable(endpoints, selected);
-        renderTargets(endpoints);
+        refreshTargetOptions();
         const current = endpoints.find((e) => Number(e.id) === Number(selected));
         if (current) {
           renderDetails(current, { headers: headerEditor, params: paramEditor });
@@ -1188,8 +1306,7 @@
           updateEndpoint(current.id, {
             body: current.body,
             headers: current.headers,
-            params: current.params,
-            targetUrl: current.targetUrl
+            params: current.params
           });
         }, 500);
       });
@@ -1211,24 +1328,16 @@
       }
     });
 
-    const saveTargetUrl = () => {
-      const current = endpoints.find((e) => Number(e.id) === Number(selected));
-      if (!current || !Number.isInteger(Number(current.id))) return;
-      current.targetUrl = (targetInput?.value || "").trim();
-      renderTargets(endpoints);
-      updateEndpoint(current.id, {
-        body: current.body,
-        headers: current.headers,
-        params: current.params,
-        targetUrl: current.targetUrl
-      });
-    };
     let targetTimer;
     targetInput?.addEventListener("input", () => {
       clearTimeout(targetTimer);
-      targetTimer = setTimeout(saveTargetUrl, 350);
+      targetTimer = setTimeout(() => {
+        persistSelectedTargetUrl(getActiveTargetUrl());
+      }, 250);
     });
-    targetInput?.addEventListener("change", saveTargetUrl);
+    targetInput?.addEventListener("change", () => {
+      persistSelectedTargetUrl(getActiveTargetUrl());
+    });
 
     const getDefaultResponseState = () => ({
       statusText: "",
@@ -1369,7 +1478,7 @@
       const bodySource = preferEditorValues ? bodyTextarea?.value || endpoint.body || "" : endpoint.body || "";
 
       const normalized = normalizeEndpointAddress({
-        targetUrl: targetUrlOverride || endpoint.targetUrl || "",
+        targetUrl: targetUrlOverride || "",
         path: endpoint.path || "/"
       });
       if (!normalized.targetUrl) {
@@ -1523,6 +1632,10 @@
           throw new Error("Endpoint bulunamadı.");
         }
         currentEndpointId = Number(current.id);
+        const activeTargetUrl = getActiveTargetUrl();
+        if (!activeTargetUrl) {
+          throw new Error("Hedef URL seçilmeli.");
+        }
 
         let templateVariables = {};
         const currentSearchText = getEndpointSearchText(current);
@@ -1555,10 +1668,7 @@
           }
           const getSessionPayload = buildPayloadForEndpoint(getSessionEndpoint, {
             preferEditorValues: Number(getSessionEndpoint.id) === Number(selected),
-            targetUrlOverride:
-              Number(getSessionEndpoint.id) === Number(selected)
-                ? targetInput?.value || getSessionEndpoint.targetUrl || ""
-                : getSessionEndpoint.targetUrl || ""
+            targetUrlOverride: activeTargetUrl
           });
           const getSessionResult = await executePayload(getSessionPayload);
           const getSessionData = ensureSuccessfulStep("GetSession", getSessionResult);
@@ -1587,10 +1697,7 @@
           const getParameterPayload = buildPayloadForEndpoint(getParameterEndpoint, {
             templateVariables,
             preferEditorValues: Number(getParameterEndpoint.id) === Number(selected),
-            targetUrlOverride:
-              Number(getParameterEndpoint.id) === Number(selected)
-                ? targetInput?.value || getParameterEndpoint.targetUrl || ""
-                : getParameterEndpoint.targetUrl || ""
+            targetUrlOverride: activeTargetUrl
           });
           const getParameterResult = await executePayload(getParameterPayload);
           ensureSuccessfulStep("GetParameter", getParameterResult);
@@ -1613,7 +1720,7 @@
         const payload = buildPayloadForEndpoint(current, {
           templateVariables,
           preferEditorValues: true,
-          targetUrlOverride: targetInput?.value || current.targetUrl || ""
+          targetUrlOverride: activeTargetUrl
         });
         const execution = await executePayload(payload);
         if (!execution.ok || !execution.data) {

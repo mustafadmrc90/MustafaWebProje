@@ -90,6 +90,15 @@ async function initDb() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_targets (
+      id SERIAL PRIMARY KEY,
+      url TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   // Backward-compatible schema upgrades for existing databases.
   await pool.query(`
     ALTER TABLE api_endpoints
@@ -114,6 +123,16 @@ async function initDb() {
     FROM ranked
     WHERE target.id = ranked.id
       AND (target.sort_order IS NULL OR target.sort_order = 0)
+  `);
+
+  // Migrate legacy endpoint target_url values into shared target list.
+  await pool.query(`
+    INSERT INTO api_targets (url)
+    SELECT DISTINCT trim(target_url)
+    FROM api_endpoints
+    WHERE target_url IS NOT NULL
+      AND trim(target_url) <> ''
+    ON CONFLICT (url) DO NOTHING
   `);
 
   await pool.query(`
@@ -194,6 +213,24 @@ function requireAuth(req, res, next) {
     return res.redirect("/login");
   }
   next();
+}
+
+function normalizeTargetUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (err) {
+    return "";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "";
+  }
+  parsed.hash = "";
+  const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname.replace(/\/+$/, "") : "";
+  const search = parsed.search || "";
+  return `${parsed.origin}${pathname}${search}`;
 }
 
 app.get("/", (req, res) => {
@@ -455,6 +492,41 @@ app.get("/api/endpoints", requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: "Endpoint listesi alınamadı." });
+  }
+});
+
+app.get("/api/targets", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, url, created_at, updated_at
+       FROM api_targets
+       ORDER BY updated_at DESC, id DESC`
+    );
+    res.json({ ok: true, items: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Hedef URL listesi alınamadı." });
+  }
+});
+
+app.post("/api/targets", requireAuth, async (req, res) => {
+  const normalized = normalizeTargetUrl(req.body?.url);
+  if (!normalized) {
+    return res.status(400).json({ ok: false, error: "Geçerli bir Hedef URL girin." });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO api_targets (url)
+       VALUES ($1)
+       ON CONFLICT (url)
+       DO UPDATE SET updated_at = now()
+       RETURNING id, url, created_at, updated_at`,
+      [normalized]
+    );
+    res.json({ ok: true, item: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: "Hedef URL kaydedilemedi." });
   }
 });
 
