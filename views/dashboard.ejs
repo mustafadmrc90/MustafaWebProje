@@ -55,6 +55,46 @@
                   <span class="muted" id="request-status"></span>
                 </div>
 
+                <div class="login-profile-panel">
+                  <div class="login-profile-row">
+                    <select id="login-profile-select">
+                      <option value="">Manuel seçim</option>
+                    </select>
+                    <button type="button" class="ghost small" id="save-login-profile">Kaydet</button>
+                    <button type="button" class="ghost small" id="delete-login-profile">Sil</button>
+                  </div>
+                  <div class="login-profile-fields">
+                    <label class="login-profile-field">
+                      <span>Partner Code</span>
+                      <input
+                        type="text"
+                        id="login-partner-code"
+                        placeholder="partner-code"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label class="login-profile-field">
+                      <span>Branch Id</span>
+                      <input
+                        type="text"
+                        id="login-branch-id"
+                        placeholder="branch-id"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label class="login-profile-field">
+                      <span>Profil Adı</span>
+                      <input
+                        type="text"
+                        id="login-profile-name"
+                        placeholder="Opsiyonel"
+                        autocomplete="off"
+                      />
+                    </label>
+                  </div>
+                  <span class="login-profile-status" id="login-profile-status"></span>
+                </div>
+
                 <div class="request-tabs">
                   <button class="tab active" data-tab="body">Body</button>
                   <button class="tab" data-tab="headers">Headers</button>

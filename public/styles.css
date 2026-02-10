@@ -426,7 +426,7 @@ body {
 
 .request-editor-column {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   gap: 10px;
   min-height: var(--request-panels-height);
 }
@@ -465,6 +465,71 @@ body {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.login-profile-panel {
+  border: 1px solid #d6dde7;
+  border-radius: 12px;
+  background: #f7f9fc;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.login-profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.login-profile-row select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #d6dde7;
+  padding: 7px 10px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.login-profile-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.login-profile-field {
+  display: grid;
+  gap: 4px;
+}
+
+.login-profile-field span {
+  font-size: 10px;
+  color: #6b7785;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.login-profile-field input {
+  border-radius: 10px;
+  border: 1px solid #d6dde7;
+  padding: 7px 10px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.login-profile-status {
+  min-height: 14px;
+  font-size: 11px;
+  color: #6b7785;
+}
+
+.login-profile-status.error {
+  color: #a24a4a;
+}
+
+.login-profile-status.success {
+  color: #246f45;
 }
 
 .response-panel {
@@ -921,6 +986,29 @@ body {
 
 .api-panel .request-actions {
   gap: 8px;
+}
+
+.api-panel .login-profile-panel {
+  border-radius: 10px;
+  padding: 8px;
+  gap: 6px;
+}
+
+.api-panel .login-profile-row,
+.api-panel .login-profile-fields {
+  gap: 6px;
+}
+
+.api-panel .login-profile-row select,
+.api-panel .login-profile-field input {
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.api-panel .login-profile-field span,
+.api-panel .login-profile-status {
+  font-size: 10px;
 }
 
 .api-panel .endpoint-list-card,
@@ -1753,6 +1841,14 @@ button.ghost {
   .request-editor-column,
   .request-response-column {
     min-height: 0;
+  }
+
+  .login-profile-row {
+    grid-template-columns: 1fr;
+  }
+
+  .login-profile-fields {
+    grid-template-columns: 1fr;
   }
 
   .api-sidebar {

@@ -235,6 +235,35 @@
   const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
   const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
   const defaultParams = "{}";
+  const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
+
+  const loadLoginProfilesFromStorage = () => {
+    try {
+      const raw = window.localStorage.getItem(loginProfilesStorageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((item) => ({
+          id: String(item?.id || "").trim(),
+          name: String(item?.name || "").trim(),
+          partnerCode: String(item?.partnerCode || "").trim(),
+          branchId: String(item?.branchId || "").trim()
+        }))
+        .filter((item) => item.id);
+    } catch (err) {
+      return [];
+    }
+  };
+
+  const saveLoginProfilesToStorage = (profiles) => {
+    try {
+      window.localStorage.setItem(loginProfilesStorageKey, JSON.stringify(profiles || []));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
 
   const normalizeEndpoints = (items) =>
     items.map((item) => {
@@ -587,6 +616,13 @@
     const responseUrl = document.querySelector("#response-url");
     const responseTime = document.querySelector("#response-time");
     const targetInput = document.querySelector("#target-url-input");
+    const loginProfileSelect = document.querySelector("#login-profile-select");
+    const loginPartnerCodeInput = document.querySelector("#login-partner-code");
+    const loginBranchIdInput = document.querySelector("#login-branch-id");
+    const loginProfileNameInput = document.querySelector("#login-profile-name");
+    const saveLoginProfileBtn = document.querySelector("#save-login-profile");
+    const deleteLoginProfileBtn = document.querySelector("#delete-login-profile");
+    const loginProfileStatus = document.querySelector("#login-profile-status");
     const historyList = document.querySelector("#request-history");
     const clearHistoryBtn = document.querySelector("#clear-history");
     const headersRows = document.querySelector("#headers-rows");
@@ -610,6 +646,8 @@
     let editingEndpointId = null;
     let draggingEndpointId = null;
     let suppressEndpointClickUntil = 0;
+    let loginProfiles = loadLoginProfilesFromStorage();
+    let activeLoginProfileId = "";
 
     const headerEditor = initRowEditor({
       rowsContainer: headersRows,
@@ -643,6 +681,67 @@
       const [moved] = endpoints.splice(fromIndex, 1);
       endpoints.splice(toIndex, 0, moved);
       return true;
+    };
+
+    const setLoginProfileStatus = (message = "", kind = "") => {
+      if (!loginProfileStatus) return;
+      loginProfileStatus.textContent = message;
+      loginProfileStatus.className = `login-profile-status${kind ? ` ${kind}` : ""}`;
+    };
+
+    const getActiveLoginProfile = () =>
+      loginProfiles.find((item) => String(item.id) === String(activeLoginProfileId));
+
+    const fillLoginProfileInputs = (profile) => {
+      if (loginPartnerCodeInput) {
+        loginPartnerCodeInput.value = profile?.partnerCode || "";
+      }
+      if (loginBranchIdInput) {
+        loginBranchIdInput.value = profile?.branchId || "";
+      }
+      if (loginProfileNameInput) {
+        loginProfileNameInput.value = profile?.name || "";
+      }
+    };
+
+    const renderLoginProfileOptions = () => {
+      if (!loginProfileSelect) return;
+      const normalizedActiveId = String(activeLoginProfileId || "");
+      loginProfileSelect.innerHTML = "";
+
+      const manualOption = document.createElement("option");
+      manualOption.value = "";
+      manualOption.textContent = "Manuel seçim";
+      loginProfileSelect.appendChild(manualOption);
+
+      loginProfiles.forEach((profile) => {
+        const option = document.createElement("option");
+        option.value = profile.id;
+        const generatedName =
+          profile.name || `${profile.partnerCode || "-"} / ${profile.branchId || "-"}`;
+        option.textContent = generatedName;
+        loginProfileSelect.appendChild(option);
+      });
+
+      if (normalizedActiveId && loginProfiles.some((item) => item.id === normalizedActiveId)) {
+        loginProfileSelect.value = normalizedActiveId;
+      } else {
+        activeLoginProfileId = "";
+        loginProfileSelect.value = "";
+      }
+    };
+
+    const getSelectedUserLoginVariables = () => ({
+      partnerCode: String(loginPartnerCodeInput?.value || "").trim(),
+      branchId: String(loginBranchIdInput?.value || "").trim()
+    });
+
+    const saveLoginProfiles = () => {
+      const saved = saveLoginProfilesToStorage(loginProfiles);
+      if (!saved) {
+        setLoginProfileStatus("Profil kaydedilemedi.", "error");
+      }
+      return saved;
     };
 
     const setModalFormStatus = (message = "", kind = "") => {
@@ -712,6 +811,13 @@
       renderHistory(await loadRequests(selected));
       renderHistoryDetail(null);
     }
+
+    if (loginProfiles.length) {
+      activeLoginProfileId = loginProfiles[0].id;
+      fillLoginProfileInputs(loginProfiles[0]);
+    }
+    renderLoginProfileOptions();
+    setLoginProfileStatus("");
 
     const openModal = () => {
       modal.classList.add("active");
@@ -847,6 +953,73 @@
       table.addEventListener("drop", onEndpointDrop);
       table.addEventListener("dragend", onEndpointDragEnd);
     });
+
+    loginProfileSelect?.addEventListener("change", () => {
+      activeLoginProfileId = String(loginProfileSelect.value || "");
+      const profile = getActiveLoginProfile();
+      if (profile) {
+        fillLoginProfileInputs(profile);
+      }
+      setLoginProfileStatus("");
+    });
+
+    saveLoginProfileBtn?.addEventListener("click", () => {
+      const partnerCode = String(loginPartnerCodeInput?.value || "").trim();
+      const branchId = String(loginBranchIdInput?.value || "").trim();
+      const profileName = String(loginProfileNameInput?.value || "").trim();
+
+      if (!partnerCode || !branchId) {
+        setLoginProfileStatus("partner-code ve branch-id zorunlu.", "error");
+        return;
+      }
+
+      if (activeLoginProfileId) {
+        const index = loginProfiles.findIndex((item) => item.id === activeLoginProfileId);
+        if (index >= 0) {
+          loginProfiles[index] = {
+            ...loginProfiles[index],
+            name: profileName || `${partnerCode} / ${branchId}`,
+            partnerCode,
+            branchId
+          };
+        } else {
+          activeLoginProfileId = "";
+        }
+      }
+
+      if (!activeLoginProfileId) {
+        activeLoginProfileId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        loginProfiles.push({
+          id: activeLoginProfileId,
+          name: profileName || `${partnerCode} / ${branchId}`,
+          partnerCode,
+          branchId
+        });
+      }
+
+      if (!saveLoginProfiles()) return;
+      renderLoginProfileOptions();
+      setLoginProfileStatus("Profil kaydedildi.", "success");
+    });
+
+    deleteLoginProfileBtn?.addEventListener("click", () => {
+      if (!activeLoginProfileId) {
+        setLoginProfileStatus("Silinecek kayıt seçilmedi.", "error");
+        return;
+      }
+      loginProfiles = loginProfiles.filter((item) => item.id !== activeLoginProfileId);
+      activeLoginProfileId = "";
+      if (!saveLoginProfiles()) return;
+      renderLoginProfileOptions();
+      fillLoginProfileInputs(null);
+      setLoginProfileStatus("Profil silindi.", "success");
+    });
+
+    [loginPartnerCodeInput, loginBranchIdInput, loginProfileNameInput]
+      .filter(Boolean)
+      .forEach((input) => {
+        input.addEventListener("input", () => setLoginProfileStatus(""));
+      });
 
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1046,6 +1219,12 @@
         }
         if (normalizedToken === "deviceid" && variables.deviceId !== undefined) {
           return String(variables.deviceId);
+        }
+        if (normalizedToken === "partnercode" && variables.partnerCode !== undefined) {
+          return String(variables.partnerCode);
+        }
+        if (normalizedToken === "branchid" && variables.branchId !== undefined) {
+          return String(variables.branchId);
         }
         return match;
       });
@@ -1256,6 +1435,15 @@
         const isUserLogin = getEndpointSearchText(current).includes("userlogin");
 
         if (isUserLogin) {
+          const selectedUserLoginVariables = getSelectedUserLoginVariables();
+          if (!selectedUserLoginVariables.partnerCode || !selectedUserLoginVariables.branchId) {
+            throw new Error("UserLogin için partner-code ve branch-id seçilmeli.");
+          }
+          templateVariables = {
+            ...templateVariables,
+            ...selectedUserLoginVariables
+          };
+
           setResponseState({
             statusText: "GetSession çalıştırılıyor...",
             badgeText: "Ön Hazırlık",
@@ -1280,7 +1468,10 @@
           if (!extracted.sessionId || !extracted.deviceId) {
             throw new Error("GetSession yanıtında session-id ve device-id bulunamadı.");
           }
-          templateVariables = extracted;
+          templateVariables = {
+            ...templateVariables,
+            ...extracted
+          };
 
           setResponseState({
             statusText: "GetParameter çalıştırılıyor...",
