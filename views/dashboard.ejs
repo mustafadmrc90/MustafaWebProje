@@ -23,18 +23,6 @@
             </div>
 
             <div class="endpoint-meta endpoint-meta-grid">
-              <div class="endpoint-target-group">
-                <label class="label" for="target-url-input">Hedef URL</label>
-                <input
-                  id="target-url-input"
-                  list="target-url-list"
-                  type="url"
-                  inputmode="url"
-                  placeholder="https://api.example.com"
-                />
-                <datalist id="target-url-list"></datalist>
-              </div>
-
               <div class="login-profile-panel endpoint-login-profile-panel">
                 <div class="login-profile-fields">
                   <label class="login-profile-field">
@@ -74,6 +62,18 @@
                 </div>
                 <span class="login-profile-status" id="login-profile-status"></span>
               </div>
+
+              <div class="endpoint-target-group">
+                <label class="label" for="target-url-input">Hedef URL</label>
+                <input
+                  id="target-url-input"
+                  list="target-url-list"
+                  type="url"
+                  inputmode="url"
+                  placeholder="https://api.example.com"
+                />
+                <datalist id="target-url-list"></datalist>
+              </div>
             </div>
 
             <div class="endpoint-actions">
@@ -100,7 +100,6 @@
                 <div class="request-tabs">
                   <button class="tab active" data-tab="body">Body</button>
                   <button class="tab" data-tab="headers">Headers</button>
-                  <button class="tab" data-tab="params">Params</button>
                 </div>
 
                 <div class="request-body tab-panel active" data-panel="body">
@@ -151,28 +150,6 @@
                   </div>
                 </div>
 
-                <div class="request-body tab-panel" data-panel="params">
-                  <label class="label">Params</label>
-                  <div class="kv-table">
-                    <div class="kv-head">
-                      <span>Etkin</span>
-                      <span>Key</span>
-                      <span>Value</span>
-                      <span></span>
-                    </div>
-                    <div class="kv-rows" id="params-rows"></div>
-                    <div class="kv-toolbar">
-                      <button type="button" class="ghost small" id="add-param-row">Satır Ekle</button>
-                      <button type="button" class="ghost small" id="copy-params-json">JSON Kopyala</button>
-                    </div>
-                    <textarea
-                      id="endpoint-params"
-                      class="code-input hidden-field"
-                      rows="6"
-                      placeholder='{"page":1,"size":10}'
-                    ></textarea>
-                  </div>
-                </div>
               </div>
 
               <div class="request-column request-response-column">

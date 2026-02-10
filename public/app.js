@@ -236,6 +236,7 @@
   const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
   const defaultParams = "{}";
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
+  const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
 
   const loadLoginProfilesFromStorage = () => {
     try {
@@ -259,6 +260,29 @@
   const saveLoginProfilesToStorage = (profiles) => {
     try {
       window.localStorage.setItem(loginProfilesStorageKey, JSON.stringify(profiles || []));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const loadEndpointLastResponsesFromStorage = () => {
+    try {
+      const raw = window.localStorage.getItem(endpointLastResponsesStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      return parsed;
+    } catch (err) {
+      return {};
+    }
+  };
+
+  const saveEndpointLastResponsesToStorage = (payload) => {
+    try {
+      window.localStorage.setItem(endpointLastResponsesStorageKey, JSON.stringify(payload || {}));
       return true;
     } catch (err) {
       return false;
@@ -366,15 +390,17 @@
     const headers = document.querySelector("#endpoint-headers");
     const params = document.querySelector("#endpoint-params");
     const targetInput = document.querySelector("#target-url-input");
-    if (!title || !path || !method || !body || !headers || !params) return;
+    if (!title || !path || !method || !body || !headers) return;
     title.textContent = item.title;
     path.textContent = `${item.method} ${item.path}`;
     method.textContent = item.method;
     body.value = item.body || defaultBody;
     headers.value = item.headers || defaultHeaders;
-    params.value = item.params || defaultParams;
+    if (params) {
+      params.value = item.params || defaultParams;
+    }
     if (editors?.headers) editors.headers.render();
-    if (editors?.params) editors.params.render();
+    if (editors?.params && params) editors.params.render();
     if (targetInput) {
       targetInput.value = (item.targetUrl || "").trim();
     }
@@ -648,6 +674,7 @@
     let suppressEndpointClickUntil = 0;
     let loginProfiles = loadLoginProfilesFromStorage();
     let activeLoginProfileId = "";
+    let endpointLastResponses = loadEndpointLastResponsesFromStorage();
 
     const headerEditor = initRowEditor({
       rowsContainer: headersRows,
@@ -813,6 +840,7 @@
       const current = endpoints.find((e) => Number(e.id) === selected);
       if (!current) return;
       renderDetails(current, { headers: headerEditor, params: paramEditor });
+      showStoredResponseForEndpoint(selected);
       if (hasHistoryPanel) {
         renderHistory(await loadRequests(selected));
         renderHistoryDetail(null);
@@ -1127,6 +1155,7 @@
         const current = endpoints.find((e) => Number(e.id) === Number(selected));
         if (current) {
           renderDetails(current, { headers: headerEditor, params: paramEditor });
+          showStoredResponseForEndpoint(selected);
         }
         if (hasHistoryPanel) {
           renderHistory(await loadRequests(selected));
@@ -1201,16 +1230,59 @@
     });
     targetInput?.addEventListener("change", saveTargetUrl);
 
-    const setResponseState = (state) => {
-      if (statusText) statusText.textContent = state.statusText || "";
-      if (responseStatus) {
-        responseStatus.textContent = state.badgeText || "Bekleniyor";
-        responseStatus.className = `pill ${state.badgeClass || "muted"}`.trim();
-      }
-      if (responseBody) responseBody.textContent = state.body || "{}";
-      if (responseUrl) responseUrl.textContent = state.url || "";
-      if (responseTime) responseTime.textContent = state.time || "";
+    const getDefaultResponseState = () => ({
+      statusText: "",
+      badgeText: "Bekleniyor",
+      badgeClass: "muted",
+      body: "{}",
+      url: "",
+      time: ""
+    });
+
+    const normalizeResponseState = (state = {}) => {
+      const defaults = getDefaultResponseState();
+      return {
+        statusText: String(state?.statusText ?? defaults.statusText),
+        badgeText: String(state?.badgeText ?? defaults.badgeText),
+        badgeClass: String(state?.badgeClass ?? defaults.badgeClass),
+        body: String(state?.body ?? defaults.body),
+        url: String(state?.url ?? defaults.url),
+        time: String(state?.time ?? defaults.time)
+      };
     };
+
+    const setResponseState = (state = {}) => {
+      const nextState = normalizeResponseState(state);
+      if (statusText) statusText.textContent = nextState.statusText;
+      if (responseStatus) {
+        responseStatus.textContent = nextState.badgeText;
+        responseStatus.className = `pill ${nextState.badgeClass || "muted"}`.trim();
+      }
+      if (responseBody) responseBody.textContent = nextState.body;
+      if (responseUrl) responseUrl.textContent = nextState.url;
+      if (responseTime) responseTime.textContent = nextState.time;
+    };
+
+    const saveLastResponseForEndpoint = (endpointId, state) => {
+      if (!Number.isInteger(Number(endpointId))) return;
+      endpointLastResponses[String(Number(endpointId))] = normalizeResponseState(state);
+      saveEndpointLastResponsesToStorage(endpointLastResponses);
+    };
+
+    const showStoredResponseForEndpoint = (endpointId) => {
+      if (!Number.isInteger(Number(endpointId))) {
+        setResponseState(getDefaultResponseState());
+        return;
+      }
+      const saved = endpointLastResponses[String(Number(endpointId))];
+      if (!saved) {
+        setResponseState(getDefaultResponseState());
+        return;
+      }
+      setResponseState(saved);
+    };
+
+    showStoredResponseForEndpoint(selected);
 
     const parseJsonField = (value, label) => {
       if (!value || !value.trim()) return {};
@@ -1284,13 +1356,16 @@
       } = options;
       const endpointName = endpoint.title || endpoint.path || "Endpoint";
       const method = (endpoint.method || "GET").toUpperCase();
+      const paramsField = document.querySelector("#endpoint-params");
 
       const headersSource = preferEditorValues
         ? document.querySelector("#endpoint-headers")?.value || endpoint.headers || ""
         : endpoint.headers || "";
-      const paramsSource = preferEditorValues
-        ? document.querySelector("#endpoint-params")?.value || endpoint.params || ""
-        : endpoint.params || "";
+      const paramsSource = paramsField
+        ? preferEditorValues
+          ? paramsField.value || endpoint.params || ""
+          : endpoint.params || ""
+        : defaultParams;
       const bodySource = preferEditorValues ? bodyTextarea?.value || endpoint.body || "" : endpoint.body || "";
 
       const normalized = normalizeEndpointAddress({
@@ -1434,6 +1509,7 @@
     };
 
     sendBtn?.addEventListener("click", async () => {
+      let currentEndpointId = Number(selected);
       setResponseState({
         statusText: "İstek gönderiliyor...",
         badgeText: "İşleniyor",
@@ -1446,6 +1522,7 @@
         if (!current || !Number.isInteger(Number(current.id))) {
           throw new Error("Endpoint bulunamadı.");
         }
+        currentEndpointId = Number(current.id);
 
         let templateVariables = {};
         const currentSearchText = getEndpointSearchText(current);
@@ -1540,12 +1617,14 @@
         });
         const execution = await executePayload(payload);
         if (!execution.ok || !execution.data) {
-          setResponseState({
+          const errorState = {
             statusText: execution.error || "İstek başarısız.",
             badgeText: "Hata",
             badgeClass: "muted",
             body: execution.details || "{}"
-          });
+          };
+          setResponseState(errorState);
+          saveLastResponseForEndpoint(currentEndpointId, errorState);
           return;
         }
 
@@ -1559,24 +1638,28 @@
             ? `405 Method Not Allowed (Allow: ${allowHeader})`
             : "405 Method Not Allowed (method/path kontrol et)";
         }
-        setResponseState({
+        const successState = {
           statusText: statusLine,
           badgeText: `${data.status} ${data.statusText}`,
           badgeClass,
           body: formatted || "{}",
           url: data.url ? `URL: ${data.url}` : "",
           time: data.durationMs ? `Süre: ${data.durationMs} ms` : ""
-        });
+        };
+        setResponseState(successState);
+        saveLastResponseForEndpoint(currentEndpointId, successState);
         if (hasHistoryPanel) {
           loadRequests(Number(current.id)).then(renderHistory);
         }
       } catch (err) {
-        setResponseState({
+        const errorState = {
           statusText: err.message || "İstek hatası.",
           badgeText: "Hata",
           badgeClass: "muted",
           body: "{}"
-        });
+        };
+        setResponseState(errorState);
+        saveLastResponseForEndpoint(currentEndpointId, errorState);
       }
     });
 
