@@ -97,11 +97,22 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) return null;
       const data = await parseJsonResponse(response);
-      return data?.item || null;
+      if (!response.ok) {
+        return {
+          item: null,
+          error: data?.error || `Kaydetme hatası (${response.status})`
+        };
+      }
+      return {
+        item: data?.item || null,
+        error: null
+      };
     } catch (err) {
-      return null;
+      return {
+        item: null,
+        error: err.message || "İstek gönderilemedi."
+      };
     }
   };
 
@@ -204,7 +215,7 @@
       headers: defaultHeaders,
       params: defaultParams
     };
-    const created = await saveEndpoint(seeded);
+    const { item: created } = await saveEndpoint(seeded);
     return created ? normalizeEndpoints([created]) : [];
   };
 
@@ -653,12 +664,6 @@
         targetUrl: data.get("targetUrl")?.toString() || "",
         path: data.get("path")?.toString() || ""
       });
-      if (!normalized.targetUrl) {
-        if (statusText) {
-          statusText.textContent = "Hedef URL zorunlu. (veya Endpoint URL alanına tam URL yazın)";
-        }
-        return;
-      }
       const item = {
         title: data.get("title")?.toString().trim() || "Endpoint",
         method: data.get("method")?.toString().toUpperCase() || "GET",
@@ -697,9 +702,9 @@
         return;
       }
 
-      const created = await saveEndpoint(item);
+      const { item: created, error: saveError } = await saveEndpoint(item);
       if (!created) {
-        if (statusText) statusText.textContent = "Endpoint kaydedilemedi.";
+        if (statusText) statusText.textContent = saveError || "Endpoint kaydedilemedi.";
         return;
       }
       endpoints = normalizeEndpoints(await loadEndpoints());
