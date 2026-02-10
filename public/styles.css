@@ -260,7 +260,7 @@ body {
 
 .endpoint-meta.endpoint-meta-grid {
   grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.15fr);
-  gap: 12px;
+  gap: 8px;
   align-items: start;
 }
 
@@ -487,9 +487,9 @@ body {
   border: 1px solid #d6dde7;
   border-radius: 12px;
   background: #f7f9fc;
-  padding: 10px;
+  padding: 8px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .login-profile-row {
@@ -511,12 +511,12 @@ body {
 .login-profile-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .login-profile-field {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .login-profile-field span {
@@ -535,9 +535,10 @@ body {
 }
 
 .login-profile-status {
-  min-height: 14px;
+  min-height: 0;
   font-size: 11px;
   color: #6b7785;
+  line-height: 1.2;
 }
 
 .login-profile-status.error {
