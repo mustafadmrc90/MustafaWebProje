@@ -265,7 +265,7 @@
         const row = document.createElement("div");
         const itemId = Number(item.id);
         const selectable = Number.isInteger(itemId);
-        const isActive = selectable && itemId === Number(selectedId);
+        const isActive = selectable && table.id !== "endpoint-table" && itemId === Number(selectedId);
         row.className = `endpoint-row selectable${isActive ? " active" : ""}`;
         if (selectable) {
           row.dataset.endpointId = String(itemId);
@@ -660,10 +660,12 @@
     const closeModal = () => {
       modal.classList.remove("active");
       modal.setAttribute("aria-hidden", "true");
+      setModalMode("create");
     };
 
     openBtn?.addEventListener("click", (event) => {
       event.preventDefault();
+      event.stopPropagation();
       setModalMode("create");
       openModal();
     });
@@ -682,12 +684,16 @@
     }
 
     const onEndpointClick = (event) => {
+      const table = event.currentTarget;
       const editBtn = event.target.closest(".endpoint-edit[data-endpoint-id]");
       if (editBtn) {
         const current = getEndpointById(editBtn.dataset.endpointId);
         if (!current) return;
         setModalMode("edit", current);
         openModal();
+        return;
+      }
+      if (table?.id === "endpoint-table") {
         return;
       }
       const row = event.target.closest(".endpoint-row[data-endpoint-id]");
