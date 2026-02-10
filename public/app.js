@@ -730,7 +730,7 @@
           params: defaultParams
         };
 
-        const isEdit = Number.isInteger(Number(editingEndpointId));
+        const isEdit = Number.isInteger(editingEndpointId);
         if (isEdit) {
           const current = getEndpointById(editingEndpointId);
           if (!current) {
