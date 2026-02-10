@@ -93,20 +93,23 @@
 
               <div class="request-column request-editor-column">
                 <div class="request-actions">
-                  <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
-                  <span class="muted" id="request-status"></span>
-                </div>
-
-                <div class="request-tabs">
-                  <button class="tab active" data-tab="body">Body</button>
-                  <button class="tab" data-tab="headers">Headers</button>
+                  <div class="request-actions-left">
+                    <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
+                    <div class="request-tabs">
+                      <button class="tab active" data-tab="body">Body</button>
+                      <button class="tab" data-tab="headers">Headers</button>
+                    </div>
+                  </div>
+                  <span class="muted request-status" id="request-status"></span>
                 </div>
 
                 <div class="request-body tab-panel active" data-panel="body">
-                  <label class="label">Body (JSON)</label>
                   <div class="fixed-body">
                     <div class="fixed-body-header">
-                      <span class="muted">İstek Body</span>
+                      <div class="body-label-inline">
+                        <span class="label">BODY JSON</span>
+                        <span class="muted">İstek Body</span>
+                      </div>
                       <button class="ghost small" id="copy-body" type="button">Kopyala</button>
                     </div>
                     <textarea

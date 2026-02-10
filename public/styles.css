@@ -446,7 +446,7 @@ body {
 
 .request-editor-column {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto 1fr;
   gap: 10px;
   min-height: var(--request-panels-height);
 }
@@ -485,6 +485,17 @@ body {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.request-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.request-status {
+  margin-left: auto;
 }
 
 .login-profile-panel {
@@ -621,6 +632,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.body-label-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .fixed-body .code-output {
@@ -1007,6 +1025,11 @@ body {
 
 .api-panel .request-actions {
   gap: 8px;
+}
+
+.api-panel .request-actions-left,
+.api-panel .body-label-inline {
+  gap: 6px;
 }
 
 .api-panel .login-profile-panel {
@@ -1874,6 +1897,14 @@ button.ghost {
 
   .login-profile-fields {
     grid-template-columns: 1fr;
+  }
+
+  .request-actions {
+    align-items: flex-start;
+  }
+
+  .request-status {
+    margin-left: 0;
   }
 
   .api-sidebar {
