@@ -22,7 +22,16 @@ body {
   min-height: 100vh;
 }
 
-.auth-page,
+.auth-page {
+  background-image:
+    linear-gradient(120deg, rgba(10, 20, 36, 0.48) 0%, rgba(10, 20, 36, 0.18) 60%),
+    url("/public/obiletwallpaper.png");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
 .dashboard {
   background-image: linear-gradient(120deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 60%);
 }
