@@ -521,6 +521,7 @@
       document.querySelector("#endpoint-table"),
       document.querySelector("#endpoint-table-inline")
     ].filter(Boolean);
+    const hasHistoryPanel = Boolean(historyList);
 
     let endpoints = await seedIfEmpty();
     let selected = Number.isInteger(Number(endpoints[0]?.id)) ? Number(endpoints[0].id) : null;
@@ -582,8 +583,10 @@
       const current = endpoints.find((e) => Number(e.id) === selected);
       if (!current) return;
       renderDetails(current, { headers: headerEditor, params: paramEditor });
-      renderHistory(await loadRequests(selected));
-      renderHistoryDetail(null);
+      if (hasHistoryPanel) {
+        renderHistory(await loadRequests(selected));
+        renderHistoryDetail(null);
+      }
     };
 
     renderTable(endpoints, selected);
@@ -594,8 +597,10 @@
         renderDetails(current, { headers: headerEditor, params: paramEditor });
       }
     }
-    renderHistory(await loadRequests(selected));
-    renderHistoryDetail(null);
+    if (hasHistoryPanel) {
+      renderHistory(await loadRequests(selected));
+      renderHistoryDetail(null);
+    }
 
     const openModal = () => {
       modal.classList.add("active");
@@ -708,8 +713,10 @@
       if (current) {
         renderDetails(current, { headers: headerEditor, params: paramEditor });
       }
-      renderHistory(await loadRequests(selected));
-      renderHistoryDetail(null);
+      if (hasHistoryPanel) {
+        renderHistory(await loadRequests(selected));
+        renderHistoryDetail(null);
+      }
       if (statusText) statusText.textContent = "Endpoint kaydedildi.";
       form.reset();
       closeModal();
@@ -896,7 +903,9 @@
           url: data.url ? `URL: ${data.url}` : "",
           time: data.durationMs ? `Süre: ${data.durationMs} ms` : ""
         });
-        loadRequests(selected).then(renderHistory);
+        if (hasHistoryPanel) {
+          loadRequests(selected).then(renderHistory);
+        }
       } catch (err) {
         setResponseState({
           statusText: "İstek hatası.",

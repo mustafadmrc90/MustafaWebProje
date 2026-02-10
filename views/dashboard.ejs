@@ -40,25 +40,27 @@
 
             <div class="endpoint-inline-list" id="endpoint-table-inline"></div>
 
-            <div class="request-tabs">
-              <button class="tab active" data-tab="body">Body</button>
-              <button class="tab" data-tab="headers">Headers</button>
-              <button class="tab" data-tab="params">Params</button>
-            </div>
-
-            <div class="request-body tab-panel active" data-panel="body">
-              <label class="label">Body (JSON)</label>
-              <div class="fixed-body">
-                <div class="fixed-body-header">
-                  <span class="muted">İstek Body</span>
-                  <button class="ghost small" id="copy-body" type="button">Kopyala</button>
+            <div class="request-columns">
+              <div class="request-column request-editor-column">
+                <div class="request-tabs">
+                  <button class="tab active" data-tab="body">Body</button>
+                  <button class="tab" data-tab="headers">Headers</button>
+                  <button class="tab" data-tab="params">Params</button>
                 </div>
-                <textarea
-                  id="endpoint-body"
-                  class="code-input"
-                  rows="10"
-                  spellcheck="false"
-                >{
+
+                <div class="request-body tab-panel active" data-panel="body">
+                  <label class="label">Body (JSON)</label>
+                  <div class="fixed-body">
+                    <div class="fixed-body-header">
+                      <span class="muted">İstek Body</span>
+                      <button class="ghost small" id="copy-body" type="button">Kopyala</button>
+                    </div>
+                    <textarea
+                      id="endpoint-body"
+                      class="code-input"
+                      rows="10"
+                      spellcheck="false"
+                    >{
   "type": 1,
   "connection": {
     "ip-address": "212.156.219.182",
@@ -68,95 +70,72 @@
     "name": "Chrome"
   }
 }</textarea>
-              </div>
-            </div>
-
-            <div class="request-body tab-panel" data-panel="headers">
-              <label class="label">Headers</label>
-              <div class="kv-table">
-                <div class="kv-head">
-                  <span>Etkin</span>
-                  <span>Key</span>
-                  <span>Value</span>
-                  <span></span>
-                </div>
-                <div class="kv-rows" id="headers-rows"></div>
-                <div class="kv-toolbar">
-                  <button type="button" class="ghost small" id="add-header-row">Satır Ekle</button>
-                  <button type="button" class="ghost small" id="copy-headers-json">JSON Kopyala</button>
-                </div>
-                <textarea
-                  id="endpoint-headers"
-                  class="code-input hidden-field"
-                  rows="8"
-                  placeholder='{"Content-Type":"application/json"}'
-                ></textarea>
-              </div>
-            </div>
-
-            <div class="request-body tab-panel" data-panel="params">
-              <label class="label">Params</label>
-              <div class="kv-table">
-                <div class="kv-head">
-                  <span>Etkin</span>
-                  <span>Key</span>
-                  <span>Value</span>
-                  <span></span>
-                </div>
-                <div class="kv-rows" id="params-rows"></div>
-                <div class="kv-toolbar">
-                  <button type="button" class="ghost small" id="add-param-row">Satır Ekle</button>
-                  <button type="button" class="ghost small" id="copy-params-json">JSON Kopyala</button>
-                </div>
-                <textarea
-                  id="endpoint-params"
-                  class="code-input hidden-field"
-                  rows="6"
-                  placeholder='{"page":1,"size":10}'
-                ></textarea>
-              </div>
-            </div>
-
-            <div class="request-actions">
-              <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
-              <span class="muted" id="request-status"></span>
-            </div>
-
-            <div class="response-panel">
-              <div class="response-header">
-                <h3>Yanıt</h3>
-                <span class="pill muted" id="response-status">Bekleniyor</span>
-              </div>
-              <div class="response-meta">
-                <span id="response-url"></span>
-                <span id="response-time"></span>
-              </div>
-              <pre class="code-output" id="response-body">{}</pre>
-            </div>
-
-            <div class="request-history">
-              <div class="response-header">
-                <h3>İstek Geçmişi</h3>
-                <div class="history-actions">
-                  <span class="muted">Son 50 kayıt</span>
-                  <button class="ghost small" id="clear-history" type="button">Temizle</button>
-                </div>
-              </div>
-              <div class="history-list" id="request-history"></div>
-              <div class="history-detail" id="history-detail">
-                <div class="response-header">
-                  <h3>Detay</h3>
-                  <span class="muted" id="history-meta">Seçim yok</span>
-                </div>
-                <div class="history-grid">
-                  <div>
-                    <div class="label">Request</div>
-                    <pre class="code-output" id="history-request">{}</pre>
                   </div>
-                  <div>
-                    <div class="label">Response</div>
-                    <pre class="code-output" id="history-response">{}</pre>
+                </div>
+
+                <div class="request-body tab-panel" data-panel="headers">
+                  <label class="label">Headers</label>
+                  <div class="kv-table">
+                    <div class="kv-head">
+                      <span>Etkin</span>
+                      <span>Key</span>
+                      <span>Value</span>
+                      <span></span>
+                    </div>
+                    <div class="kv-rows" id="headers-rows"></div>
+                    <div class="kv-toolbar">
+                      <button type="button" class="ghost small" id="add-header-row">Satır Ekle</button>
+                      <button type="button" class="ghost small" id="copy-headers-json">JSON Kopyala</button>
+                    </div>
+                    <textarea
+                      id="endpoint-headers"
+                      class="code-input hidden-field"
+                      rows="8"
+                      placeholder='{"Content-Type":"application/json"}'
+                    ></textarea>
                   </div>
+                </div>
+
+                <div class="request-body tab-panel" data-panel="params">
+                  <label class="label">Params</label>
+                  <div class="kv-table">
+                    <div class="kv-head">
+                      <span>Etkin</span>
+                      <span>Key</span>
+                      <span>Value</span>
+                      <span></span>
+                    </div>
+                    <div class="kv-rows" id="params-rows"></div>
+                    <div class="kv-toolbar">
+                      <button type="button" class="ghost small" id="add-param-row">Satır Ekle</button>
+                      <button type="button" class="ghost small" id="copy-params-json">JSON Kopyala</button>
+                    </div>
+                    <textarea
+                      id="endpoint-params"
+                      class="code-input hidden-field"
+                      rows="6"
+                      placeholder='{"page":1,"size":10}'
+                    ></textarea>
+                  </div>
+                </div>
+
+                <div class="request-actions">
+                  <button class="button-link" id="send-request" type="button">İsteği Gönder</button>
+                  <span class="muted" id="request-status"></span>
+                </div>
+              </div>
+
+              <div class="request-column request-response-column">
+                <div class="response-panel">
+                  <div class="response-header">
+                    <h3>Yanıt</h3>
+                    <span class="pill muted" id="response-status">Bekleniyor</span>
+                  </div>
+                  <div class="response-meta">
+                    <span id="response-url"></span>
+                    <span id="response-time"></span>
+                  </div>
+                  <pre class="code-output" id="response-body">{}</pre>
                 </div>
               </div>
             </div>
