@@ -1448,7 +1448,10 @@
         }
 
         let templateVariables = {};
-        const isUserLogin = getEndpointSearchText(current).includes("userlogin");
+        const currentSearchText = getEndpointSearchText(current);
+        const isUserLogin = currentSearchText.includes("userlogin");
+        const isGetStations = currentSearchText.includes("getstation");
+        const requiresSessionSetup = isUserLogin || isGetStations;
 
         if (isUserLogin) {
           const selectedUserLoginVariables = getSelectedUserLoginVariables();
@@ -1459,7 +1462,9 @@
             ...templateVariables,
             ...selectedUserLoginVariables
           };
+        }
 
+        if (requiresSessionSetup) {
           setResponseState({
             statusText: "GetSession çalıştırılıyor...",
             badgeText: "Ön Hazırlık",
@@ -1488,7 +1493,9 @@
             ...templateVariables,
             ...extracted
           };
+        }
 
+        if (isUserLogin) {
           setResponseState({
             statusText: "GetParameter çalıştırılıyor...",
             badgeText: "Ön Hazırlık",
@@ -1513,6 +1520,13 @@
 
           setResponseState({
             statusText: "UserLogin çalıştırılıyor...",
+            badgeText: "İşleniyor",
+            badgeClass: "muted",
+            body: "..."
+          });
+        } else if (isGetStations) {
+          setResponseState({
+            statusText: "GetStations çalıştırılıyor...",
             badgeText: "İşleniyor",
             badgeClass: "muted",
             body: "..."
