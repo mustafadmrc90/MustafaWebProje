@@ -989,29 +989,26 @@
         return;
       }
 
-      if (activeLoginProfileId) {
-        const index = loginProfiles.findIndex((item) => item.id === activeLoginProfileId);
-        if (index >= 0) {
-          loginProfiles[index] = {
-            ...loginProfiles[index],
-            name: profileName || `${partnerCode} / ${branchId}`,
-            partnerCode,
-            branchId
-          };
-        } else {
-          activeLoginProfileId = "";
-        }
+      const normalizedPartnerCode = partnerCode.toLowerCase();
+      const normalizedBranchId = branchId.toLowerCase();
+      const existingProfile = loginProfiles.find(
+        (item) =>
+          String(item.partnerCode || "").trim().toLowerCase() === normalizedPartnerCode &&
+          String(item.branchId || "").trim().toLowerCase() === normalizedBranchId
+      );
+      if (existingProfile) {
+        selectLoginProfile(existingProfile.id, { keepManualInputs: true });
+        setLoginProfileStatus("Bu partner-code ve branch-id zaten kayıtlı.", "error");
+        return;
       }
 
-      if (!activeLoginProfileId) {
-        activeLoginProfileId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-        loginProfiles.push({
-          id: activeLoginProfileId,
-          name: profileName || `${partnerCode} / ${branchId}`,
-          partnerCode,
-          branchId
-        });
-      }
+      activeLoginProfileId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      loginProfiles.push({
+        id: activeLoginProfileId,
+        name: profileName || `${partnerCode} / ${branchId}`,
+        partnerCode,
+        branchId
+      });
 
       if (!saveLoginProfiles()) return;
       selectLoginProfile(activeLoginProfileId, { keepManualInputs: true });
