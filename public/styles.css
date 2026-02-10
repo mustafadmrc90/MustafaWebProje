@@ -400,6 +400,10 @@ body {
   justify-content: flex-end;
 }
 
+.endpoint-actions-inline {
+  justify-content: flex-start;
+}
+
 .endpoint-header h2 {
   margin: 0;
 }
@@ -423,6 +427,8 @@ body {
 
 .request-endpoint-column {
   display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
   min-height: var(--request-panels-height);
 }
 
@@ -1011,6 +1017,10 @@ body {
 
 .api-panel .request-editor-column {
   gap: 8px;
+}
+
+.api-panel .request-endpoint-column {
+  gap: 6px;
 }
 
 .api-panel .request-tabs {
