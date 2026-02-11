@@ -549,8 +549,7 @@
 
   const renderTargets = (targets, selectedValue = "") => {
     const targetInput = document.querySelector("#target-url-input");
-    const targetList = document.querySelector("#target-url-list");
-    if (!targetInput || !targetList) return;
+    if (!targetInput) return;
     const currentValue = String(targetInput.value || "").trim();
     const preferredValue = String(selectedValue || "").trim();
     const options = Array.from(
@@ -561,23 +560,28 @@
           .filter((value) => value)
       )
     );
-    targetList.innerHTML = "";
+    targetInput.innerHTML = "";
+    if (!options.length) {
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = "Kayıtlı hedef URL yok";
+      targetInput.appendChild(emptyOption);
+      targetInput.value = "";
+      return;
+    }
+
     options.forEach((url) => {
       const option = document.createElement("option");
       option.value = url;
-      targetList.appendChild(option);
+      option.textContent = url;
+      targetInput.appendChild(option);
     });
-    if (preferredValue) {
-      targetInput.value = preferredValue;
-      return;
+
+    let nextValue = preferredValue || currentValue || options[0];
+    if (!options.includes(nextValue)) {
+      nextValue = options[0];
     }
-    if (currentValue) {
-      targetInput.value = currentValue;
-      return;
-    }
-    if (options.length) {
-      targetInput.value = options[0];
-    }
+    targetInput.value = nextValue;
   };
 
   const normalizeEndpointAddress = ({ targetUrl, path }) => {
@@ -708,7 +712,8 @@
   const initEndpointUI = async () => {
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;
-    const addTargetBtn = document.querySelector("#open-endpoint-modal");
+    const openBtn = document.querySelector("#open-endpoint-modal");
+    const addTargetBtn = document.querySelector("#add-target-url-button");
     const closeBtn = document.querySelector("#close-endpoint-modal");
     const modalTitle = document.querySelector("#endpoint-modal-title");
     const form = document.querySelector("#endpoint-form");
@@ -977,6 +982,13 @@
       modal.setAttribute("aria-hidden", "true");
       setModalMode("create");
     };
+
+    openBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setModalMode("create");
+      openModal();
+    });
 
     addTargetBtn?.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -1328,13 +1340,6 @@
       }
     });
 
-    let targetTimer;
-    targetInput?.addEventListener("input", () => {
-      clearTimeout(targetTimer);
-      targetTimer = setTimeout(() => {
-        persistSelectedTargetUrl(getActiveTargetUrl());
-      }, 250);
-    });
     targetInput?.addEventListener("change", () => {
       persistSelectedTargetUrl(getActiveTargetUrl());
     });

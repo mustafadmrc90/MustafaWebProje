@@ -65,21 +65,17 @@
 
               <div class="endpoint-target-group">
                 <label class="label" for="target-url-input">Hedef URL</label>
-                <input
-                  id="target-url-input"
-                  list="target-url-list"
-                  type="url"
-                  inputmode="url"
-                  placeholder="https://api.example.com"
-                />
-                <datalist id="target-url-list"></datalist>
+                <div class="target-select-row">
+                  <select id="target-url-input"></select>
+                  <button type="button" class="ghost small" id="add-target-url-button">Hedef URL Ekle</button>
+                </div>
               </div>
             </div>
 
             <div class="request-columns">
               <div class="request-column request-endpoint-column">
                 <div class="endpoint-actions endpoint-actions-inline">
-                  <button class="button-link" id="open-endpoint-modal" type="button">Hedef URL Ekle</button>
+                  <button class="button-link" id="open-endpoint-modal" type="button">Endpoint Ekle</button>
                 </div>
                 <div class="endpoint-list-card">
                   <div class="response-header">

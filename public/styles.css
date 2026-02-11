@@ -269,6 +269,13 @@ body {
   gap: 6px;
 }
 
+.target-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .endpoint-target-group input {
   width: 100%;
 }
@@ -1902,6 +1909,10 @@ button.ghost {
   }
 
   .login-profile-row {
+    grid-template-columns: 1fr;
+  }
+
+  .target-select-row {
     grid-template-columns: 1fr;
   }
 
