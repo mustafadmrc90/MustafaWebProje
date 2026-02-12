@@ -216,8 +216,11 @@ function requireAuth(req, res, next) {
 }
 
 function normalizeTargetUrl(input) {
-  const raw = String(input || "").trim();
+  let raw = String(input || "").trim();
   if (!raw) return "";
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    raw = `https://${raw}`;
+  }
   let parsed;
   try {
     parsed = new URL(raw);
@@ -231,6 +234,17 @@ function normalizeTargetUrl(input) {
   const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname.replace(/\/+$/, "") : "";
   const search = parsed.search || "";
   return `${parsed.origin}${pathname}${search}`;
+}
+
+async function ensureTargetsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_targets (
+      id SERIAL PRIMARY KEY,
+      url TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
 }
 
 app.get("/", (req, res) => {
@@ -497,6 +511,7 @@ app.get("/api/endpoints", requireAuth, async (req, res) => {
 
 app.get("/api/targets", requireAuth, async (req, res) => {
   try {
+    await ensureTargetsTable();
     const result = await pool.query(
       `SELECT id, url, created_at, updated_at
        FROM api_targets
@@ -515,6 +530,7 @@ app.post("/api/targets", requireAuth, async (req, res) => {
     return res.status(400).json({ ok: false, error: "Geçerli bir Hedef URL girin." });
   }
   try {
+    await ensureTargetsTable();
     const result = await pool.query(
       `INSERT INTO api_targets (url)
        VALUES ($1)

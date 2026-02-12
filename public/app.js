@@ -996,10 +996,13 @@
       const initialValue = getActiveTargetUrl() || selectedTargetUrl || "https://";
       const draft = window.prompt("Kaydedilecek Hedef URL", initialValue);
       if (draft === null) return;
-      const nextUrl = String(draft || "").trim();
+      let nextUrl = String(draft || "").trim();
       if (!nextUrl) {
         if (statusText) statusText.textContent = "Hedef URL boş olamaz.";
         return;
+      }
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(nextUrl)) {
+        nextUrl = `https://${nextUrl}`;
       }
       if (statusText) statusText.textContent = "Hedef URL kaydediliyor...";
       const { item, error } = await saveTargetUrlRecord(nextUrl);
@@ -1342,6 +1345,10 @@
 
     targetInput?.addEventListener("change", () => {
       persistSelectedTargetUrl(getActiveTargetUrl());
+    });
+    targetInput?.addEventListener("focus", async () => {
+      targetUrls = await loadTargetUrls();
+      refreshTargetOptions(selectedTargetUrl || getActiveTargetUrl());
     });
 
     const getDefaultResponseState = () => ({
