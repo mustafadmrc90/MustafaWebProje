@@ -14,7 +14,6 @@
       <header class="page-header">
         <div class="page-title">
           <h1>Satışlar</h1>
-          <p>Raporlar menüsündeki satış ekranı hazırlık aşamasında.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -22,17 +21,11 @@
       </header>
 
       <section class="table-card panel-card">
-        <h2>Filtreler</h2>
         <form class="sales-filter-form" method="get" action="/reports/sales">
           <div class="sales-filter-grid">
             <label>
               <span>Başlangıç Tarihi</span>
               <input type="date" name="startDate" value="<%= filters.startDate %>" />
-            </label>
-
-            <label>
-              <span>Bitiş Tarihi</span>
-              <input type="date" name="endDate" value="<%= filters.endDate %>" />
             </label>
 
             <label>
@@ -44,6 +37,11 @@
                   </option>
                 <% }) %>
               </select>
+            </label>
+
+            <label>
+              <span>Bitiş Tarihi</span>
+              <input type="date" name="endDate" value="<%= filters.endDate %>" />
             </label>
           </div>
           <div class="sales-filter-actions">
