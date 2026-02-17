@@ -8,6 +8,9 @@ const pgSession = require("connect-pg-simple")(session);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
+const PARTNERS_API_URL =
+  process.env.PARTNERS_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -247,6 +250,67 @@ async function ensureTargetsTable() {
   `);
 }
 
+function extractPartnerCodes(payload) {
+  const candidateLists = [];
+
+  if (Array.isArray(payload)) {
+    candidateLists.push(payload);
+  }
+
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.data)) candidateLists.push(payload.data);
+    if (Array.isArray(payload.items)) candidateLists.push(payload.items);
+    if (Array.isArray(payload.result)) candidateLists.push(payload.result);
+    if (Array.isArray(payload.partners)) candidateLists.push(payload.partners);
+
+    if (payload.data && typeof payload.data === "object") {
+      if (Array.isArray(payload.data.items)) candidateLists.push(payload.data.items);
+      if (Array.isArray(payload.data.partners)) candidateLists.push(payload.data.partners);
+      if (Array.isArray(payload.data.result)) candidateLists.push(payload.data.result);
+    }
+  }
+
+  const rows = candidateLists.find((list) => list.length > 0) || [];
+  const uniqueCodes = new Set();
+
+  rows.forEach((row) => {
+    if (!row || typeof row !== "object") return;
+    if (Number(row.status) !== 1) return;
+
+    const code = String(row.code || "").trim();
+    if (!code) return;
+    uniqueCodes.add(code);
+  });
+
+  return Array.from(uniqueCodes).sort((a, b) => a.localeCompare(b, "tr"));
+}
+
+async function fetchPartnerCodes() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(PARTNERS_API_URL, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      console.error("Partner API request failed:", response.status);
+      return [];
+    }
+
+    const payload = await response.json();
+    return extractPartnerCodes(payload);
+  } catch (err) {
+    console.error("Partner API fetch error:", err);
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.redirect("/login");
@@ -311,7 +375,7 @@ app.get("/change-password", requireAuth, (req, res) => {
   });
 });
 
-app.get("/reports/sales", requireAuth, (req, res) => {
+app.get("/reports/sales", requireAuth, async (req, res) => {
   const normalizeDate = (value) => {
     if (typeof value !== "string") return "";
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
@@ -325,12 +389,10 @@ app.get("/reports/sales", requireAuth, (req, res) => {
   const startDate = normalizeDate(req.query.startDate) || today;
   const endDate = normalizeDate(req.query.endDate) || today;
   const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
-  const companies = [
-    { value: "all", label: "Tümü" },
-    { value: "obilet", label: "Obilet" },
-    { value: "firma-a", label: "Firma A" },
-    { value: "firma-b", label: "Firma B" }
-  ];
+  const partnerCodes = await fetchPartnerCodes();
+  const companies = [{ value: "all", label: "Tümü" }].concat(
+    partnerCodes.map((code) => ({ value: code, label: code }))
+  );
   const company = companies.some((item) => item.value === requestedCompany)
     ? requestedCompany
     : "all";
