@@ -22,10 +22,39 @@
       </header>
 
       <section class="table-card panel-card">
+        <h2>Filtreler</h2>
+        <form class="sales-filter-form" method="get" action="/reports/sales">
+          <div class="sales-filter-grid">
+            <label>
+              <span>Başlangıç Tarihi</span>
+              <input type="date" name="startDate" value="<%= filters.startDate %>" />
+            </label>
+
+            <label>
+              <span>Bitiş Tarihi</span>
+              <input type="date" name="endDate" value="<%= filters.endDate %>" />
+            </label>
+
+            <label>
+              <span>Firma</span>
+              <select name="company">
+                <% companies.forEach((item) => { %>
+                  <option value="<%= item.value %>" <%= filters.company === item.value ? "selected" : "" %>>
+                    <%= item.label %>
+                  </option>
+                <% }) %>
+              </select>
+            </label>
+          </div>
+          <div class="sales-filter-actions">
+            <button type="submit">Filtrele</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="table-card panel-card">
         <h2>Satış Raporları</h2>
-        <p class="muted">
-          Bu bölümde satış verisi, filtreler ve metrik kartları bir sonraki adımda eklenecek.
-        </p>
+        <p class="muted">Filtreleri seçtikten sonra bu alana tablo ve metrikleri ekleyeceğiz.</p>
       </section>
     </section>
     <script src="/public/app.js" defer></script>

@@ -312,9 +312,33 @@ app.get("/change-password", requireAuth, (req, res) => {
 });
 
 app.get("/reports/sales", requireAuth, (req, res) => {
+  const normalizeDate = (value) => {
+    if (typeof value !== "string") return "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+  };
+
+  const startDate = normalizeDate(req.query.startDate);
+  const endDate = normalizeDate(req.query.endDate);
+  const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
+  const companies = [
+    { value: "all", label: "Tümü" },
+    { value: "obilet", label: "Obilet" },
+    { value: "firma-a", label: "Firma A" },
+    { value: "firma-b", label: "Firma B" }
+  ];
+  const company = companies.some((item) => item.value === requestedCompany)
+    ? requestedCompany
+    : "all";
+
   res.render("reports-sales", {
     user: req.session.user,
-    active: "sales"
+    active: "sales",
+    filters: {
+      startDate,
+      endDate,
+      company
+    },
+    companies
   });
 });
 

@@ -1737,6 +1737,47 @@ button.ghost {
   font-size: 15px;
 }
 
+.form-grid select {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e4d7cc;
+  background: #fff;
+  font-size: 15px;
+}
+
+.sales-filter-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sales-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.sales-filter-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.sales-filter-grid input,
+.sales-filter-grid select {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e4d7cc;
+  background: #fff;
+  font-size: 15px;
+}
+
+.sales-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .table {
   display: grid;
   gap: 8px;
@@ -1957,5 +1998,13 @@ button.ghost {
 
   .span-2 {
     grid-column: auto;
+  }
+
+  .sales-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-filter-actions {
+    justify-content: flex-start;
   }
 }
