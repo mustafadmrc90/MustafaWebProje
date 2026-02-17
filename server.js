@@ -317,8 +317,13 @@ app.get("/reports/sales", requireAuth, (req, res) => {
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
   };
 
-  const startDate = normalizeDate(req.query.startDate);
-  const endDate = normalizeDate(req.query.endDate);
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const today = `${yyyy}-${mm}-${dd}`;
+  const startDate = normalizeDate(req.query.startDate) || today;
+  const endDate = normalizeDate(req.query.endDate) || today;
   const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
   const companies = [
     { value: "all", label: "Tümü" },

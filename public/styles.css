@@ -1749,28 +1749,30 @@ button.ghost {
   display: grid;
   gap: 12px;
   margin-top: 12px;
+  max-width: 520px;
 }
 
 .sales-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(170px, 220px));
   gap: 12px;
+  justify-content: start;
 }
 
 .sales-filter-grid label {
   display: grid;
   gap: 6px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--muted);
 }
 
 .sales-filter-grid input,
 .sales-filter-grid select {
-  padding: 12px 14px;
-  border-radius: 12px;
+  padding: 9px 10px;
+  border-radius: 10px;
   border: 1px solid #e4d7cc;
   background: #fff;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .sales-filter-actions {
