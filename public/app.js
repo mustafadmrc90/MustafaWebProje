@@ -10,6 +10,7 @@
   const routeFromPath = (path) => {
     if (path.startsWith("/users")) return "users";
     if (path.startsWith("/screens")) return "screens";
+    if (path.startsWith("/reports/sales")) return "sales";
     if (path.startsWith("/change-password")) return "password";
     return "dashboard";
   };
@@ -25,6 +26,12 @@
     const doc = new DOMParser().parseFromString(html, "text/html");
     const next = doc.querySelector(".content");
     if (!next) return false;
+
+    const nextSidebar = doc.querySelector(".sidebar");
+    if (nextSidebar) {
+      // Keep the same sidebar element so delegated click handlers remain attached.
+      sidebar.innerHTML = nextSidebar.innerHTML;
+    }
 
     content.innerHTML = next.innerHTML;
     document.title = doc.title || document.title;

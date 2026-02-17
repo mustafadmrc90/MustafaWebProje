@@ -311,6 +311,13 @@ app.get("/change-password", requireAuth, (req, res) => {
   });
 });
 
+app.get("/reports/sales", requireAuth, (req, res) => {
+  res.render("reports-sales", {
+    user: req.session.user,
+    active: "sales"
+  });
+});
+
 app.post("/change-password", requireAuth, async (req, res) => {
   const { currentPassword, newPassword, confirmPassword } = req.body;
   if (!currentPassword || !newPassword || !confirmPassword) {
