@@ -11,6 +11,11 @@ const isProd = process.env.NODE_ENV === "production";
 const PARTNERS_API_URL =
   process.env.PARTNERS_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
+const PARTNERS_SESSION_API_URL =
+  process.env.PARTNERS_SESSION_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession";
+const PARTNERS_API_AUTH =
+  process.env.PARTNERS_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -285,27 +290,178 @@ function extractPartnerCodes(payload) {
   return Array.from(uniqueCodes).sort((a, b) => a.localeCompare(b, "tr"));
 }
 
+function normalizeTokenName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function findNestedValue(node, keySet) {
+  if (node === null || node === undefined) return undefined;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findNestedValue(item, keySet);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  if (typeof node !== "object") return undefined;
+
+  for (const [key, value] of Object.entries(node)) {
+    if (keySet.has(normalizeTokenName(key)) && value !== undefined && value !== null) {
+      const normalized = String(value).trim();
+      if (normalized) return normalized;
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const found = findNestedValue(value, keySet);
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
+function parseJsonSafe(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function fetchPartnerSessionCredentials(signal) {
+  const payload = {
+    type: 1,
+    connection: {
+      "ip-address": "212.156.219.182",
+      port: "5117"
+    },
+    browser: {
+      name: "Chrome"
+    }
+  };
+
+  const response = await fetch(PARTNERS_SESSION_API_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: PARTNERS_API_AUTH
+    },
+    body: JSON.stringify(payload),
+    signal
+  });
+
+  const raw = await response.text();
+  const parsed = parseJsonSafe(raw);
+
+  if (!response.ok) {
+    const reason =
+      (parsed && typeof parsed === "object" && String(parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+    return {
+      sessionId: "",
+      deviceId: "",
+      error: `GetSession HTTP ${response.status}: ${reason}`
+    };
+  }
+
+  if (!parsed) {
+    return {
+      sessionId: "",
+      deviceId: "",
+      error: "GetSession JSON parse edilemedi."
+    };
+  }
+
+  const sessionId =
+    findNestedValue(parsed, new Set(["sessionid"])) ||
+    findNestedValue(parsed, new Set(["sessionid", "session"])) ||
+    "";
+  const deviceId =
+    findNestedValue(parsed, new Set(["deviceid"])) ||
+    findNestedValue(parsed, new Set(["deviceid", "device"])) ||
+    "";
+
+  if (!sessionId || !deviceId) {
+    return {
+      sessionId,
+      deviceId,
+      error: "GetSession yanıtında session-id veya device-id bulunamadı."
+    };
+  }
+
+  return {
+    sessionId,
+    deviceId,
+    error: null
+  };
+}
+
 async function fetchPartnerCodes() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
 
   try {
+    const sessionResult = await fetchPartnerSessionCredentials(controller.signal);
+    if (sessionResult.error) {
+      return { codes: [], error: sessionResult.error };
+    }
+
+    const partnerRequestBody = {
+      data: "BusTicketProvider",
+      "device-session": {
+        "session-id": sessionResult.sessionId,
+        "device-id": sessionResult.deviceId
+      },
+      date: "2016-03-11T11:33:00",
+      language: "tr-TR"
+    };
+
     const response = await fetch(PARTNERS_API_URL, {
-      method: "GET",
-      headers: { Accept: "application/json" },
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(partnerRequestBody),
       signal: controller.signal
     });
 
+    const raw = await response.text();
+    const payload = parseJsonSafe(raw);
+
     if (!response.ok) {
-      console.error("Partner API request failed:", response.status);
-      return [];
+      const apiError =
+        (payload &&
+          typeof payload === "object" &&
+          String(payload.message || payload.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      const message = `Partner API HTTP ${response.status}: ${apiError}`;
+      console.error("Partner API request failed:", message);
+      return { codes: [], error: message };
     }
 
-    const payload = await response.json();
-    return extractPartnerCodes(payload);
+    if (!payload) {
+      return { codes: [], error: "Partner API JSON parse edilemedi." };
+    }
+
+    const codes = extractPartnerCodes(payload);
+    if (codes.length === 0) {
+      return { codes: [], error: "Partner API sonucu boş (status=1 ve code bulunan kayıt yok)." };
+    }
+
+    return { codes, error: null };
   } catch (err) {
+    const message = `Partner API fetch hatası: ${err?.message || "Bilinmeyen hata"}`;
     console.error("Partner API fetch error:", err);
-    return [];
+    return { codes: [], error: message };
   } finally {
     clearTimeout(timeout);
   }
@@ -389,11 +545,19 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
   const startDate = normalizeDate(req.query.startDate) || today;
   const endDate = normalizeDate(req.query.endDate) || today;
   const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
-  const partnerCodes = await fetchPartnerCodes();
+  const { codes: partnerCodes, error: partnerError } = await fetchPartnerCodes();
   const companies = [{ value: "all", label: "Tümü" }].concat(
     partnerCodes.map((code) => ({ value: code, label: code }))
   );
-  const company = companies.some((item) => item.value === requestedCompany)
+  if (partnerError) {
+    companies.push({
+      value: "__partner_error__",
+      label: `Hata: ${partnerError}`,
+      disabled: true
+    });
+  }
+
+  const company = companies.some((item) => !item.disabled && item.value === requestedCompany)
     ? requestedCompany
     : "all";
 

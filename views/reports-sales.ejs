@@ -32,7 +32,11 @@
               <span>Firma</span>
               <select name="company">
                 <% companies.forEach((item) => { %>
-                  <option value="<%= item.value %>" <%= filters.company === item.value ? "selected" : "" %>>
+                  <option
+                    value="<%= item.value %>"
+                    <%= item.disabled ? "disabled" : "" %>
+                    <%= filters.company === item.value ? "selected" : "" %>
+                  >
                     <%= item.label %>
                   </option>
                 <% }) %>
