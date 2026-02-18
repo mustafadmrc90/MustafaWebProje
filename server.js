@@ -1303,12 +1303,28 @@ function extractSalesTotalsFromPayload(payload) {
 }
 
 function buildChartSeries(rows) {
-  const sortedRows = Array.from(Array.isArray(rows) ? rows : []).sort((a, b) =>
-    String(a.label || "").localeCompare(String(b.label || ""), "tr")
-  );
+  const sortedRows = Array.from(Array.isArray(rows) ? rows : []).sort((a, b) => {
+    const aCode = String(a?.code || "").trim();
+    const bCode = String(b?.code || "").trim();
+    if (aCode || bCode) {
+      const byCode = aCode.localeCompare(bCode, "tr");
+      if (byCode !== 0) return byCode;
+    }
+
+    const aStart = normalizeDateToDay(a?.periodStartDate);
+    const bStart = normalizeDateToDay(b?.periodStartDate);
+    if (aStart || bStart) {
+      const byStart = aStart.localeCompare(bStart, "tr");
+      if (byStart !== 0) return byStart;
+    }
+
+    return String(a?.label || "").localeCompare(String(b?.label || ""), "tr");
+  });
 
   const normalizedRows = sortedRows.map((row) => ({
     label: String(row.label || ""),
+    code: String(row.code || ""),
+    periodStartDate: normalizeDateToDay(row.periodStartDate) || "",
     website: toNumber(row.website) ?? 0,
     obilet: toNumber(row.obilet) ?? 0
   }));
@@ -1477,7 +1493,13 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
           const label = String(range?.label || "").trim();
           if (!label) return;
           if (!rowsByLabel.has(label)) {
-            rowsByLabel.set(label, { label, website: 0, obilet: 0 });
+            rowsByLabel.set(label, {
+              label,
+              code: "",
+              periodStartDate: String(range?.startDate || ""),
+              website: 0,
+              obilet: 0
+            });
           }
         });
       }
@@ -1532,7 +1554,13 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
                 if (!code) return;
                 const rowKey = `${range.label}__${code}`;
                 const label = `${range.label} - ${code}`;
-                const row = rowsByLabel.get(rowKey) || { label, website: 0, obilet: 0 };
+                const row = rowsByLabel.get(rowKey) || {
+                  label,
+                  code,
+                  periodStartDate: String(range.startDate || ""),
+                  website: 0,
+                  obilet: 0
+                };
                 row.website += toNumber(item.websiteSaleAmountValue) ?? 0;
                 row.obilet += toNumber(item.obiletSaleAmountValue) ?? 0;
                 rowsByLabel.set(rowKey, row);
@@ -1541,6 +1569,8 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
               const fallbackKey = String(range.label || "");
               const row = rowsByLabel.get(fallbackKey) || {
                 label: fallbackKey,
+                code: "",
+                periodStartDate: String(range.startDate || ""),
                 website: 0,
                 obilet: 0
               };
@@ -1552,6 +1582,8 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
           } else {
             const row = rowsByLabel.get(range.label) || {
               label: String(range.label || ""),
+              code: "",
+              periodStartDate: String(range.startDate || ""),
               website: 0,
               obilet: 0
             };
@@ -1839,6 +1871,23 @@ app.post("/change-password", requireAuth, async (req, res) => {
 });
 
 app.get("/users", requireAuth, async (req, res) => {
+  const errorMessages = {
+    missing_fields: "Kullanıcı adı ve görünen isim zorunludur.",
+    invalid_user: "Geçersiz kullanıcı seçimi.",
+    user_not_found: "Kullanıcı bulunamadı.",
+    username_exists: "Bu kullanıcı adı zaten kullanılıyor.",
+    update_failed: "Kullanıcı güncellenemedi.",
+    create_failed: "Kullanıcı oluşturulamadı."
+  };
+
+  const okValue = String(req.query.ok || "").trim();
+  const errValue = String(req.query.err || "").trim();
+  const notice =
+    okValue === "1" ? "Kullanıcı oluşturuldu." : okValue === "2" ? "Kullanıcı güncellendi." : null;
+  const error = errorMessages[errValue] || null;
+  const editUserId = Number(req.query.edit);
+  const editingUserId = Number.isInteger(editUserId) ? editUserId : null;
+
   try {
     const result = await pool.query(
       "SELECT id, username, display_name, created_at FROM users ORDER BY id DESC"
@@ -1846,8 +1895,9 @@ app.get("/users", requireAuth, async (req, res) => {
     res.render("users", {
       user: req.session.user,
       users: result.rows,
-      error: null,
-      ok: req.query.ok === "1",
+      notice,
+      error,
+      editingUserId,
       active: "users"
     });
   } catch (err) {
@@ -1859,7 +1909,7 @@ app.get("/users", requireAuth, async (req, res) => {
 app.post("/users", requireAuth, async (req, res) => {
   const { username, displayName, password } = req.body;
   if (!username || !displayName || !password) {
-    return res.status(400).send("Eksik alan");
+    return res.redirect("/users?err=missing_fields");
   }
   try {
     const passwordHash = await bcrypt.hash(password, 10);
@@ -1870,7 +1920,59 @@ app.post("/users", requireAuth, async (req, res) => {
     res.redirect("/users?ok=1");
   } catch (err) {
     console.error(err);
-    res.status(400).send("Kullanıcı oluşturulamadı");
+    if (err?.code === "23505") {
+      return res.redirect("/users?err=username_exists");
+    }
+    res.redirect("/users?err=create_failed");
+  }
+});
+
+app.post("/users/:userId/update", requireAuth, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId)) {
+    return res.redirect("/users?err=invalid_user");
+  }
+
+  const username = String(req.body.username || "").trim();
+  const displayName = String(req.body.displayName || "").trim();
+  const rawPassword = typeof req.body.password === "string" ? req.body.password : "";
+  const password = rawPassword.trim();
+
+  if (!username || !displayName) {
+    return res.redirect(`/users?edit=${userId}&err=missing_fields`);
+  }
+
+  try {
+    let queryResult;
+    if (password) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      queryResult = await pool.query(
+        "UPDATE users SET username = $1, display_name = $2, password_hash = $3 WHERE id = $4",
+        [username, displayName, passwordHash, userId]
+      );
+    } else {
+      queryResult = await pool.query(
+        "UPDATE users SET username = $1, display_name = $2 WHERE id = $3",
+        [username, displayName, userId]
+      );
+    }
+
+    if ((queryResult?.rowCount || 0) === 0) {
+      return res.redirect("/users?err=user_not_found");
+    }
+
+    if (Number(req.session.user?.id) === userId) {
+      req.session.user.username = username;
+      req.session.user.displayName = displayName;
+    }
+
+    return res.redirect("/users?ok=2");
+  } catch (err) {
+    console.error(err);
+    if (err?.code === "23505") {
+      return res.redirect(`/users?edit=${userId}&err=username_exists`);
+    }
+    return res.redirect(`/users?edit=${userId}&err=update_failed`);
   }
 });
 

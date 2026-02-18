@@ -21,8 +21,12 @@
         </div>
       </header>
 
-      <% if (ok) { %>
-        <div class="alert success inline-alert">Kullanıcı oluşturuldu.</div>
+      <% if (notice) { %>
+        <div class="alert success inline-alert"><%= notice %></div>
+      <% } %>
+
+      <% if (error) { %>
+        <div class="alert inline-alert"><%= error %></div>
       <% } %>
 
       <div class="panel-grid">
@@ -59,10 +63,40 @@
               <div class="row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
-                <span>
+                <span class="user-row-actions">
                   <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
+                  <% if (editingUserId === u.id) { %>
+                    <a class="button-link ghost" href="/users">Vazgeç</a>
+                  <% } else { %>
+                    <a class="button-link ghost" href="/users?edit=<%= u.id %>">Düzenle</a>
+                  <% } %>
                 </span>
               </div>
+
+              <% if (editingUserId === u.id) { %>
+                <div class="row user-edit-row">
+                  <form class="user-edit-form" method="post" action="/users/<%= u.id %>/update">
+                    <div class="user-edit-fields">
+                      <label>
+                        <span>Kullanıcı Adı</span>
+                        <input type="text" name="username" value="<%= u.username %>" required />
+                      </label>
+                      <label>
+                        <span>Görünen İsim</span>
+                        <input type="text" name="displayName" value="<%= u.display_name %>" required />
+                      </label>
+                      <label>
+                        <span>Yeni Şifre (Opsiyonel)</span>
+                        <input type="password" name="password" autocomplete="new-password" />
+                      </label>
+                    </div>
+                    <div class="user-edit-actions">
+                      <button type="submit">Kaydet</button>
+                      <a class="button-link ghost" href="/users">İptal</a>
+                    </div>
+                  </form>
+                </div>
+              <% } %>
             <% }) %>
           </div>
         </section>
