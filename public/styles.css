@@ -1747,37 +1747,72 @@ button.ghost {
 
 .sales-filter-form {
   display: grid;
-  gap: 12px;
-  margin-top: 12px;
-  max-width: 520px;
+  gap: 10px;
+  margin-top: 8px;
+  width: 100%;
+  max-width: 1200px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 2px solid #c2ccd9;
+  background: #e8edf3;
 }
 
 .sales-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(170px, 220px));
-  gap: 12px;
-  justify-content: start;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 10px 12px;
 }
 
 .sales-filter-grid label {
   display: grid;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
+  gap: 5px;
+}
+
+.sales-filter-grid label span {
+  font-size: 12px;
+  color: #677789;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 700;
 }
 
 .sales-filter-grid input,
 .sales-filter-grid select {
-  padding: 9px 10px;
-  border-radius: 10px;
-  border: 1px solid #e4d7cc;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 2px solid #b9c6d7;
+  background: #f1f4f8;
+  font-size: 18px;
+  color: #1f2735;
+}
+
+.sales-filter-grid input:focus,
+.sales-filter-grid select:focus {
+  outline: none;
+  border-color: #8ca4c0;
   background: #fff;
-  font-size: 14px;
 }
 
 .sales-filter-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+}
+
+.sales-filter-actions button {
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  background: #e3e8ef;
+  color: #1f2735;
+  border: 1px solid #b9c6d7;
+  box-shadow: none;
+}
+
+.sales-filter-actions button:hover {
+  transform: none;
+  box-shadow: none;
+  background: #dbe2eb;
 }
 
 .table {
