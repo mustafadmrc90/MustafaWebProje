@@ -1938,6 +1938,15 @@ button.ghost {
   text-align: left;
 }
 
+.partners-raw-table {
+  min-width: max-content;
+}
+
+.partners-raw-table th,
+.partners-raw-table td {
+  white-space: nowrap;
+}
+
 .sales-chart {
   display: grid;
   gap: 10px;

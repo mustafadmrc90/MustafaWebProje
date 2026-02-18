@@ -10,6 +10,7 @@
   const routeFromPath = (path) => {
     if (path.startsWith("/users")) return "users";
     if (path.startsWith("/screens")) return "screens";
+    if (path.startsWith("/reports/all-companies")) return "all-companies";
     if (path.startsWith("/reports/sales")) return "sales";
     if (path.startsWith("/change-password")) return "password";
     return "dashboard";
@@ -743,6 +744,13 @@
     const submitBtn = form.querySelector(".sales-filter-actions button[type='submit']");
     const loadingMessage = form.querySelector(".sales-loading-message");
     if (!submitBtn) return;
+
+    form.classList.remove("is-loading");
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Filtrele";
+    if (loadingMessage) {
+      loadingMessage.hidden = true;
+    }
 
     form.addEventListener("submit", () => {
       submitBtn.disabled = true;

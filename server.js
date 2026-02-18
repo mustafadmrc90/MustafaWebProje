@@ -349,6 +349,73 @@ function extractPartnerItems(payload, clusterLabel) {
   return normalizePartnerItems(items);
 }
 
+function extractPartnerRawRows(payload, clusterLabel) {
+  const candidateLists = [];
+
+  if (Array.isArray(payload)) {
+    candidateLists.push(payload);
+  }
+
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.data)) candidateLists.push(payload.data);
+    if (Array.isArray(payload.items)) candidateLists.push(payload.items);
+    if (Array.isArray(payload.result)) candidateLists.push(payload.result);
+    if (Array.isArray(payload.partners)) candidateLists.push(payload.partners);
+
+    if (payload.data && typeof payload.data === "object") {
+      if (Array.isArray(payload.data.items)) candidateLists.push(payload.data.items);
+      if (Array.isArray(payload.data.partners)) candidateLists.push(payload.data.partners);
+      if (Array.isArray(payload.data.result)) candidateLists.push(payload.data.result);
+    }
+  }
+
+  const rows = [];
+  candidateLists.forEach((list) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return;
+      rows.push({
+        source_cluster: String(clusterLabel || "").trim().toLowerCase(),
+        ...item
+      });
+    });
+  });
+
+  const uniqueRows = new Map();
+  rows.forEach((row) => {
+    const key = JSON.stringify(row);
+    if (!uniqueRows.has(key)) uniqueRows.set(key, row);
+  });
+  return Array.from(uniqueRows.values());
+}
+
+function formatPartnerCellValue(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return String(value);
+  }
+}
+
+function buildPartnerRawColumns(rows) {
+  const allColumns = new Set();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (!row || typeof row !== "object") return;
+    Object.keys(row).forEach((key) => allColumns.add(key));
+  });
+
+  const preferred = ["source_cluster", "status", "code", "id"];
+  const orderedPreferred = preferred.filter((key) => allColumns.has(key));
+  const orderedRest = Array.from(allColumns)
+    .filter((key) => !preferred.includes(key))
+    .sort((a, b) => a.localeCompare(b, "tr"));
+  return orderedPreferred.concat(orderedRest);
+}
+
 function normalizeTokenName(value) {
   return String(value || "")
     .toLowerCase()
@@ -661,6 +728,76 @@ async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
   }
 }
 
+async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
+  const clusterLabel = extractClusterLabel(partnerUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl);
+
+  try {
+    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal);
+    if (sessionResult.error) {
+      return { clusterLabel, rows: [], error: `${clusterLabel}: ${sessionResult.error}` };
+    }
+
+    const partnerRequestBody = {
+      data: "BusTicketProvider",
+      "device-session": {
+        "session-id": sessionResult.sessionId,
+        "device-id": sessionResult.deviceId
+      },
+      date: "2016-03-11T11:33:00",
+      language: "tr-TR"
+    };
+
+    const response = await fetch(partnerUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(partnerRequestBody),
+      signal
+    });
+
+    const raw = await response.text();
+    const payload = parseJsonSafe(raw);
+
+    if (!response.ok) {
+      const apiError =
+        (payload &&
+          typeof payload === "object" &&
+          String(payload.message || payload.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        clusterLabel,
+        rows: [],
+        error: `${clusterLabel}: Partner API HTTP ${response.status}: ${apiError}`
+      };
+    }
+
+    if (!payload) {
+      return {
+        clusterLabel,
+        rows: [],
+        error: `${clusterLabel}: Partner API JSON parse edilemedi.`
+      };
+    }
+
+    return {
+      clusterLabel,
+      rows: extractPartnerRawRows(payload, clusterLabel),
+      error: null
+    };
+  } catch (err) {
+    return {
+      clusterLabel,
+      rows: [],
+      error: `${clusterLabel}: ${err?.message || "Partner API fetch hatası"}`
+    };
+  }
+}
+
 async function fetchPartnerCodes() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
@@ -721,6 +858,62 @@ async function fetchPartnerCodes() {
       };
     }
     return { partners: [], error: message };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchAllPartnerRows() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+
+  try {
+    const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
+    if (partnerUrls.length === 0) {
+      return { columns: [], rows: [], error: "Partner URL yapılandırması boş.", clusterCount: 0 };
+    }
+
+    const results = await Promise.all(
+      partnerUrls.map((partnerUrl) => fetchPartnerRawRowsFromCluster(partnerUrl, controller.signal))
+    );
+
+    const mergedRows = [];
+    const errors = [];
+    results.forEach((result) => {
+      if (result.error) errors.push(result.error);
+      (result.rows || []).forEach((row) => mergedRows.push(row));
+    });
+
+    const columns = buildPartnerRawColumns(mergedRows);
+    const rows = mergedRows.map((row) => {
+      const normalized = {};
+      columns.forEach((column) => {
+        normalized[column] = formatPartnerCellValue(row[column]);
+      });
+      return normalized;
+    });
+
+    let error = null;
+    if (errors.length > 0) {
+      error = `${errors.length}/${partnerUrls.length} cluster alınamadı.`;
+    }
+    if (!error && rows.length === 0) {
+      error = "Partner API sonucunda gösterilecek kayıt bulunamadı.";
+    }
+
+    return {
+      columns,
+      rows,
+      error,
+      clusterCount: partnerUrls.length
+    };
+  } catch (err) {
+    return {
+      columns: [],
+      rows: [],
+      error: `Partner verileri alınamadı: ${err?.message || "Bilinmeyen hata"}`,
+      clusterCount: 0
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -1811,6 +2004,20 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
       dailySeries: reportDailySeries,
       monthlySeries: reportMonthlySeries,
       error: reportError
+    }
+  });
+});
+
+app.get("/reports/all-companies", requireAuth, async (req, res) => {
+  const result = await fetchAllPartnerRows();
+  res.render("reports-all-companies", {
+    user: req.session.user,
+    active: "all-companies",
+    report: {
+      columns: result.columns || [],
+      rows: result.rows || [],
+      error: result.error,
+      clusterCount: result.clusterCount || 0
     }
   });
 });

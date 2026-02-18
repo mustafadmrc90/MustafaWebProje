@@ -17,7 +17,10 @@
         </a>
       </div>
     </details>
-    <details class="nav-accordion" <%= active === "sales" ? "open" : "" %>>
+    <details
+      class="nav-accordion"
+      <%= active === "sales" || active === "all-companies" ? "open" : "" %>
+    >
       <summary class="nav-section-toggle">Raporlar</summary>
       <div class="nav-group">
         <a
@@ -26,6 +29,13 @@
           href="/reports/sales"
         >
           Satışlar
+        </a>
+        <a
+          class="nav-item <%= active === 'all-companies' ? 'active' : '' %>"
+          data-route="all-companies"
+          href="/reports/all-companies"
+        >
+          Tüm Firmalar
         </a>
       </div>
     </details>
