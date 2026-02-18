@@ -763,6 +763,34 @@ function getDeepValueByNormalizedKey(node, normalizedKeyList, maxDepth = 3) {
   return undefined;
 }
 
+function getObjectValueByKeyMatcher(object, matcher) {
+  if (!object || typeof object !== "object") return undefined;
+
+  for (const [key, value] of Object.entries(object)) {
+    const normalizedKey = normalizeTokenName(key);
+    if (matcher(normalizedKey, key, value)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function getDeepValueByKeyMatcher(node, matcher, maxDepth = 3) {
+  if (maxDepth < 0 || node === null || node === undefined) return undefined;
+  if (typeof node !== "object") return undefined;
+
+  const direct = getObjectValueByKeyMatcher(node, matcher);
+  if (direct !== undefined) return direct;
+
+  for (const value of Object.values(node)) {
+    const found = getDeepValueByKeyMatcher(value, matcher, maxDepth - 1);
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
 function formatAmountForList(value) {
   if (value === undefined || value === null) return "";
   const raw = String(value).trim();
@@ -770,9 +798,60 @@ function formatAmountForList(value) {
   return raw.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
 }
 
+function findFirstNumericLikeValue(node, maxDepth = 3) {
+  if (maxDepth < 0 || node === null || node === undefined) return undefined;
+
+  if (typeof node === "number") {
+    return Number.isFinite(node) ? node : undefined;
+  }
+
+  if (typeof node === "string") {
+    return node.trim() ? node : undefined;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findFirstNumericLikeValue(item, maxDepth - 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  if (typeof node === "object") {
+    const preferred = [
+      "amount",
+      "value",
+      "total",
+      "sum",
+      "count",
+      "websitesaleamount",
+      "obiletsaleamount"
+    ];
+    for (const [key, value] of Object.entries(node)) {
+      if (preferred.includes(normalizeTokenName(key))) {
+        const found = findFirstNumericLikeValue(value, maxDepth - 1);
+        if (found !== undefined) return found;
+      }
+    }
+    for (const value of Object.values(node)) {
+      const found = findFirstNumericLikeValue(value, maxDepth - 1);
+      if (found !== undefined) return found;
+    }
+  }
+
+  return undefined;
+}
+
 function toNumber(value) {
   if (value === undefined || value === null) return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "object") {
+    const scalar = findFirstNumericLikeValue(value, 4);
+    if (scalar !== undefined && scalar !== value) {
+      return toNumber(scalar);
+    }
+    return null;
+  }
 
   let raw = String(value).trim();
   if (!raw) return null;
@@ -802,7 +881,77 @@ function formatDateParts(year, month, day) {
 function normalizeDateToDay(value) {
   if (value === undefined || value === null) return "";
 
+  if (Array.isArray(value)) {
+    if (value.length >= 3) {
+      const year = Number.parseInt(value[0], 10);
+      const month = Number.parseInt(value[1], 10);
+      const day = Number.parseInt(value[2], 10);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        return formatDateParts(year, month, day);
+      }
+    }
+    for (const item of value) {
+      const normalized = normalizeDateToDay(item);
+      if (normalized) return normalized;
+    }
+  }
+
+  if (typeof value === "object") {
+    const yearValue = getObjectValueByKeyMatcher(
+      value,
+      (key) => key === "year" || key === "yil" || key.endsWith("year")
+    );
+    const monthValue = getObjectValueByKeyMatcher(
+      value,
+      (key) => key === "month" || key === "ay" || key.endsWith("month")
+    );
+    const dayValue = getObjectValueByKeyMatcher(
+      value,
+      (key) => key === "day" || key === "gun" || key.endsWith("day")
+    );
+
+    const year = Number.parseInt(yearValue, 10);
+    const month = Number.parseInt(monthValue, 10);
+    const day = Number.parseInt(dayValue, 10);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      return formatDateParts(year, month, day);
+    }
+
+    const rawObjectDate = getDeepValueByKeyMatcher(
+      value,
+      (key) => key.includes("date") || key.includes("tarih"),
+      3
+    );
+    const normalizedObjectDate = normalizeDateToDay(rawObjectDate);
+    if (normalizedObjectDate) return normalizedObjectDate;
+  }
+
   if (typeof value === "number" && Number.isFinite(value)) {
+    const numeric = Math.trunc(value);
+    const abs = Math.abs(numeric);
+
+    if (abs >= 10000101 && abs <= 99991231) {
+      const raw = String(abs).padStart(8, "0");
+      const year = raw.slice(0, 4);
+      const month = raw.slice(4, 6);
+      const day = raw.slice(6, 8);
+      return formatDateParts(year, month, day);
+    }
+
+    if (abs >= 100001 && abs <= 999912) {
+      const raw = String(abs).padStart(6, "0");
+      const year = raw.slice(0, 4);
+      const month = raw.slice(4, 6);
+      return formatDateParts(year, month, 1);
+    }
+
+    if (abs >= 1000000000 && abs < 100000000000) {
+      const secondsDate = new Date(numeric * 1000);
+      if (!Number.isNaN(secondsDate.getTime())) {
+        return formatDateParts(secondsDate.getFullYear(), secondsDate.getMonth() + 1, secondsDate.getDate());
+      }
+    }
+
     const date = new Date(value);
     if (!Number.isNaN(date.getTime())) {
       return formatDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
@@ -814,6 +963,21 @@ function normalizeDateToDay(value) {
 
   const isoMatch = raw.match(/(\d{4}-\d{2}-\d{2})/);
   if (isoMatch) return isoMatch[1];
+
+  const compactIsoMatch = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactIsoMatch) {
+    return formatDateParts(compactIsoMatch[1], compactIsoMatch[2], compactIsoMatch[3]);
+  }
+
+  const yearMonthMatch = raw.match(/^(\d{4})[-./](\d{2})$/);
+  if (yearMonthMatch) {
+    return formatDateParts(yearMonthMatch[1], yearMonthMatch[2], 1);
+  }
+
+  const compactYearMonthMatch = raw.match(/^(\d{4})(\d{2})$/);
+  if (compactYearMonthMatch) {
+    return formatDateParts(compactYearMonthMatch[1], compactYearMonthMatch[2], 1);
+  }
 
   const trMatch = raw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
   if (trMatch) {
@@ -908,6 +1072,19 @@ function extractSalesTimePointsFromPayload(payload) {
   ];
   const websiteKeys = ["WebsiteSaleAmount", "website-sale-amount", "website_sale_amount"];
   const obiletKeys = ["ObiletSaleAmount", "oBiletSaleAmount", "obilet-sale-amount", "obilet_sale_amount"];
+  const dateKeyMatcher = (normalizedKey) =>
+    normalizedKey.includes("date") ||
+    normalizedKey.includes("tarih") ||
+    normalizedKey === "day" ||
+    normalizedKey.endsWith("day") ||
+    normalizedKey.endsWith("month") ||
+    normalizedKey.includes("month");
+  const websiteMatcher = (normalizedKey) =>
+    normalizedKey.includes("website") &&
+    (normalizedKey.includes("sale") || normalizedKey.includes("amount") || normalizedKey.includes("tutar"));
+  const obiletMatcher = (normalizedKey) =>
+    normalizedKey.includes("obilet") &&
+    (normalizedKey.includes("sale") || normalizedKey.includes("amount") || normalizedKey.includes("tutar"));
 
   const pushPoint = (node) => {
     if (!node || typeof node !== "object") return false;
@@ -919,11 +1096,29 @@ function extractSalesTimePointsFromPayload(payload) {
     if (dateValue === undefined) {
       dateValue = getDeepValueByNormalizedKey(node, dateKeys, 2);
     }
+    if (dateValue === undefined) {
+      dateValue = getObjectValueByKeyMatcher(node, dateKeyMatcher);
+    }
+    if (dateValue === undefined) {
+      dateValue = getDeepValueByKeyMatcher(node, dateKeyMatcher, 4);
+    }
     if (websiteValue === undefined) {
       websiteValue = getDeepValueByNormalizedKey(node, websiteKeys, 2);
     }
+    if (websiteValue === undefined) {
+      websiteValue = getObjectValueByKeyMatcher(node, websiteMatcher);
+    }
+    if (websiteValue === undefined) {
+      websiteValue = getDeepValueByKeyMatcher(node, websiteMatcher, 4);
+    }
     if (obiletValue === undefined) {
       obiletValue = getDeepValueByNormalizedKey(node, obiletKeys, 2);
+    }
+    if (obiletValue === undefined) {
+      obiletValue = getObjectValueByKeyMatcher(node, obiletMatcher);
+    }
+    if (obiletValue === undefined) {
+      obiletValue = getDeepValueByKeyMatcher(node, obiletMatcher, 4);
     }
 
     const day = normalizeDateToDay(dateValue);
