@@ -1847,6 +1847,16 @@ button.ghost {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.sales-filter-form.is-loading {
+  opacity: 0.9;
+}
+
+.sales-loading-message {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #4f6176;
+}
+
 .sales-report-list {
   display: grid;
   gap: 12px;
@@ -1887,6 +1897,75 @@ button.ghost {
 
 .sales-list-table {
   min-width: 460px;
+}
+
+.sales-chart {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sales-chart-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d6dde7;
+  border-radius: 12px;
+  padding: 10px;
+  background: #f7f9fc;
+}
+
+.sales-chart-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #405164;
+}
+
+.sales-chart-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.sales-bar-line {
+  display: grid;
+  grid-template-columns: 58px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.sales-bar-name {
+  font-size: 11px;
+  color: #617389;
+  font-weight: 600;
+}
+
+.sales-bar-track {
+  height: 12px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.sales-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.sales-bar-fill.website {
+  background: #2f7ed8;
+}
+
+.sales-bar-fill.obilet {
+  background: #27a36f;
+}
+
+.sales-bar-number {
+  font-size: 11px;
+  color: #1f2735;
+  min-width: 44px;
+  text-align: right;
+  font-weight: 600;
 }
 
 .sales-report-item {
@@ -2161,5 +2240,13 @@ button.ghost {
   .sales-filter-grid select {
     width: 100%;
     max-width: none;
+  }
+
+  .sales-chart-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-bar-line {
+    grid-template-columns: 58px 1fr 52px;
   }
 }

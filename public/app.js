@@ -734,8 +734,29 @@
     });
   };
 
+  const initSalesReportLoading = () => {
+    const form = document.querySelector(".sales-filter-form");
+    if (!form) return;
+    if (form.dataset.loadingBound === "1") return;
+    form.dataset.loadingBound = "1";
+
+    const submitBtn = form.querySelector(".sales-filter-actions button[type='submit']");
+    const loadingMessage = form.querySelector(".sales-loading-message");
+    if (!submitBtn) return;
+
+    form.addEventListener("submit", () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Yükleniyor...";
+      form.classList.add("is-loading");
+      if (loadingMessage) {
+        loadingMessage.hidden = false;
+      }
+    });
+  };
+
   const initEndpointUI = async () => {
     initSalesTabs();
+    initSalesReportLoading();
 
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;

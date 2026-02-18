@@ -770,6 +770,64 @@ function formatAmountForList(value) {
   return raw.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
 }
 
+function toNumber(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  let raw = String(value).trim();
+  if (!raw) return null;
+  raw = raw.replace(/\s+/g, "");
+
+  if (raw.includes(",") && raw.includes(".")) {
+    if (raw.lastIndexOf(",") > raw.lastIndexOf(".")) {
+      raw = raw.replace(/\./g, "").replace(",", ".");
+    } else {
+      raw = raw.replace(/,/g, "");
+    }
+  } else if (raw.includes(",") && !raw.includes(".")) {
+    raw = raw.replace(",", ".");
+  }
+
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDateParts(year, month, day) {
+  const yyyy = String(year).padStart(4, "0");
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function normalizeDateToDay(value) {
+  if (value === undefined || value === null) return "";
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return formatDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+    }
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  const isoMatch = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+
+  const trMatch = raw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+  if (trMatch) {
+    return formatDateParts(trMatch[3], trMatch[2], trMatch[1]);
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatDateParts(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
+  }
+
+  return "";
+}
+
 function extractSalesRowsFromPayload(payload) {
   const rows = [];
   const codeKeys = ["code", "partner-code", "partner_code", "partnercode"];
@@ -833,6 +891,110 @@ function extractSalesRowsFromPayload(payload) {
     if (!uniqueByRow.has(key)) uniqueByRow.set(key, row);
   });
   return Array.from(uniqueByRow.values());
+}
+
+function extractSalesTimePointsFromPayload(payload) {
+  const points = [];
+  const dateKeys = [
+    "date",
+    "sale-date",
+    "sale_date",
+    "report-date",
+    "report_date",
+    "journey-date",
+    "journey_date",
+    "day",
+    "tarih"
+  ];
+  const websiteKeys = ["WebsiteSaleAmount", "website-sale-amount", "website_sale_amount"];
+  const obiletKeys = ["ObiletSaleAmount", "oBiletSaleAmount", "obilet-sale-amount", "obilet_sale_amount"];
+
+  const pushPoint = (node) => {
+    if (!node || typeof node !== "object") return false;
+
+    let dateValue = getObjectValueByNormalizedKey(node, dateKeys);
+    let websiteValue = getObjectValueByNormalizedKey(node, websiteKeys);
+    let obiletValue = getObjectValueByNormalizedKey(node, obiletKeys);
+
+    if (dateValue === undefined) {
+      dateValue = getDeepValueByNormalizedKey(node, dateKeys, 2);
+    }
+    if (websiteValue === undefined) {
+      websiteValue = getDeepValueByNormalizedKey(node, websiteKeys, 2);
+    }
+    if (obiletValue === undefined) {
+      obiletValue = getDeepValueByNormalizedKey(node, obiletKeys, 2);
+    }
+
+    const day = normalizeDateToDay(dateValue);
+    if (!day) return false;
+
+    const website = toNumber(websiteValue) ?? 0;
+    const obilet = toNumber(obiletValue) ?? 0;
+    if (website === 0 && obilet === 0) return false;
+
+    points.push({ day, website, obilet });
+    return true;
+  };
+
+  const walk = (node) => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) {
+          walk(parsed);
+        }
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item));
+      return;
+    }
+    if (typeof node !== "object") return;
+
+    if (pushPoint(node)) return;
+    Object.values(node).forEach((value) => walk(value));
+  };
+
+  walk(payload);
+  return points;
+}
+
+function buildChartSeries(points, mode) {
+  const map = new Map();
+  (Array.isArray(points) ? points : []).forEach((point) => {
+    if (!point || typeof point !== "object") return;
+    const day = normalizeDateToDay(point.day);
+    if (!day) return;
+    const label = mode === "monthly" ? day.slice(0, 7) : day;
+    const current = map.get(label) || { label, website: 0, obilet: 0 };
+    current.website += toNumber(point.website) ?? 0;
+    current.obilet += toNumber(point.obilet) ?? 0;
+    map.set(label, current);
+  });
+
+  const rows = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "tr"));
+  const maxValue = rows.reduce((max, row) => Math.max(max, row.website, row.obilet), 0);
+  const minVisiblePct = 3;
+
+  return rows.map((row) => {
+    const websitePct =
+      maxValue > 0 && row.website > 0 ? Math.max((row.website / maxValue) * 100, minVisiblePct) : 0;
+    const obiletPct =
+      maxValue > 0 && row.obilet > 0 ? Math.max((row.obilet / maxValue) * 100, minVisiblePct) : 0;
+    return {
+      label: row.label,
+      website: row.website,
+      obilet: row.obilet,
+      websiteText: formatAmountForList(row.website),
+      obiletText: formatAmountForList(row.obilet),
+      websitePct: Number(websitePct.toFixed(2)),
+      obiletPct: Number(obiletPct.toFixed(2))
+    };
+  });
 }
 
 async function fetchSalesReportFromCluster({
@@ -951,6 +1113,7 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
 
     const items = [];
     const listRows = [];
+    const timePoints = [];
     for (const target of targets) {
       const result = await fetchSalesReportFromCluster({
         clusterLabel: target.clusterLabel,
@@ -971,14 +1134,23 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
 
       if (result.ok && result.payload && typeof result.payload === "object") {
         extractSalesRowsFromPayload(result.payload).forEach((row) => listRows.push(row));
+        extractSalesTimePointsFromPayload(result.payload).forEach((point) => timePoints.push(point));
       }
     }
 
-    return { items, listRows, error: null };
+    return {
+      items,
+      listRows,
+      dailySeries: buildChartSeries(timePoints, "daily"),
+      monthlySeries: buildChartSeries(timePoints, "monthly"),
+      error: null
+    };
   } catch (err) {
     return {
       items: [],
       listRows: [],
+      dailySeries: [],
+      monthlySeries: [],
       error: `Satış raporu alınamadı: ${err?.message || "Bilinmeyen hata"}`
     };
   } finally {
@@ -1106,6 +1278,8 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
 
   let reportItems = [];
   let reportListRows = [];
+  let reportDailySeries = [];
+  let reportMonthlySeries = [];
   let reportError = null;
   if (invalidCompanySelection) {
     reportError = "Seçilen firma bilgisi bulunamadı. Lütfen listeden tekrar seçim yapın.";
@@ -1117,6 +1291,8 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
     });
     reportItems = reportResult.items;
     reportListRows = reportResult.listRows || [];
+    reportDailySeries = reportResult.dailySeries || [];
+    reportMonthlySeries = reportResult.monthlySeries || [];
     reportError = reportResult.error;
   }
 
@@ -1133,6 +1309,8 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
       requested: shouldFetchReport,
       items: reportItems,
       listRows: reportListRows,
+      dailySeries: reportDailySeries,
+      monthlySeries: reportMonthlySeries,
       error: reportError
     }
   });
