@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>Tüm Firmalar</h1>
+          <p>Partner servisinden dönen tüm alanlar kolon bazlı gösterilir.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <% if (report.error) { %>
+        <div class="alert inline-alert"><%= report.error %></div>
+      <% } %>
+
+      <section class="table-card panel-card">
+        <div class="table-head">
+          <h2>Partner Sonuçları</h2>
+          <div class="table-actions">
+            <span class="pill"><%= report.rows.length %> Kayıt</span>
+            <span class="pill"><%= report.columns.length %> Kolon</span>
+            <span class="pill"><%= report.clusterCount %> Cluster</span>
+            <a class="button-link ghost" href="/reports/all-companies">Yenile</a>
+          </div>
+        </div>
+
+        <% if (report.columns.length === 0 || report.rows.length === 0) { %>
+          <p class="muted">Gösterilecek partner kaydı bulunamadı.</p>
+        <% } %>
+
+        <% if (report.columns.length > 0 && report.rows.length > 0) { %>
+          <div class="table-scroll">
+            <table class="partners-raw-table">
+              <thead>
+                <tr>
+                  <% report.columns.forEach((column) => { %>
+                    <th><%= column %></th>
+                  <% }) %>
+                </tr>
+              </thead>
+              <tbody>
+                <% report.rows.forEach((row) => { %>
+                  <tr>
+                    <% report.columns.forEach((column) => { %>
+                      <td title="<%= row[column] || '' %>"><%= row[column] || "-" %></td>
+                    <% }) %>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

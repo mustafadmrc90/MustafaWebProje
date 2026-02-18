@@ -865,7 +865,7 @@ async function fetchPartnerCodes() {
 
 async function fetchAllPartnerRows() {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 90000);
 
   try {
     const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
@@ -873,15 +873,33 @@ async function fetchAllPartnerRows() {
       return { columns: [], rows: [], error: "Partner URL yapılandırması boş.", clusterCount: 0 };
     }
 
-    const results = await Promise.all(
-      partnerUrls.map((partnerUrl) => fetchPartnerRawRowsFromCluster(partnerUrl, controller.signal))
-    );
+    const results = [];
+    for (const partnerUrl of partnerUrls) {
+      // Must iterate cluster0..cluster15 in order as requested.
+      const result = await fetchPartnerRawRowsFromCluster(partnerUrl, controller.signal);
+      results.push(result);
+    }
 
     const mergedRows = [];
     const errors = [];
     results.forEach((result) => {
       if (result.error) errors.push(result.error);
       (result.rows || []).forEach((row) => mergedRows.push(row));
+    });
+
+    const clusterRank = (clusterText) => {
+      const match = String(clusterText || "").match(/cluster(\d+)/i);
+      if (!match) return Number.MAX_SAFE_INTEGER;
+      const parsed = Number.parseInt(match[1], 10);
+      return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+    };
+
+    mergedRows.sort((a, b) => {
+      const byCluster = clusterRank(a?.source_cluster) - clusterRank(b?.source_cluster);
+      if (byCluster !== 0) return byCluster;
+      const byCode = String(a?.code || "").localeCompare(String(b?.code || ""), "tr");
+      if (byCode !== 0) return byCode;
+      return String(a?.id || "").localeCompare(String(b?.id || ""), "tr");
     });
 
     const columns = buildPartnerRawColumns(mergedRows);
