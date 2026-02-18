@@ -748,6 +748,21 @@ function getObjectValueByNormalizedKey(object, normalizedKeyList) {
   return undefined;
 }
 
+function getDeepValueByNormalizedKey(node, normalizedKeyList, maxDepth = 3) {
+  if (maxDepth < 0 || node === null || node === undefined) return undefined;
+  if (typeof node !== "object") return undefined;
+
+  const direct = getObjectValueByNormalizedKey(node, normalizedKeyList);
+  if (direct !== undefined) return direct;
+
+  for (const value of Object.values(node)) {
+    const found = getDeepValueByNormalizedKey(value, normalizedKeyList, maxDepth - 1);
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
 function formatAmountForList(value) {
   if (value === undefined || value === null) return "";
   const raw = String(value).trim();
@@ -757,16 +772,27 @@ function formatAmountForList(value) {
 
 function extractSalesRowsFromPayload(payload) {
   const rows = [];
+  const codeKeys = ["code", "partner-code", "partner_code", "partnercode"];
+  const websiteKeys = ["WebsiteSaleAmount", "website-sale-amount", "website_sale_amount"];
+  const obiletKeys = ["ObiletSaleAmount", "oBiletSaleAmount", "obilet-sale-amount", "obilet_sale_amount"];
 
   const pushRow = (node) => {
     if (!node || typeof node !== "object") return false;
 
-    const codeValue = getObjectValueByNormalizedKey(node, ["code"]);
-    const websiteValue = getObjectValueByNormalizedKey(node, ["WebsiteSaleAmount"]);
-    const obiletValue = getObjectValueByNormalizedKey(node, ["ObiletSaleAmount"]);
+    const codeValue = getObjectValueByNormalizedKey(node, codeKeys);
+    let websiteValue = getObjectValueByNormalizedKey(node, websiteKeys);
+    let obiletValue = getObjectValueByNormalizedKey(node, obiletKeys);
 
     const code = String(codeValue || "").trim();
     if (!code) return false;
+
+    // Some responses nest amount fields under inner objects of the same row.
+    if (websiteValue === undefined) {
+      websiteValue = getDeepValueByNormalizedKey(node, websiteKeys, 2);
+    }
+    if (obiletValue === undefined) {
+      obiletValue = getDeepValueByNormalizedKey(node, obiletKeys, 2);
+    }
     if (websiteValue === undefined && obiletValue === undefined) return false;
 
     rows.push({
@@ -779,6 +805,16 @@ function extractSalesRowsFromPayload(payload) {
 
   const walk = (node) => {
     if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) {
+          walk(parsed);
+        }
+      }
+      return;
+    }
     if (Array.isArray(node)) {
       node.forEach((item) => walk(item));
       return;
