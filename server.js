@@ -735,6 +735,70 @@ function stringifyPayload(payload) {
   }
 }
 
+function getObjectValueByNormalizedKey(object, normalizedKeyList) {
+  if (!object || typeof object !== "object") return undefined;
+  const normalizedKeys = new Set(normalizedKeyList.map((key) => normalizeTokenName(key)));
+
+  for (const [key, value] of Object.entries(object)) {
+    if (normalizedKeys.has(normalizeTokenName(key))) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function formatAmountForList(value) {
+  if (value === undefined || value === null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  return raw.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function extractSalesRowsFromPayload(payload) {
+  const rows = [];
+
+  const pushRow = (node) => {
+    if (!node || typeof node !== "object") return false;
+
+    const codeValue = getObjectValueByNormalizedKey(node, ["code"]);
+    const websiteValue = getObjectValueByNormalizedKey(node, ["WebsiteSaleAmount"]);
+    const obiletValue = getObjectValueByNormalizedKey(node, ["ObiletSaleAmount"]);
+
+    const code = String(codeValue || "").trim();
+    if (!code) return false;
+    if (websiteValue === undefined && obiletValue === undefined) return false;
+
+    rows.push({
+      code,
+      websiteSaleAmount: formatAmountForList(websiteValue),
+      obiletSaleAmount: formatAmountForList(obiletValue)
+    });
+    return true;
+  };
+
+  const walk = (node) => {
+    if (node === null || node === undefined) return;
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item));
+      return;
+    }
+    if (typeof node !== "object") return;
+
+    if (pushRow(node)) return;
+    Object.values(node).forEach((value) => walk(value));
+  };
+
+  walk(payload);
+
+  const uniqueByRow = new Map();
+  rows.forEach((row) => {
+    const key = `${row.code}__${row.websiteSaleAmount}__${row.obiletSaleAmount}`;
+    if (!uniqueByRow.has(key)) uniqueByRow.set(key, row);
+  });
+  return Array.from(uniqueByRow.values());
+}
+
 async function fetchSalesReportFromCluster({
   clusterLabel,
   reportUrl,
@@ -850,6 +914,7 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     }
 
     const items = [];
+    const listRows = [];
     for (const target of targets) {
       const result = await fetchSalesReportFromCluster({
         clusterLabel: target.clusterLabel,
@@ -867,12 +932,17 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
         error: result.error,
         payloadText: stringifyPayload(result.payload)
       });
+
+      if (result.ok && result.payload && typeof result.payload === "object") {
+        extractSalesRowsFromPayload(result.payload).forEach((row) => listRows.push(row));
+      }
     }
 
-    return { items, error: null };
+    return { items, listRows, error: null };
   } catch (err) {
     return {
       items: [],
+      listRows: [],
       error: `Satış raporu alınamadı: ${err?.message || "Bilinmeyen hata"}`
     };
   } finally {
@@ -999,6 +1069,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
   const invalidCompanySelection = requestedCompany !== "all" && !selectedCompanyMeta;
 
   let reportItems = [];
+  let reportListRows = [];
   let reportError = null;
   if (invalidCompanySelection) {
     reportError = "Seçilen firma bilgisi bulunamadı. Lütfen listeden tekrar seçim yapın.";
@@ -1009,6 +1080,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
       selectedCompany: company === "all" ? null : selectedCompanyMeta
     });
     reportItems = reportResult.items;
+    reportListRows = reportResult.listRows || [];
     reportError = reportResult.error;
   }
 
@@ -1024,6 +1096,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
     report: {
       requested: shouldFetchReport,
       items: reportItems,
+      listRows: reportListRows,
       error: reportError
     }
   });

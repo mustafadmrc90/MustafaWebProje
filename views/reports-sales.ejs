@@ -57,39 +57,84 @@
 
       <section class="table-card panel-card">
         <h2>Satış Raporları</h2>
-        <% if (!report.requested) { %>
-          <p class="muted">Raporu görmek için tarih ve firma seçip Filtrele'ye basın.</p>
-        <% } %>
+        <div class="sales-tabs" role="tablist" aria-label="Satış raporu görünümleri">
+          <button type="button" class="sales-tab active" data-sales-tab="list">Liste</button>
+          <button type="button" class="sales-tab" data-sales-tab="daily">Günlük</button>
+          <button type="button" class="sales-tab" data-sales-tab="monthly">Aylık</button>
+        </div>
 
         <% if (report.error) { %>
           <div class="alert inline-alert"><%= report.error %></div>
         <% } %>
 
-        <% if (report.requested && report.items.length === 0 && !report.error) { %>
-          <p class="muted">Seçilen filtre için sonuç bulunamadı.</p>
-        <% } %>
+        <div class="sales-tab-panel active" data-sales-panel="list">
+          <% if (!report.requested) { %>
+            <p class="muted">Raporu görmek için tarih ve firma seçip Filtrele'ye basın.</p>
+          <% } %>
 
-        <% if (report.items.length > 0) { %>
-          <div class="sales-report-list">
-            <% report.items.forEach((item) => { %>
-              <article class="sales-report-item">
-                <div class="sales-report-head">
-                  <strong><%= item.cluster %></strong>
-                  <span class="pill <%= item.ok ? 'success' : 'muted' %>">
-                    <%= item.ok ? `OK (${item.status})` : `Hata (${item.status || 0})` %>
-                  </span>
-                </div>
-                <% if (item.reportUrl) { %>
-                  <div class="sales-report-url"><%= item.reportUrl %></div>
-                <% } %>
-                <% if (item.error) { %>
-                  <div class="alert inline-alert"><%= item.error %></div>
-                <% } %>
-                <pre class="code-output sales-report-output"><%= item.payloadText %></pre>
-              </article>
-            <% }) %>
-          </div>
-        <% } %>
+          <% if (report.requested && report.listRows.length === 0 && !report.error) { %>
+            <p class="muted">Liste görünümünde gösterilecek veri bulunamadı.</p>
+          <% } %>
+
+          <% if (report.listRows.length > 0) { %>
+            <div class="table-scroll">
+              <table class="sales-list-table">
+                <thead>
+                  <tr>
+                    <th>Firma Adı</th>
+                    <th>WebSite</th>
+                    <th>oBilet</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% report.listRows.forEach((row) => { %>
+                    <tr>
+                      <td><%= row.code %></td>
+                      <td><%= row.websiteSaleAmount %></td>
+                      <td><%= row.obiletSaleAmount %></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          <% } %>
+        </div>
+
+        <div class="sales-tab-panel" data-sales-panel="daily">
+          <% if (!report.requested) { %>
+            <p class="muted">Günlük görünüm için filtreleyip raporu çalıştırın.</p>
+          <% } %>
+
+          <% if (report.requested && report.items.length === 0 && !report.error) { %>
+            <p class="muted">Günlük görünümde gösterilecek sonuç bulunamadı.</p>
+          <% } %>
+
+          <% if (report.items.length > 0) { %>
+            <div class="sales-report-list">
+              <% report.items.forEach((item) => { %>
+                <article class="sales-report-item">
+                  <div class="sales-report-head">
+                    <strong><%= item.cluster %></strong>
+                    <span class="pill <%= item.ok ? 'success' : 'muted' %>">
+                      <%= item.ok ? `OK (${item.status})` : `Hata (${item.status || 0})` %>
+                    </span>
+                  </div>
+                  <% if (item.reportUrl) { %>
+                    <div class="sales-report-url"><%= item.reportUrl %></div>
+                  <% } %>
+                  <% if (item.error) { %>
+                    <div class="alert inline-alert"><%= item.error %></div>
+                  <% } %>
+                  <pre class="code-output sales-report-output"><%= item.payloadText %></pre>
+                </article>
+              <% }) %>
+            </div>
+          <% } %>
+        </div>
+
+        <div class="sales-tab-panel" data-sales-panel="monthly">
+          <p class="muted">Aylık görünüm bir sonraki adımda hazırlanacak.</p>
+        </div>
       </section>
     </section>
     <script src="/public/app.js" defer></script>

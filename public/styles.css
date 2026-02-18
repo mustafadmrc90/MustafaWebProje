@@ -1853,6 +1853,42 @@ button.ghost {
   margin-top: 12px;
 }
 
+.sales-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.sales-tab {
+  border: 1px solid #b9c6d7;
+  background: transparent;
+  color: #1f2735;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sales-tab.active {
+  background: #1f2735;
+  color: #fff;
+  border-color: #1f2735;
+}
+
+.sales-tab-panel {
+  display: none;
+}
+
+.sales-tab-panel.active {
+  display: block;
+}
+
+.sales-list-table {
+  min-width: 460px;
+}
+
 .sales-report-item {
   border: 1px solid #d6dde7;
   border-radius: 12px;

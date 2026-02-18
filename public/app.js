@@ -716,7 +716,27 @@
     });
   };
 
+  const initSalesTabs = () => {
+    const tabs = Array.from(document.querySelectorAll(".sales-tab"));
+    const panels = Array.from(document.querySelectorAll(".sales-tab-panel"));
+    if (tabs.length === 0 || panels.length === 0) return;
+
+    tabs.forEach((tab) => {
+      if (tab.dataset.bound === "1") return;
+      tab.dataset.bound = "1";
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.salesTab;
+        tabs.forEach((item) => item.classList.toggle("active", item === tab));
+        panels.forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.salesPanel === target);
+        });
+      });
+    });
+  };
+
   const initEndpointUI = async () => {
+    initSalesTabs();
+
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;
     const openBtn = document.querySelector("#open-endpoint-modal");
