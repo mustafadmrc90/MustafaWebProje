@@ -1745,15 +1745,22 @@ button.ghost {
   font-size: 15px;
 }
 
+.sales-filter-section {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+}
+
 .sales-filter-form {
   display: grid;
-  grid-template-columns: max-content max-content max-content;
-  column-gap: 12px;
+  grid-template-columns: 1fr auto;
+  column-gap: 16px;
   row-gap: 10px;
-  align-items: end;
-  margin-top: 8px;
-  width: fit-content;
-  max-width: 100%;
+  align-items: start;
+  margin-top: 0;
+  width: 100%;
+  max-width: none;
   padding: 12px 14px 14px;
   border-radius: 16px;
   border: 2px solid #c2ccd9;
@@ -1767,7 +1774,7 @@ button.ghost {
     "start company"
     "end .";
   gap: 10px 12px;
-  grid-column: 1 / span 2;
+  grid-column: 1;
 }
 
 .sales-filter-grid label {
@@ -1818,9 +1825,9 @@ button.ghost {
 .sales-filter-actions {
   display: flex;
   justify-content: flex-end;
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1;
-  align-self: end;
+  align-self: start;
 }
 
 .sales-filter-actions button {
