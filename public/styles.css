@@ -1855,9 +1855,17 @@ button.ghost {
   grid-column: 1 / -1;
   font-size: 12px;
   color: #4f6176;
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 8px;
+}
+
+.sales-filter-form.is-loading .sales-loading-message {
+  display: inline-flex;
+}
+
+.sales-loading-message[hidden] {
+  display: none !important;
 }
 
 .sales-loading-message::before {
@@ -1910,6 +1918,24 @@ button.ghost {
 
 .sales-list-table {
   min-width: 460px;
+}
+
+.sales-list-table th:nth-child(2),
+.sales-list-table th:nth-child(3),
+.sales-list-table td:nth-child(2),
+.sales-list-table td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-list-table tfoot td {
+  font-weight: 700;
+  border-top: 2px solid #c6d2e0;
+  background: #eef3f8;
+}
+
+.sales-list-table tfoot td:first-child {
+  text-align: left;
 }
 
 .sales-chart {

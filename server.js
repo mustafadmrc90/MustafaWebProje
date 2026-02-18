@@ -1136,6 +1136,50 @@ function extractSalesRowsFromPayload(payload) {
   return Array.from(uniqueByRow.values());
 }
 
+function groupSalesRowsByCode(rows) {
+  const byCode = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (!row || typeof row !== "object") return;
+    const code = String(row.code || "").trim();
+    if (!code) return;
+
+    const website = toNumber(row.websiteSaleAmountValue) ?? 0;
+    const obilet = toNumber(row.obiletSaleAmountValue) ?? 0;
+    const current = byCode.get(code) || { code, websiteSaleAmountValue: 0, obiletSaleAmountValue: 0 };
+    current.websiteSaleAmountValue += website;
+    current.obiletSaleAmountValue += obilet;
+    byCode.set(code, current);
+  });
+
+  return Array.from(byCode.values())
+    .sort((a, b) => a.code.localeCompare(b.code, "tr"))
+    .map((row) => ({
+      code: row.code,
+      websiteSaleAmountValue: row.websiteSaleAmountValue,
+      obiletSaleAmountValue: row.obiletSaleAmountValue,
+      websiteSaleAmount: formatCurrencyTry(row.websiteSaleAmountValue),
+      obiletSaleAmount: formatCurrencyTry(row.obiletSaleAmountValue)
+    }));
+}
+
+function buildSalesListTotals(rows) {
+  const totals = (Array.isArray(rows) ? rows : []).reduce(
+    (acc, row) => {
+      acc.website += toNumber(row?.websiteSaleAmountValue) ?? 0;
+      acc.obilet += toNumber(row?.obiletSaleAmountValue) ?? 0;
+      return acc;
+    },
+    { website: 0, obilet: 0 }
+  );
+
+  return {
+    websiteValue: totals.website,
+    obiletValue: totals.obilet,
+    websiteText: formatCurrencyTry(totals.website),
+    obiletText: formatCurrencyTry(totals.obilet)
+  };
+}
+
 function extractSalesTimePointsFromPayload(payload) {
   const points = [];
   const dateKeys = [
@@ -1421,20 +1465,22 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
 
     const runRequestsForRanges = async (
       ranges,
-      { collectItems = false, collectListRows = false } = {}
+      { collectItems = false, collectListRows = false, groupByCode = false } = {}
     ) => {
       const rowsByLabel = new Map();
       const items = [];
       const listRows = [];
       const errors = [];
 
-      (Array.isArray(ranges) ? ranges : []).forEach((range) => {
-        const label = String(range?.label || "").trim();
-        if (!label) return;
-        if (!rowsByLabel.has(label)) {
-          rowsByLabel.set(label, { label, website: 0, obilet: 0 });
-        }
-      });
+      if (!groupByCode) {
+        (Array.isArray(ranges) ? ranges : []).forEach((range) => {
+          const label = String(range?.label || "").trim();
+          if (!label) return;
+          if (!rowsByLabel.has(label)) {
+            rowsByLabel.set(label, { label, website: 0, obilet: 0 });
+          }
+        });
+      }
 
       for (const range of Array.isArray(ranges) ? ranges : []) {
         if (!range || !range.startDate || !range.endDate) continue;
@@ -1478,15 +1524,42 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
 
           if (!result.payload || typeof result.payload !== "object") return;
 
-          const row = rowsByLabel.get(range.label) || {
-            label: String(range.label || ""),
-            website: 0,
-            obilet: 0
-          };
-          const totals = extractSalesTotalsFromPayload(result.payload);
-          row.website += totals.website;
-          row.obilet += totals.obilet;
-          rowsByLabel.set(range.label, row);
+          if (groupByCode) {
+            const groupedRows = groupSalesRowsByCode(extractSalesRowsFromPayload(result.payload));
+            if (groupedRows.length > 0) {
+              groupedRows.forEach((item) => {
+                const code = String(item.code || "").trim();
+                if (!code) return;
+                const rowKey = `${range.label}__${code}`;
+                const label = `${range.label} - ${code}`;
+                const row = rowsByLabel.get(rowKey) || { label, website: 0, obilet: 0 };
+                row.website += toNumber(item.websiteSaleAmountValue) ?? 0;
+                row.obilet += toNumber(item.obiletSaleAmountValue) ?? 0;
+                rowsByLabel.set(rowKey, row);
+              });
+            } else {
+              const fallbackKey = String(range.label || "");
+              const row = rowsByLabel.get(fallbackKey) || {
+                label: fallbackKey,
+                website: 0,
+                obilet: 0
+              };
+              const totals = extractSalesTotalsFromPayload(result.payload);
+              row.website += totals.website;
+              row.obilet += totals.obilet;
+              rowsByLabel.set(fallbackKey, row);
+            }
+          } else {
+            const row = rowsByLabel.get(range.label) || {
+              label: String(range.label || ""),
+              website: 0,
+              obilet: 0
+            };
+            const totals = extractSalesTotalsFromPayload(result.payload);
+            row.website += totals.website;
+            row.obilet += totals.obilet;
+            rowsByLabel.set(range.label, row);
+          }
 
           if (collectListRows) {
             extractSalesRowsFromPayload(result.payload).forEach((item) => listRows.push(item));
@@ -1513,8 +1586,11 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
       { collectItems: true, collectListRows: true }
     );
 
-    const dailyResult = await runRequestsForRanges(dailyRanges);
-    const monthlyResult = await runRequestsForRanges(monthlyRanges);
+    const listRowsGrouped = groupSalesRowsByCode(listResult.listRows);
+    const listTotals = buildSalesListTotals(listRowsGrouped);
+    const shouldGroupSeriesByCode = !selectedCompany;
+    const dailyResult = await runRequestsForRanges(dailyRanges, { groupByCode: shouldGroupSeriesByCode });
+    const monthlyResult = await runRequestsForRanges(monthlyRanges, { groupByCode: shouldGroupSeriesByCode });
 
     const allErrors = [...listResult.errors, ...dailyResult.errors, ...monthlyResult.errors];
     const error =
@@ -1526,7 +1602,8 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
 
     return {
       items: listResult.items,
-      listRows: listResult.listRows,
+      listRows: listRowsGrouped,
+      listTotals,
       dailySeries: buildChartSeries(dailyResult.seriesRows),
       monthlySeries: buildChartSeries(monthlyResult.seriesRows),
       error
@@ -1535,6 +1612,7 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     return {
       items: [],
       listRows: [],
+      listTotals: buildSalesListTotals([]),
       dailySeries: [],
       monthlySeries: [],
       error: `Satış raporu alınamadı: ${err?.message || "Bilinmeyen hata"}`
@@ -1664,6 +1742,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
 
   let reportItems = [];
   let reportListRows = [];
+  let reportListTotals = buildSalesListTotals([]);
   let reportDailySeries = [];
   let reportMonthlySeries = [];
   let reportError = null;
@@ -1677,6 +1756,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
     });
     reportItems = reportResult.items;
     reportListRows = reportResult.listRows || [];
+    reportListTotals = reportResult.listTotals || buildSalesListTotals([]);
     reportDailySeries = reportResult.dailySeries || [];
     reportMonthlySeries = reportResult.monthlySeries || [];
     reportError = reportResult.error;
@@ -1695,6 +1775,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
       requested: shouldFetchReport,
       items: reportItems,
       listRows: reportListRows,
+      listTotals: reportListTotals,
       dailySeries: reportDailySeries,
       monthlySeries: reportMonthlySeries,
       error: reportError

@@ -96,6 +96,13 @@
                     </tr>
                   <% }) %>
                 </tbody>
+                <tfoot>
+                  <tr class="sales-list-total-row">
+                    <td>Dip Toplam</td>
+                    <td><%= report.listTotals.websiteText %></td>
+                    <td><%= report.listTotals.obiletText %></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           <% } %>
