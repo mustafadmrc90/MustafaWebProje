@@ -791,13 +791,6 @@ function getDeepValueByKeyMatcher(node, matcher, maxDepth = 3) {
   return undefined;
 }
 
-function formatAmountForList(value) {
-  if (value === undefined || value === null) return "";
-  const raw = String(value).trim();
-  if (!raw) return "";
-  return raw.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
-}
-
 function findFirstNumericLikeValue(node, maxDepth = 3) {
   if (maxDepth < 0 || node === null || node === undefined) return undefined;
 
@@ -869,6 +862,15 @@ function toNumber(value) {
 
   const parsed = Number.parseFloat(raw);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatCurrencyTry(value) {
+  const amount = toNumber(value);
+  if (amount === null) return "";
+  return `${new Intl.NumberFormat("tr-TR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount)} TL`;
 }
 
 function formatDateParts(year, month, day) {
@@ -1094,8 +1096,10 @@ function extractSalesRowsFromPayload(payload) {
 
     rows.push({
       code,
-      websiteSaleAmount: formatAmountForList(websiteValue),
-      obiletSaleAmount: formatAmountForList(obiletValue)
+      websiteSaleAmountValue: toNumber(websiteValue) ?? 0,
+      obiletSaleAmountValue: toNumber(obiletValue) ?? 0,
+      websiteSaleAmount: formatCurrencyTry(websiteValue),
+      obiletSaleAmount: formatCurrencyTry(obiletValue)
     });
     return true;
   };
@@ -1126,7 +1130,7 @@ function extractSalesRowsFromPayload(payload) {
 
   const uniqueByRow = new Map();
   rows.forEach((row) => {
-    const key = `${row.code}__${row.websiteSaleAmount}__${row.obiletSaleAmount}`;
+    const key = `${row.code}__${row.websiteSaleAmountValue}__${row.obiletSaleAmountValue}`;
     if (!uniqueByRow.has(key)) uniqueByRow.set(key, row);
   });
   return Array.from(uniqueByRow.values());
@@ -1240,8 +1244,8 @@ function extractSalesTotalsFromPayload(payload) {
   const listRows = extractSalesRowsFromPayload(payload);
   if (listRows.length > 0) {
     listRows.forEach((row) => {
-      website += toNumber(row.websiteSaleAmount) ?? 0;
-      obilet += toNumber(row.obiletSaleAmount) ?? 0;
+      website += toNumber(row.websiteSaleAmountValue) ?? 0;
+      obilet += toNumber(row.obiletSaleAmountValue) ?? 0;
     });
     return { website, obilet };
   }
@@ -1277,8 +1281,8 @@ function buildChartSeries(rows) {
       label: row.label,
       website: row.website,
       obilet: row.obilet,
-      websiteText: formatAmountForList(row.website),
-      obiletText: formatAmountForList(row.obilet),
+      websiteText: formatCurrencyTry(row.website),
+      obiletText: formatCurrencyTry(row.obilet),
       websitePct: Number(websitePct.toFixed(2)),
       obiletPct: Number(obiletPct.toFixed(2))
     };

@@ -1855,6 +1855,19 @@ button.ghost {
   grid-column: 1 / -1;
   font-size: 12px;
   color: #4f6176;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sales-loading-message::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid #b7c5d8;
+  border-top-color: #4f6176;
+  animation: salesSpin 0.8s linear infinite;
 }
 
 .sales-report-list {
@@ -2120,6 +2133,15 @@ button.ghost {
   }
   100% {
     box-shadow: 0 0 0 0 rgba(63, 143, 88, 0);
+  }
+}
+
+@keyframes salesSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
