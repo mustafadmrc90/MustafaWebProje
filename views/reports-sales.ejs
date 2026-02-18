@@ -23,12 +23,12 @@
       <section class="table-card panel-card">
         <form class="sales-filter-form" method="get" action="/reports/sales">
           <div class="sales-filter-grid">
-            <label>
+            <label class="sales-filter-field sales-filter-field-start">
               <span>Başlangıç Tarihi</span>
               <input type="date" name="startDate" value="<%= filters.startDate %>" />
             </label>
 
-            <label>
+            <label class="sales-filter-field sales-filter-field-company">
               <span>Firma</span>
               <select name="company">
                 <% companies.forEach((item) => { %>
@@ -43,7 +43,7 @@
               </select>
             </label>
 
-            <label>
+            <label class="sales-filter-field sales-filter-field-end">
               <span>Bitiş Tarihi</span>
               <input type="date" name="endDate" value="<%= filters.endDate %>" />
             </label>

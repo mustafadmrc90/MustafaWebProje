@@ -1747,10 +1747,13 @@ button.ghost {
 
 .sales-filter-form {
   display: grid;
-  gap: 10px;
+  grid-template-columns: max-content max-content max-content;
+  column-gap: 12px;
+  row-gap: 10px;
+  align-items: end;
   margin-top: 8px;
-  width: 100%;
-  max-width: 1200px;
+  width: fit-content;
+  max-width: 100%;
   padding: 12px 14px 14px;
   border-radius: 16px;
   border: 2px solid #c2ccd9;
@@ -1759,13 +1762,29 @@ button.ghost {
 
 .sales-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  grid-template-columns: max-content max-content;
+  grid-template-areas:
+    "start company"
+    "end .";
   gap: 10px 12px;
+  grid-column: 1 / span 2;
 }
 
 .sales-filter-grid label {
   display: grid;
   gap: 5px;
+}
+
+.sales-filter-field-start {
+  grid-area: start;
+}
+
+.sales-filter-field-company {
+  grid-area: company;
+}
+
+.sales-filter-field-end {
+  grid-area: end;
 }
 
 .sales-filter-grid label span {
@@ -1785,6 +1804,8 @@ button.ghost {
   background: #f1f4f8;
   font-size: 13px;
   color: #1f2735;
+  width: 185px;
+  max-width: 185px;
 }
 
 .sales-filter-grid input:focus,
@@ -1797,13 +1818,16 @@ button.ghost {
 .sales-filter-actions {
   display: flex;
   justify-content: flex-end;
-  order: -1;
+  grid-column: 3;
+  grid-row: 1;
+  align-self: end;
 }
 
 .sales-filter-actions button {
   padding: 8px 12px;
   border-radius: 10px;
   font-size: 12px;
+  min-height: 38px;
   background: transparent;
   color: #1f2735;
   border: 1px solid #b9c6d7;
@@ -2040,9 +2064,27 @@ button.ghost {
 
   .sales-filter-grid {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "start"
+      "company"
+      "end";
+    grid-column: auto;
   }
 
   .sales-filter-actions {
-    justify-content: flex-end;
+    grid-column: auto;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .sales-filter-form {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .sales-filter-grid input,
+  .sales-filter-grid select {
+    width: 100%;
+    max-width: none;
   }
 }
