@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs/promises");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
@@ -16,6 +17,9 @@ const PARTNERS_SESSION_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession";
 const PARTNERS_API_AUTH =
   process.env.PARTNERS_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const PARTNER_CLUSTER_MIN = 0;
+const PARTNER_CLUSTER_MAX = 15;
+const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -332,7 +336,81 @@ function parseJsonSafe(text) {
   }
 }
 
-async function fetchPartnerSessionCredentials(signal) {
+function buildClusterPartnerUrls(baseUrl) {
+  const raw = String(baseUrl || "").trim();
+  if (!raw) return [];
+
+  if (!/cluster\d+/i.test(raw)) {
+    return [raw];
+  }
+
+  const urls = [];
+  for (let cluster = PARTNER_CLUSTER_MIN; cluster <= PARTNER_CLUSTER_MAX; cluster += 1) {
+    urls.push(raw.replace(/cluster\d+/i, `cluster${cluster}`));
+  }
+  return urls;
+}
+
+function extractClusterLabel(url) {
+  const match = String(url || "").match(/cluster\d+/i);
+  return match ? match[0].toLowerCase() : "cluster";
+}
+
+function buildSessionUrlForPartnerUrl(partnerUrl) {
+  try {
+    const parsed = new URL(String(partnerUrl || ""));
+    parsed.pathname = "/api/client/getsession";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return PARTNERS_SESSION_API_URL;
+  }
+}
+
+function normalizeCodes(codes) {
+  const unique = new Set();
+  (Array.isArray(codes) ? codes : []).forEach((code) => {
+    const normalized = String(code || "").trim();
+    if (normalized) unique.add(normalized);
+  });
+  return Array.from(unique).sort((a, b) => a.localeCompare(b, "tr"));
+}
+
+async function loadPartnerCodesCache() {
+  try {
+    const raw = await fs.readFile(PARTNER_CODES_CACHE_FILE, "utf8");
+    const parsed = parseJsonSafe(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const codes = normalizeCodes(parsed.codes);
+    if (codes.length === 0) return null;
+    return {
+      codes,
+      updatedAt: String(parsed.updatedAt || "")
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+async function savePartnerCodesCache(codes) {
+  const normalizedCodes = normalizeCodes(codes);
+  if (normalizedCodes.length === 0) return;
+
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    codes: normalizedCodes
+  };
+
+  try {
+    await fs.mkdir(path.dirname(PARTNER_CODES_CACHE_FILE), { recursive: true });
+    await fs.writeFile(PARTNER_CODES_CACHE_FILE, JSON.stringify(payload, null, 2), "utf8");
+  } catch (err) {
+    console.error("Partner cache write error:", err);
+  }
+}
+
+async function fetchPartnerSessionCredentials(sessionUrl, signal) {
   const payload = {
     type: 1,
     connection: {
@@ -344,7 +422,7 @@ async function fetchPartnerSessionCredentials(signal) {
     }
   };
 
-  const response = await fetch(PARTNERS_SESSION_API_URL, {
+  const response = await fetch(sessionUrl, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -402,14 +480,14 @@ async function fetchPartnerSessionCredentials(signal) {
   };
 }
 
-async function fetchPartnerCodes() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
+  const clusterLabel = extractClusterLabel(partnerUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl);
 
   try {
-    const sessionResult = await fetchPartnerSessionCredentials(controller.signal);
+    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal);
     if (sessionResult.error) {
-      return { codes: [], error: sessionResult.error };
+      return { clusterLabel, codes: [], error: `${clusterLabel}: ${sessionResult.error}` };
     }
 
     const partnerRequestBody = {
@@ -422,7 +500,7 @@ async function fetchPartnerCodes() {
       language: "tr-TR"
     };
 
-    const response = await fetch(PARTNERS_API_URL, {
+    const response = await fetch(partnerUrl, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -430,7 +508,7 @@ async function fetchPartnerCodes() {
         Authorization: PARTNERS_API_AUTH
       },
       body: JSON.stringify(partnerRequestBody),
-      signal: controller.signal
+      signal
     });
 
     const raw = await response.text();
@@ -443,24 +521,94 @@ async function fetchPartnerCodes() {
           String(payload.message || payload.error || "").trim()) ||
         response.statusText ||
         "Bilinmeyen hata";
-      const message = `Partner API HTTP ${response.status}: ${apiError}`;
-      console.error("Partner API request failed:", message);
-      return { codes: [], error: message };
+      return {
+        clusterLabel,
+        codes: [],
+        error: `${clusterLabel}: Partner API HTTP ${response.status}: ${apiError}`
+      };
     }
 
     if (!payload) {
-      return { codes: [], error: "Partner API JSON parse edilemedi." };
+      return {
+        clusterLabel,
+        codes: [],
+        error: `${clusterLabel}: Partner API JSON parse edilemedi.`
+      };
     }
 
-    const codes = extractPartnerCodes(payload);
-    if (codes.length === 0) {
-      return { codes: [], error: "Partner API sonucu boş (status=1 ve code bulunan kayıt yok)." };
+    return {
+      clusterLabel,
+      codes: extractPartnerCodes(payload),
+      error: null
+    };
+  } catch (err) {
+    return {
+      clusterLabel,
+      codes: [],
+      error: `${clusterLabel}: ${err?.message || "Partner API fetch hatası"}`
+    };
+  }
+}
+
+async function fetchPartnerCodes() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
+    if (partnerUrls.length === 0) {
+      return { codes: [], error: "Partner URL yapılandırması boş." };
     }
 
-    return { codes, error: null };
+    const results = await Promise.all(
+      partnerUrls.map((partnerUrl) => fetchPartnerCodesFromCluster(partnerUrl, controller.signal))
+    );
+
+    const errors = [];
+    const mergedCodes = new Set();
+
+    results.forEach((result) => {
+      if (result.error) errors.push(result.error);
+      result.codes.forEach((code) => mergedCodes.add(code));
+    });
+
+    const codes = normalizeCodes(Array.from(mergedCodes));
+    if (codes.length > 0) {
+      await savePartnerCodesCache(codes);
+      if (errors.length > 0) {
+        return { codes, error: `${errors.length}/${partnerUrls.length} cluster alınamadı.` };
+      }
+      return { codes, error: null };
+    }
+
+    const cache = await loadPartnerCodesCache();
+    if (cache && cache.codes.length > 0) {
+      const cacheDate = cache.updatedAt ? new Date(cache.updatedAt).toLocaleString("tr-TR") : "";
+      const suffix = cacheDate ? ` (${cacheDate})` : "";
+      return {
+        codes: cache.codes,
+        error: `Canlı veriler alınamadı, önbellekten gösteriliyor${suffix}.`
+      };
+    }
+
+    if (errors.length > 0) {
+      console.error("Partner API cluster errors:", errors);
+      return { codes: [], error: errors[0] };
+    }
+
+    return { codes: [], error: "Partner API sonucu boş (status=1 ve code bulunan kayıt yok)." };
   } catch (err) {
     const message = `Partner API fetch hatası: ${err?.message || "Bilinmeyen hata"}`;
     console.error("Partner API fetch error:", err);
+    const cache = await loadPartnerCodesCache();
+    if (cache && cache.codes.length > 0) {
+      const cacheDate = cache.updatedAt ? new Date(cache.updatedAt).toLocaleString("tr-TR") : "";
+      const suffix = cacheDate ? ` (${cacheDate})` : "";
+      return {
+        codes: cache.codes,
+        error: `Canlı veriler alınamadı, önbellekten gösteriliyor${suffix}.`
+      };
+    }
     return { codes: [], error: message };
   } finally {
     clearTimeout(timeout);
