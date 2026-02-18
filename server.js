@@ -992,6 +992,60 @@ function normalizeDateToDay(value) {
   return "";
 }
 
+function parseIsoDateUtc(value) {
+  const normalized = normalizeDateToDay(value);
+  if (!normalized) return null;
+  const [yearText, monthText, dayText] = normalized.split("-");
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const day = Number.parseInt(dayText, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return parsed;
+}
+
+function buildDailyLabelsInRange(startDate, endDate) {
+  const start = parseIsoDateUtc(startDate);
+  const end = parseIsoDateUtc(endDate);
+  if (!start || !end) return [];
+
+  const from = start.getTime() <= end.getTime() ? start : end;
+  const to = start.getTime() <= end.getTime() ? end : start;
+  const cursor = new Date(from.getTime());
+  const labels = [];
+
+  while (cursor.getTime() <= to.getTime()) {
+    labels.push(formatDateParts(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate()));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (labels.length > 4000) break;
+  }
+
+  return labels;
+}
+
+function buildMonthlyLabelsInRange(startDate, endDate) {
+  const start = parseIsoDateUtc(startDate);
+  const end = parseIsoDateUtc(endDate);
+  if (!start || !end) return [];
+
+  const from = start.getTime() <= end.getTime() ? start : end;
+  const to = start.getTime() <= end.getTime() ? end : start;
+  const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
+  const last = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+  const labels = [];
+
+  while (cursor.getTime() <= last.getTime()) {
+    labels.push(`${String(cursor.getUTCFullYear()).padStart(4, "0")}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    if (labels.length > 600) break;
+  }
+
+  return labels;
+}
+
 function extractSalesRowsFromPayload(payload) {
   const rows = [];
   const codeKeys = ["code", "partner-code", "partner_code", "partnercode"];
@@ -1158,8 +1212,19 @@ function extractSalesTimePointsFromPayload(payload) {
   return points;
 }
 
-function buildChartSeries(points, mode) {
+function buildChartSeries(points, mode, { startDate = "", endDate = "" } = {}) {
   const map = new Map();
+  const presetLabels =
+    mode === "monthly"
+      ? buildMonthlyLabelsInRange(startDate, endDate)
+      : buildDailyLabelsInRange(startDate, endDate);
+
+  presetLabels.forEach((label) => {
+    if (!map.has(label)) {
+      map.set(label, { label, website: 0, obilet: 0 });
+    }
+  });
+
   (Array.isArray(points) ? points : []).forEach((point) => {
     if (!point || typeof point !== "object") return;
     const day = normalizeDateToDay(point.day);
@@ -1336,8 +1401,8 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     return {
       items,
       listRows,
-      dailySeries: buildChartSeries(timePoints, "daily"),
-      monthlySeries: buildChartSeries(timePoints, "monthly"),
+      dailySeries: buildChartSeries(timePoints, "daily", { startDate, endDate }),
+      monthlySeries: buildChartSeries(timePoints, "monthly", { startDate, endDate }),
       error: null
     };
   } catch (err) {
