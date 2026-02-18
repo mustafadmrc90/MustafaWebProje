@@ -1007,7 +1007,11 @@ function parseIsoDateUtc(value) {
   return parsed;
 }
 
-function buildDailyLabelsInRange(startDate, endDate) {
+function formatUtcDate(date) {
+  return formatDateParts(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+}
+
+function buildDailyRequestRanges(startDate, endDate) {
   const start = parseIsoDateUtc(startDate);
   const end = parseIsoDateUtc(endDate);
   if (!start || !end) return [];
@@ -1015,35 +1019,52 @@ function buildDailyLabelsInRange(startDate, endDate) {
   const from = start.getTime() <= end.getTime() ? start : end;
   const to = start.getTime() <= end.getTime() ? end : start;
   const cursor = new Date(from.getTime());
-  const labels = [];
+  const ranges = [];
 
   while (cursor.getTime() <= to.getTime()) {
-    labels.push(formatDateParts(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate()));
+    const day = formatUtcDate(cursor);
+    ranges.push({
+      label: day,
+      startDate: day,
+      endDate: day
+    });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
-    if (labels.length > 4000) break;
+    if (ranges.length > 4000) break;
   }
 
-  return labels;
+  return ranges;
 }
 
-function buildMonthlyLabelsInRange(startDate, endDate) {
+function buildMonthlyRequestRanges(startDate, endDate) {
   const start = parseIsoDateUtc(startDate);
   const end = parseIsoDateUtc(endDate);
   if (!start || !end) return [];
 
   const from = start.getTime() <= end.getTime() ? start : end;
   const to = start.getTime() <= end.getTime() ? end : start;
-  const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1));
-  const last = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
-  const labels = [];
+  const ranges = [];
+  let cursor = new Date(from.getTime());
 
-  while (cursor.getTime() <= last.getTime()) {
-    labels.push(`${String(cursor.getUTCFullYear()).padStart(4, "0")}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-    if (labels.length > 600) break;
+  while (cursor.getTime() <= to.getTime()) {
+    const year = cursor.getUTCFullYear();
+    const month = cursor.getUTCMonth();
+    const monthLabel = `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}`;
+    const monthEnd = new Date(Date.UTC(year, month + 1, 0));
+    const rangeEnd = monthEnd.getTime() <= to.getTime() ? monthEnd : to;
+
+    ranges.push({
+      label: monthLabel,
+      startDate: formatUtcDate(cursor),
+      endDate: formatUtcDate(rangeEnd)
+    });
+
+    const next = new Date(rangeEnd.getTime());
+    next.setUTCDate(next.getUTCDate() + 1);
+    cursor = next;
+    if (ranges.length > 600) break;
   }
 
-  return labels;
+  return ranges;
 }
 
 function extractSalesRowsFromPayload(payload) {
@@ -1212,35 +1233,42 @@ function extractSalesTimePointsFromPayload(payload) {
   return points;
 }
 
-function buildChartSeries(points, mode, { startDate = "", endDate = "" } = {}) {
-  const map = new Map();
-  const presetLabels =
-    mode === "monthly"
-      ? buildMonthlyLabelsInRange(startDate, endDate)
-      : buildDailyLabelsInRange(startDate, endDate);
+function extractSalesTotalsFromPayload(payload) {
+  let website = 0;
+  let obilet = 0;
 
-  presetLabels.forEach((label) => {
-    if (!map.has(label)) {
-      map.set(label, { label, website: 0, obilet: 0 });
-    }
+  const listRows = extractSalesRowsFromPayload(payload);
+  if (listRows.length > 0) {
+    listRows.forEach((row) => {
+      website += toNumber(row.websiteSaleAmount) ?? 0;
+      obilet += toNumber(row.obiletSaleAmount) ?? 0;
+    });
+    return { website, obilet };
+  }
+
+  const points = extractSalesTimePointsFromPayload(payload);
+  points.forEach((point) => {
+    website += toNumber(point.website) ?? 0;
+    obilet += toNumber(point.obilet) ?? 0;
   });
+  return { website, obilet };
+}
 
-  (Array.isArray(points) ? points : []).forEach((point) => {
-    if (!point || typeof point !== "object") return;
-    const day = normalizeDateToDay(point.day);
-    if (!day) return;
-    const label = mode === "monthly" ? day.slice(0, 7) : day;
-    const current = map.get(label) || { label, website: 0, obilet: 0 };
-    current.website += toNumber(point.website) ?? 0;
-    current.obilet += toNumber(point.obilet) ?? 0;
-    map.set(label, current);
-  });
+function buildChartSeries(rows) {
+  const sortedRows = Array.from(Array.isArray(rows) ? rows : []).sort((a, b) =>
+    String(a.label || "").localeCompare(String(b.label || ""), "tr")
+  );
 
-  const rows = Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "tr"));
-  const maxValue = rows.reduce((max, row) => Math.max(max, row.website, row.obilet), 0);
+  const normalizedRows = sortedRows.map((row) => ({
+    label: String(row.label || ""),
+    website: toNumber(row.website) ?? 0,
+    obilet: toNumber(row.obilet) ?? 0
+  }));
+
+  const maxValue = normalizedRows.reduce((max, row) => Math.max(max, row.website, row.obilet), 0);
   const minVisiblePct = 3;
 
-  return rows.map((row) => {
+  return normalizedRows.map((row) => {
     const websitePct =
       maxValue > 0 && row.website > 0 ? Math.max((row.website / maxValue) * 100, minVisiblePct) : 0;
     const obiletPct =
@@ -1263,12 +1291,22 @@ async function fetchSalesReportFromCluster({
   startDate,
   endDate,
   partnerId,
-  signal
+  signal,
+  sessionCache = null
 }) {
   const cluster = extractClusterLabel(clusterLabel || reportUrl);
   const sessionUrl = buildSessionUrlForPartnerUrl(reportUrl);
 
-  const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal, REPORTING_API_AUTH);
+  let sessionResult = null;
+  if (sessionCache && sessionCache.has(sessionUrl)) {
+    sessionResult = sessionCache.get(sessionUrl);
+  } else {
+    sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal, REPORTING_API_AUTH);
+    if (!sessionResult.error && sessionCache) {
+      sessionCache.set(sessionUrl, sessionResult);
+    }
+  }
+
   if (sessionResult.error) {
     return {
       cluster,
@@ -1348,7 +1386,7 @@ async function fetchSalesReportFromCluster({
 
 async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 180000);
 
   try {
     const targets = [];
@@ -1371,39 +1409,123 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
       });
     }
 
-    const items = [];
-    const listRows = [];
-    const timePoints = [];
-    for (const target of targets) {
-      const result = await fetchSalesReportFromCluster({
-        clusterLabel: target.clusterLabel,
-        reportUrl: target.reportUrl,
-        startDate,
-        endDate,
-        partnerId: target.partnerId,
-        signal: controller.signal
-      });
-      items.push({
-        cluster: result.cluster,
-        reportUrl: result.reportUrl,
-        ok: result.ok,
-        status: result.status,
-        error: result.error,
-        payloadText: stringifyPayload(result.payload)
+    const sessionCache = new Map();
+    const dailyRanges = buildDailyRequestRanges(startDate, endDate);
+    const monthlyRanges = buildMonthlyRequestRanges(startDate, endDate);
+    const normalizedStart = dailyRanges[0]?.startDate || startDate;
+    const normalizedEnd = dailyRanges[dailyRanges.length - 1]?.endDate || endDate;
+
+    const runRequestsForRanges = async (
+      ranges,
+      { collectItems = false, collectListRows = false } = {}
+    ) => {
+      const rowsByLabel = new Map();
+      const items = [];
+      const listRows = [];
+      const errors = [];
+
+      (Array.isArray(ranges) ? ranges : []).forEach((range) => {
+        const label = String(range?.label || "").trim();
+        if (!label) return;
+        if (!rowsByLabel.has(label)) {
+          rowsByLabel.set(label, { label, website: 0, obilet: 0 });
+        }
       });
 
-      if (result.ok && result.payload && typeof result.payload === "object") {
-        extractSalesRowsFromPayload(result.payload).forEach((row) => listRows.push(row));
-        extractSalesTimePointsFromPayload(result.payload).forEach((point) => timePoints.push(point));
+      for (const range of Array.isArray(ranges) ? ranges : []) {
+        if (!range || !range.startDate || !range.endDate) continue;
+
+        const results = await Promise.all(
+          targets.map((target) =>
+            fetchSalesReportFromCluster({
+              clusterLabel: target.clusterLabel,
+              reportUrl: target.reportUrl,
+              startDate: range.startDate,
+              endDate: range.endDate,
+              partnerId: target.partnerId,
+              signal: controller.signal,
+              sessionCache
+            })
+          )
+        );
+
+        results.forEach((result, index) => {
+          const target = targets[index];
+          if (collectItems) {
+            items.push({
+              cluster: result.cluster,
+              reportUrl: result.reportUrl,
+              ok: result.ok,
+              status: result.status,
+              error: result.error,
+              payloadText: stringifyPayload(result.payload),
+              periodLabel: range.label,
+              periodStartDate: range.startDate,
+              periodEndDate: range.endDate
+            });
+          }
+
+          if (!result.ok) {
+            const clusterText = result.cluster || target.clusterLabel || "cluster";
+            const detail = result.error || "Bilinmeyen hata";
+            errors.push(`${range.startDate}..${range.endDate} ${clusterText}: ${detail}`);
+            return;
+          }
+
+          if (!result.payload || typeof result.payload !== "object") return;
+
+          const row = rowsByLabel.get(range.label) || {
+            label: String(range.label || ""),
+            website: 0,
+            obilet: 0
+          };
+          const totals = extractSalesTotalsFromPayload(result.payload);
+          row.website += totals.website;
+          row.obilet += totals.obilet;
+          rowsByLabel.set(range.label, row);
+
+          if (collectListRows) {
+            extractSalesRowsFromPayload(result.payload).forEach((item) => listRows.push(item));
+          }
+        });
       }
-    }
+
+      return {
+        items,
+        listRows,
+        seriesRows: Array.from(rowsByLabel.values()),
+        errors
+      };
+    };
+
+    const listResult = await runRequestsForRanges(
+      [
+        {
+          label: "list",
+          startDate: normalizedStart,
+          endDate: normalizedEnd
+        }
+      ],
+      { collectItems: true, collectListRows: true }
+    );
+
+    const dailyResult = await runRequestsForRanges(dailyRanges);
+    const monthlyResult = await runRequestsForRanges(monthlyRanges);
+
+    const allErrors = [...listResult.errors, ...dailyResult.errors, ...monthlyResult.errors];
+    const error =
+      allErrors.length > 0
+        ? `Bazı rapor istekleri alınamadı: ${allErrors.slice(0, 2).join(" | ")}${
+            allErrors.length > 2 ? ` (+${allErrors.length - 2} hata)` : ""
+          }`
+        : null;
 
     return {
-      items,
-      listRows,
-      dailySeries: buildChartSeries(timePoints, "daily", { startDate, endDate }),
-      monthlySeries: buildChartSeries(timePoints, "monthly", { startDate, endDate }),
-      error: null
+      items: listResult.items,
+      listRows: listResult.listRows,
+      dailySeries: buildChartSeries(dailyResult.seriesRows),
+      monthlySeries: buildChartSeries(monthlyResult.seriesRows),
+      error
     };
   } catch (err) {
     return {
