@@ -259,7 +259,42 @@ async function ensureTargetsTable() {
   `);
 }
 
-function extractPartnerCodes(payload) {
+function normalizePartnerItems(items) {
+  const byKey = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    let code = "";
+    let id = "";
+    let cluster = "";
+
+    if (typeof item === "string") {
+      code = String(item).trim();
+    } else if (item && typeof item === "object") {
+      code = String(item.code || item.value || "").trim();
+      id = String(item.id || "").trim();
+      cluster = String(item.cluster || "").trim().toLowerCase();
+    }
+
+    if (!code) return;
+
+    const key = `${code}__${id}__${cluster}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, { code, id, cluster });
+    }
+  });
+
+  return Array.from(byKey.values()).sort((a, b) => {
+    const byCode = a.code.localeCompare(b.code, "tr");
+    if (byCode !== 0) return byCode;
+
+    const byId = a.id.localeCompare(b.id, "tr");
+    if (byId !== 0) return byId;
+
+    return a.cluster.localeCompare(b.cluster, "tr");
+  });
+}
+
+function extractPartnerItems(payload, clusterLabel) {
   const candidateLists = [];
 
   if (Array.isArray(payload)) {
@@ -280,18 +315,33 @@ function extractPartnerCodes(payload) {
   }
 
   const rows = candidateLists.find((list) => list.length > 0) || [];
-  const uniqueCodes = new Set();
+  const items = [];
 
   rows.forEach((row) => {
     if (!row || typeof row !== "object") return;
     if (Number(row.status) !== 1) return;
 
-    const code = String(row.code || "").trim();
+    const code = String(row.code || row.Code || "").trim();
     if (!code) return;
-    uniqueCodes.add(code);
+
+    const rawId =
+      row.id ??
+      row.ID ??
+      row.partner_id ??
+      row.partnerId ??
+      row.partnerID ??
+      row.provider_id ??
+      row.providerId;
+    const id = rawId === undefined || rawId === null ? "" : String(rawId).trim();
+
+    items.push({
+      code,
+      id,
+      cluster: String(clusterLabel || "").trim().toLowerCase()
+    });
   });
 
-  return Array.from(uniqueCodes).sort((a, b) => a.localeCompare(b, "tr"));
+  return normalizePartnerItems(items);
 }
 
 function normalizeTokenName(value) {
@@ -368,24 +418,23 @@ function buildSessionUrlForPartnerUrl(partnerUrl) {
   }
 }
 
-function normalizeCodes(codes) {
-  const unique = new Set();
-  (Array.isArray(codes) ? codes : []).forEach((code) => {
-    const normalized = String(code || "").trim();
-    if (normalized) unique.add(normalized);
-  });
-  return Array.from(unique).sort((a, b) => a.localeCompare(b, "tr"));
-}
-
 async function loadPartnerCodesCache() {
   try {
     const raw = await fs.readFile(PARTNER_CODES_CACHE_FILE, "utf8");
     const parsed = parseJsonSafe(raw);
     if (!parsed || typeof parsed !== "object") return null;
-    const codes = normalizeCodes(parsed.codes);
-    if (codes.length === 0) return null;
+
+    // Backward compatible: old cache may only have `codes`.
+    const partnersSource = Array.isArray(parsed.partners)
+      ? parsed.partners
+      : Array.isArray(parsed.codes)
+        ? parsed.codes.map((code) => ({ code, id: "", cluster: "" }))
+        : [];
+    const partners = normalizePartnerItems(partnersSource);
+    if (partners.length === 0) return null;
+
     return {
-      codes,
+      partners,
       updatedAt: String(parsed.updatedAt || "")
     };
   } catch (err) {
@@ -393,13 +442,17 @@ async function loadPartnerCodesCache() {
   }
 }
 
-async function savePartnerCodesCache(codes) {
-  const normalizedCodes = normalizeCodes(codes);
-  if (normalizedCodes.length === 0) return;
+async function savePartnerCodesCache(partners) {
+  const normalizedPartners = normalizePartnerItems(partners);
+  if (normalizedPartners.length === 0) return;
 
   const payload = {
     updatedAt: new Date().toISOString(),
-    codes: normalizedCodes
+    partners: normalizedPartners.map((item) => ({
+      code: item.code,
+      id: item.id,
+      cluster: item.cluster
+    }))
   };
 
   try {
@@ -487,7 +540,7 @@ async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
   try {
     const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal);
     if (sessionResult.error) {
-      return { clusterLabel, codes: [], error: `${clusterLabel}: ${sessionResult.error}` };
+      return { clusterLabel, partners: [], error: `${clusterLabel}: ${sessionResult.error}` };
     }
 
     const partnerRequestBody = {
@@ -523,7 +576,7 @@ async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
         "Bilinmeyen hata";
       return {
         clusterLabel,
-        codes: [],
+        partners: [],
         error: `${clusterLabel}: Partner API HTTP ${response.status}: ${apiError}`
       };
     }
@@ -531,20 +584,20 @@ async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
     if (!payload) {
       return {
         clusterLabel,
-        codes: [],
+        partners: [],
         error: `${clusterLabel}: Partner API JSON parse edilemedi.`
       };
     }
 
     return {
       clusterLabel,
-      codes: extractPartnerCodes(payload),
+      partners: extractPartnerItems(payload, clusterLabel),
       error: null
     };
   } catch (err) {
     return {
       clusterLabel,
-      codes: [],
+      partners: [],
       error: `${clusterLabel}: ${err?.message || "Partner API fetch hatası"}`
     };
   }
@@ -557,7 +610,7 @@ async function fetchPartnerCodes() {
   try {
     const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
     if (partnerUrls.length === 0) {
-      return { codes: [], error: "Partner URL yapılandırması boş." };
+      return { partners: [], error: "Partner URL yapılandırması boş." };
     }
 
     const results = await Promise.all(
@@ -565,51 +618,51 @@ async function fetchPartnerCodes() {
     );
 
     const errors = [];
-    const mergedCodes = new Set();
+    const mergedPartners = [];
 
     results.forEach((result) => {
       if (result.error) errors.push(result.error);
-      result.codes.forEach((code) => mergedCodes.add(code));
+      result.partners.forEach((item) => mergedPartners.push(item));
     });
 
-    const codes = normalizeCodes(Array.from(mergedCodes));
-    if (codes.length > 0) {
-      await savePartnerCodesCache(codes);
+    const partners = normalizePartnerItems(mergedPartners);
+    if (partners.length > 0) {
+      await savePartnerCodesCache(partners);
       if (errors.length > 0) {
-        return { codes, error: `${errors.length}/${partnerUrls.length} cluster alınamadı.` };
+        return { partners, error: `${errors.length}/${partnerUrls.length} cluster alınamadı.` };
       }
-      return { codes, error: null };
+      return { partners, error: null };
     }
 
     const cache = await loadPartnerCodesCache();
-    if (cache && cache.codes.length > 0) {
+    if (cache && cache.partners.length > 0) {
       const cacheDate = cache.updatedAt ? new Date(cache.updatedAt).toLocaleString("tr-TR") : "";
       const suffix = cacheDate ? ` (${cacheDate})` : "";
       return {
-        codes: cache.codes,
+        partners: cache.partners,
         error: `Canlı veriler alınamadı, önbellekten gösteriliyor${suffix}.`
       };
     }
 
     if (errors.length > 0) {
       console.error("Partner API cluster errors:", errors);
-      return { codes: [], error: errors[0] };
+      return { partners: [], error: errors[0] };
     }
 
-    return { codes: [], error: "Partner API sonucu boş (status=1 ve code bulunan kayıt yok)." };
+    return { partners: [], error: "Partner API sonucu boş (status=1 ve code bulunan kayıt yok)." };
   } catch (err) {
     const message = `Partner API fetch hatası: ${err?.message || "Bilinmeyen hata"}`;
     console.error("Partner API fetch error:", err);
     const cache = await loadPartnerCodesCache();
-    if (cache && cache.codes.length > 0) {
+    if (cache && cache.partners.length > 0) {
       const cacheDate = cache.updatedAt ? new Date(cache.updatedAt).toLocaleString("tr-TR") : "";
       const suffix = cacheDate ? ` (${cacheDate})` : "";
       return {
-        codes: cache.codes,
+        partners: cache.partners,
         error: `Canlı veriler alınamadı, önbellekten gösteriliyor${suffix}.`
       };
     }
-    return { codes: [], error: message };
+    return { partners: [], error: message };
   } finally {
     clearTimeout(timeout);
   }
@@ -693,9 +746,17 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
   const startDate = normalizeDate(req.query.startDate) || today;
   const endDate = normalizeDate(req.query.endDate) || today;
   const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
-  const { codes: partnerCodes, error: partnerError } = await fetchPartnerCodes();
+  const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
   const companies = [{ value: "all", label: "Tümü" }].concat(
-    partnerCodes.map((code) => ({ value: code, label: code }))
+    partnerItems.map((item) => {
+      const idText = item.id || "N/A";
+      const clusterText = item.cluster || "cluster";
+      const label = `${item.code} - ${idText} - ${clusterText}`;
+      return {
+        value: label,
+        label
+      };
+    })
   );
   if (partnerError) {
     companies.push({
