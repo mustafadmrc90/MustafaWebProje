@@ -1751,7 +1751,7 @@ button.ghost {
   margin-top: 8px;
   width: 100%;
   max-width: 1200px;
-  padding: 14px;
+  padding: 12px 14px 14px;
   border-radius: 16px;
   border: 2px solid #c2ccd9;
   background: #e8edf3;
@@ -1769,7 +1769,7 @@ button.ghost {
 }
 
 .sales-filter-grid label span {
-  font-size: 12px;
+  font-size: 11px;
   color: #677789;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -1778,12 +1778,12 @@ button.ghost {
 
 .sales-filter-grid input,
 .sales-filter-grid select {
-  min-height: 46px;
-  padding: 10px 14px;
-  border-radius: 14px;
-  border: 2px solid #b9c6d7;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
   background: #f1f4f8;
-  font-size: 18px;
+  font-size: 13px;
   color: #1f2735;
 }
 
@@ -1796,14 +1796,15 @@ button.ghost {
 
 .sales-filter-actions {
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
+  order: -1;
 }
 
 .sales-filter-actions button {
-  padding: 10px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  background: #e3e8ef;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: transparent;
   color: #1f2735;
   border: 1px solid #b9c6d7;
   box-shadow: none;
@@ -1812,7 +1813,7 @@ button.ghost {
 .sales-filter-actions button:hover {
   transform: none;
   box-shadow: none;
-  background: #dbe2eb;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .table {
@@ -2042,6 +2043,6 @@ button.ghost {
   }
 
   .sales-filter-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 }
