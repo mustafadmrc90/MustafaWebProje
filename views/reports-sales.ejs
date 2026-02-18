@@ -22,6 +22,7 @@
 
       <section class="table-card panel-card sales-filter-section">
         <form class="sales-filter-form" method="get" action="/reports/sales">
+          <input type="hidden" name="run" value="1" />
           <div class="sales-filter-grid">
             <label class="sales-filter-field sales-filter-field-start">
               <span>Başlangıç Tarihi</span>
@@ -56,7 +57,39 @@
 
       <section class="table-card panel-card">
         <h2>Satış Raporları</h2>
-        <p class="muted">Filtreleri seçtikten sonra bu alana tablo ve metrikleri ekleyeceğiz.</p>
+        <% if (!report.requested) { %>
+          <p class="muted">Raporu görmek için tarih ve firma seçip Filtrele'ye basın.</p>
+        <% } %>
+
+        <% if (report.error) { %>
+          <div class="alert inline-alert"><%= report.error %></div>
+        <% } %>
+
+        <% if (report.requested && report.items.length === 0 && !report.error) { %>
+          <p class="muted">Seçilen filtre için sonuç bulunamadı.</p>
+        <% } %>
+
+        <% if (report.items.length > 0) { %>
+          <div class="sales-report-list">
+            <% report.items.forEach((item) => { %>
+              <article class="sales-report-item">
+                <div class="sales-report-head">
+                  <strong><%= item.cluster %></strong>
+                  <span class="pill <%= item.ok ? 'success' : 'muted' %>">
+                    <%= item.ok ? `OK (${item.status})` : `Hata (${item.status || 0})` %>
+                  </span>
+                </div>
+                <% if (item.reportUrl) { %>
+                  <div class="sales-report-url"><%= item.reportUrl %></div>
+                <% } %>
+                <% if (item.error) { %>
+                  <div class="alert inline-alert"><%= item.error %></div>
+                <% } %>
+                <pre class="code-output sales-report-output"><%= item.payloadText %></pre>
+              </article>
+            <% }) %>
+          </div>
+        <% } %>
       </section>
     </section>
     <script src="/public/app.js" defer></script>

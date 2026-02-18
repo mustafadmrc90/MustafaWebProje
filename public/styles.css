@@ -1847,6 +1847,38 @@ button.ghost {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.sales-report-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sales-report-item {
+  border: 1px solid #d6dde7;
+  border-radius: 12px;
+  background: #f7f9fc;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.sales-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sales-report-url {
+  font-size: 12px;
+  color: #6b7785;
+  word-break: break-all;
+}
+
+.sales-report-output {
+  min-height: 120px;
+}
+
 .table {
   display: grid;
   gap: 8px;

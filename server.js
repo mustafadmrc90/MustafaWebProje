@@ -17,6 +17,11 @@ const PARTNERS_SESSION_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession";
 const PARTNERS_API_AUTH =
   process.env.PARTNERS_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const REPORTING_API_URL =
+  process.env.REPORTING_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/reporting/obiletsalesreport";
+const REPORTING_API_AUTH =
+  process.env.REPORTING_API_AUTH || "Basic TXVyb011aG9BbGlPZ2lIYXJ1bk96YW4K";
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -401,6 +406,18 @@ function buildClusterPartnerUrls(baseUrl) {
   return urls;
 }
 
+function buildUrlForCluster(baseUrl, clusterLabel) {
+  const raw = String(baseUrl || "").trim();
+  const cluster = String(clusterLabel || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (!cluster) return raw;
+
+  if (/cluster\d+/i.test(raw)) {
+    return raw.replace(/cluster\d+/i, cluster);
+  }
+  return raw;
+}
+
 function extractClusterLabel(url) {
   const match = String(url || "").match(/cluster\d+/i);
   return match ? match[0].toLowerCase() : "cluster";
@@ -416,6 +433,43 @@ function buildSessionUrlForPartnerUrl(partnerUrl) {
   } catch (err) {
     return PARTNERS_SESSION_API_URL;
   }
+}
+
+function buildCompanyOptionValue(item) {
+  const code = String(item?.code || "").trim();
+  const id = String(item?.id || "").trim();
+  const cluster = String(item?.cluster || "").trim().toLowerCase();
+  return `${code}|||${id}|||${cluster}`;
+}
+
+function parseCompanyOptionValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "all") return null;
+
+  const parts = raw.split("|||");
+  if (parts.length === 3) {
+    const [codeRaw, idRaw, clusterRaw] = parts;
+    const code = String(codeRaw || "").trim();
+    const id = String(idRaw || "").trim();
+    const cluster = String(clusterRaw || "").trim().toLowerCase();
+    if (code && cluster) {
+      return { code, id, cluster };
+    }
+  }
+
+  // Backward compatibility for older values shown as "Code - ID - clusterX".
+  const legacyMatch = raw.match(/^(.*?)\s*-\s*(.*?)\s*-\s*(cluster\d+)$/i);
+  if (legacyMatch) {
+    const code = String(legacyMatch[1] || "").trim();
+    const idToken = String(legacyMatch[2] || "").trim();
+    const cluster = String(legacyMatch[3] || "").trim().toLowerCase();
+    const id = /^n\/?a$/i.test(idToken) ? "" : idToken;
+    if (code && cluster) {
+      return { code, id, cluster };
+    }
+  }
+
+  return null;
 }
 
 async function loadPartnerCodesCache() {
@@ -463,7 +517,11 @@ async function savePartnerCodesCache(partners) {
   }
 }
 
-async function fetchPartnerSessionCredentials(sessionUrl, signal) {
+async function fetchPartnerSessionCredentials(
+  sessionUrl,
+  signal,
+  authorization = PARTNERS_API_AUTH
+) {
   const payload = {
     type: 1,
     connection: {
@@ -480,7 +538,7 @@ async function fetchPartnerSessionCredentials(sessionUrl, signal) {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      Authorization: PARTNERS_API_AUTH
+      Authorization: authorization || PARTNERS_API_AUTH
     },
     body: JSON.stringify(payload),
     signal
@@ -668,6 +726,160 @@ async function fetchPartnerCodes() {
   }
 }
 
+function stringifyPayload(payload) {
+  if (typeof payload === "string") return payload;
+  try {
+    return JSON.stringify(payload ?? {}, null, 2);
+  } catch (err) {
+    return String(payload ?? "");
+  }
+}
+
+async function fetchSalesReportFromCluster({
+  clusterLabel,
+  reportUrl,
+  startDate,
+  endDate,
+  partnerId,
+  signal
+}) {
+  const cluster = extractClusterLabel(clusterLabel || reportUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(reportUrl);
+
+  const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal, REPORTING_API_AUTH);
+  if (sessionResult.error) {
+    return {
+      cluster,
+      reportUrl,
+      ok: false,
+      status: 0,
+      error: sessionResult.error,
+      payload: null
+    };
+  }
+
+  const body = {
+    data: {
+      "start-date": startDate,
+      "end-date": endDate,
+      "partner-id": String(partnerId || "")
+    },
+    "device-session": {
+      "session-id": sessionResult.sessionId,
+      "device-id": sessionResult.deviceId
+    },
+    date: "2016-03-11T11:33:00",
+    language: "tr-TR"
+  };
+
+  try {
+    const response = await fetch(reportUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: REPORTING_API_AUTH
+      },
+      body: JSON.stringify(body),
+      signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        cluster,
+        reportUrl,
+        ok: false,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        payload: parsed ?? raw
+      };
+    }
+
+    return {
+      cluster,
+      reportUrl,
+      ok: true,
+      status: response.status,
+      error: null,
+      payload: parsed ?? raw
+    };
+  } catch (err) {
+    return {
+      cluster,
+      reportUrl,
+      ok: false,
+      status: 0,
+      error: err?.message || "Satış raporu isteği başarısız.",
+      payload: null
+    };
+  }
+}
+
+async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+
+  try {
+    const targets = [];
+
+    if (selectedCompany && selectedCompany.cluster) {
+      const reportUrl = buildUrlForCluster(REPORTING_API_URL, selectedCompany.cluster);
+      targets.push({
+        clusterLabel: selectedCompany.cluster,
+        reportUrl,
+        partnerId: selectedCompany.id || ""
+      });
+    } else {
+      const reportUrls = buildClusterPartnerUrls(REPORTING_API_URL);
+      reportUrls.forEach((reportUrl) => {
+        targets.push({
+          clusterLabel: extractClusterLabel(reportUrl),
+          reportUrl,
+          partnerId: ""
+        });
+      });
+    }
+
+    const items = [];
+    for (const target of targets) {
+      const result = await fetchSalesReportFromCluster({
+        clusterLabel: target.clusterLabel,
+        reportUrl: target.reportUrl,
+        startDate,
+        endDate,
+        partnerId: target.partnerId,
+        signal: controller.signal
+      });
+      items.push({
+        cluster: result.cluster,
+        reportUrl: result.reportUrl,
+        ok: result.ok,
+        status: result.status,
+        error: result.error,
+        payloadText: stringifyPayload(result.payload)
+      });
+    }
+
+    return { items, error: null };
+  } catch (err) {
+    return {
+      items: [],
+      error: `Satış raporu alınamadı: ${err?.message || "Bilinmeyen hata"}`
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.redirect("/login");
@@ -738,6 +950,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
   };
 
+  const shouldFetchReport = req.query.run === "1";
   const now = new Date();
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -745,16 +958,18 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
   const today = `${yyyy}-${mm}-${dd}`;
   const startDate = normalizeDate(req.query.startDate) || today;
   const endDate = normalizeDate(req.query.endDate) || today;
-  const requestedCompany = typeof req.query.company === "string" ? req.query.company : "all";
+  const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "all";
   const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
   const companies = [{ value: "all", label: "Tümü" }].concat(
     partnerItems.map((item) => {
       const idText = item.id || "N/A";
       const clusterText = item.cluster || "cluster";
       const label = `${item.code} - ${idText} - ${clusterText}`;
+      const value = buildCompanyOptionValue(item);
       return {
-        value: label,
-        label
+        value,
+        label,
+        meta: item
       };
     })
   );
@@ -766,9 +981,36 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
     });
   }
 
-  const company = companies.some((item) => !item.disabled && item.value === requestedCompany)
-    ? requestedCompany
-    : "all";
+  const selectedCompanyOption = companies.find(
+    (item) => !item.disabled && item.value === requestedCompany && item.meta
+  );
+  const parsedCompany = parseCompanyOptionValue(requestedCompany);
+  const matchedParsedCompany =
+    parsedCompany &&
+    partnerItems.find(
+      (item) =>
+        item.code === parsedCompany.code &&
+        String(item.id || "") === String(parsedCompany.id || "") &&
+        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+    );
+
+  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+  const company = selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : "all";
+  const invalidCompanySelection = requestedCompany !== "all" && !selectedCompanyMeta;
+
+  let reportItems = [];
+  let reportError = null;
+  if (invalidCompanySelection) {
+    reportError = "Seçilen firma bilgisi bulunamadı. Lütfen listeden tekrar seçim yapın.";
+  } else if (shouldFetchReport) {
+    const reportResult = await fetchSalesReports({
+      startDate,
+      endDate,
+      selectedCompany: company === "all" ? null : selectedCompanyMeta
+    });
+    reportItems = reportResult.items;
+    reportError = reportResult.error;
+  }
 
   res.render("reports-sales", {
     user: req.session.user,
@@ -778,7 +1020,12 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
       endDate,
       company
     },
-    companies
+    companies,
+    report: {
+      requested: shouldFetchReport,
+      items: reportItems,
+      error: reportError
+    }
   });
 });
 
