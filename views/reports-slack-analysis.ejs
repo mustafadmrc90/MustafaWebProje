@@ -14,12 +14,36 @@
       <header class="page-header">
         <div class="page-title">
           <h1>Slack Analiz</h1>
-          <p>Seçili kullanıcıların aylık mesaj adetleri.</p>
+          <p>Seçili kullanıcıların tarih aralığına göre yanıt sayıları.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
+
+      <section class="table-card panel-card slack-filter-section">
+        <form class="slack-filter-form" method="get" action="/reports/slack-analysis">
+          <input type="hidden" name="run" value="1" />
+          <div class="slack-filter-grid">
+            <label class="slack-filter-field">
+              <span>Başlangıç Tarihi</span>
+              <input type="date" name="startDate" value="<%= filters.startDate %>" required />
+            </label>
+            <label class="slack-filter-field">
+              <span>Bitiş Tarihi</span>
+              <input type="date" name="endDate" value="<%= filters.endDate %>" required />
+            </label>
+          </div>
+          <div class="slack-filter-actions">
+            <button type="submit">Filtrele</button>
+          </div>
+          <div class="slack-loading-message" hidden>Rapor hazırlanıyor, lütfen bekleyin...</div>
+        </form>
+      </section>
+
+      <% if (report.notice) { %>
+        <div class="inline-success"><%= report.notice %></div>
+      <% } %>
 
       <% if (report.error) { %>
         <div class="alert inline-alert"><%= report.error %></div>
@@ -27,56 +51,57 @@
 
       <section class="table-card panel-card">
         <div class="table-head">
-          <h2>Aylık Sonuçlar</h2>
+          <h2>Yanıt Sonuçları</h2>
           <div class="table-actions">
-            <span class="pill"><%= report.rows.length %> Ay</span>
-            <span class="pill"><%= report.users.length %> Kullanıcı</span>
+            <span class="pill"><%= report.rows.length %> Kullanıcı</span>
+            <span class="pill"><%= report.totalReplies %> Yanıt</span>
+            <span class="pill muted"><%= report.meta.channelsScanned %>/<%= report.meta.channelsTotal %> Kanal</span>
+            <span class="pill muted"><%= report.meta.threadsScanned %> Thread</span>
             <% if (report.source) { %>
               <span class="pill muted">Kaynak: <%= report.source %></span>
             <% } %>
-            <a class="button-link ghost" href="/reports/slack-analysis">Yenile</a>
+            <% if (report.requested && !report.error && report.rows.length > 0) { %>
+              <form class="slack-save-form" method="post" action="/reports/slack-analysis/save">
+                <input type="hidden" name="startDate" value="<%= filters.startDate %>" />
+                <input type="hidden" name="endDate" value="<%= filters.endDate %>" />
+                <input type="hidden" name="source" value="<%= report.source %>" />
+                <input type="hidden" name="rowsJson" value="<%= report.rowsJson %>" />
+                <button type="submit" class="button-link">SQL'e Kaydet</button>
+              </form>
+            <% } %>
           </div>
         </div>
 
-        <% if (report.notice) { %>
-          <p class="muted slack-analysis-note"><%= report.notice %></p>
+        <% if (!report.requested) { %>
+          <p class="muted">Filtre alanından tarih aralığı seçip `Filtrele` butonuna basın.</p>
         <% } %>
 
-        <% if (report.rows.length === 0 && !report.error) { %>
-          <p class="muted">Gösterilecek aylık Slack verisi bulunamadı.</p>
+        <% if (report.requested && report.rows.length === 0 && !report.error) { %>
+          <p class="muted">Seçilen tarih aralığında gösterilecek sonuç bulunamadı.</p>
         <% } %>
 
-        <% if (report.rows.length > 0) { %>
+        <% if (report.requested && report.rows.length > 0) { %>
           <% const formatter = new Intl.NumberFormat("tr-TR"); %>
           <div class="table-scroll">
-            <table class="slack-analysis-table">
+            <table class="slack-analysis-summary-table">
               <thead>
                 <tr>
-                  <th>Ay</th>
-                  <% report.users.forEach((item) => { %>
-                    <th title="<%= item.id %>"><%= item.name %></th>
-                  <% }) %>
-                  <th>Toplam</th>
+                  <th>Kullanıcı</th>
+                  <th>Yanıt Sayısı</th>
                 </tr>
               </thead>
               <tbody>
                 <% report.rows.forEach((row) => { %>
                   <tr>
-                    <td><%= row.monthLabel %></td>
-                    <% row.counts.forEach((count) => { %>
-                      <td><%= formatter.format(count) %></td>
-                    <% }) %>
-                    <td><%= formatter.format(row.total) %></td>
+                    <td title="<%= row.userId %>"><%= row.name %></td>
+                    <td><%= formatter.format(row.count) %></td>
                   </tr>
                 <% }) %>
               </tbody>
               <tfoot>
                 <tr>
                   <td>Dip Toplam</td>
-                  <% report.totals.counts.forEach((count) => { %>
-                    <td><%= formatter.format(count) %></td>
-                  <% }) %>
-                  <td><%= formatter.format(report.totals.grandTotal) %></td>
+                  <td><%= formatter.format(report.totalReplies) %></td>
                 </tr>
               </tfoot>
             </table>
@@ -84,6 +109,29 @@
         <% } %>
       </section>
     </section>
+    <script>
+      (() => {
+        const filterForm = document.querySelector(".slack-filter-form");
+        if (filterForm) {
+          filterForm.addEventListener("submit", () => {
+            filterForm.classList.add("is-loading");
+            const loading = filterForm.querySelector(".slack-loading-message");
+            if (loading) loading.hidden = false;
+          });
+        }
+
+        const saveForm = document.querySelector(".slack-save-form");
+        if (saveForm) {
+          saveForm.addEventListener("submit", () => {
+            const button = saveForm.querySelector("button[type='submit']");
+            if (button) {
+              button.disabled = true;
+              button.textContent = "Kaydediliyor...";
+            }
+          });
+        }
+      })();
+    </script>
     <script src="/public/app.js" defer></script>
   </body>
 </html>
