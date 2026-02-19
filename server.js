@@ -25,6 +25,17 @@ const REPORTING_API_AUTH =
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
+const SLACK_COUNTS_FILE = path.join(__dirname, "slack-counts.json");
+const SLACK_MONTHLY_ANALYSIS_FILE = path.join(__dirname, "data", "slack-monthly-analysis.json");
+const SLACK_SELECTED_USERS = [
+  { id: "U03M921BDCJ", name: "Onur Uğur - Corp" },
+  { id: "U03MBE47P1A", name: "Çağatay Atalay - Corp" },
+  { id: "U03M2DS4WCW", name: "Üveys Turgut - Corp" },
+  { id: "U03M2DME9U6", name: "Samet Ateş - Corp" },
+  { id: "U03M64AKWPP", name: "Osman Ağca - Corp" },
+  { id: "U03MMMBN1Q9", name: "Uğurcan CORP" },
+  { id: "U03M91THFA6", name: "Denizhan Arslan - CORP" }
+];
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -935,6 +946,253 @@ async function fetchAllPartnerRows() {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function readJsonFileSafe(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return {
+      exists: true,
+      value: parseJsonSafe(raw),
+      error: null
+    };
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      return {
+        exists: false,
+        value: null,
+        error: null
+      };
+    }
+    return {
+      exists: false,
+      value: null,
+      error: err?.message || "Dosya okunamadı."
+    };
+  }
+}
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function normalizeSlackMonth(value) {
+  if (value === undefined || value === null) return "";
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ts = value > 100000000000 ? value : value * 1000;
+    const date = new Date(ts);
+    if (!Number.isNaN(date.getTime())) {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      return `${year}-${month}`;
+    }
+    return "";
+  }
+
+  if (typeof value === "object") {
+    const year = Number.parseInt(value.year || value.yil, 10);
+    const month = Number.parseInt(value.month || value.ay, 10);
+    if (Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12) {
+      return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
+    }
+    return "";
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7);
+
+  const match = raw.match(/^(\d{4})[./](\d{1,2})(?:[./]\d{1,2})?$/);
+  if (match) {
+    const year = String(match[1]).padStart(4, "0");
+    const month = String(match[2]).padStart(2, "0");
+    return `${year}-${month}`;
+  }
+
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    return `${year}-${month}`;
+  }
+
+  return "";
+}
+
+function toCountInteger(value) {
+  const numeric = toNumber(value);
+  if (numeric === null) return 0;
+  const parsed = Math.trunc(numeric);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
+function parseSlackRecord(node, monthOverride = "") {
+  if (!node || typeof node !== "object") return null;
+  const userId = String(node.user_id || node.userId || node.id || "").trim();
+  if (!userId) return null;
+
+  const month =
+    normalizeSlackMonth(
+      monthOverride || node.month || node.ay || node.period || node.date || node.startDate || node.start_date
+    ) || getCurrentMonthKey();
+
+  return {
+    userId,
+    name: String(node.name || node.display_name || node.displayName || "").trim(),
+    count: toCountInteger(node.count ?? node.message_count ?? node.messages ?? node.total ?? 0),
+    month
+  };
+}
+
+function extractSlackRecords(payload) {
+  const records = [];
+
+  const walk = (node, inheritedMonth = "") => {
+    if (!node) return;
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, inheritedMonth));
+      return;
+    }
+
+    if (typeof node !== "object") return;
+
+    const localMonth =
+      normalizeSlackMonth(node.month || node.ay || node.period || node.date || node.startDate || node.start_date) ||
+      inheritedMonth;
+
+    const directRecord = parseSlackRecord(node, localMonth);
+    if (directRecord) {
+      records.push(directRecord);
+      return;
+    }
+
+    const nestedKeys = ["users", "items", "data", "rows", "months", "result", "results", "list"];
+    nestedKeys.forEach((key) => {
+      if (Array.isArray(node[key])) {
+        walk(node[key], localMonth);
+      }
+    });
+  };
+
+  walk(payload, "");
+  return records;
+}
+
+function formatSlackMonthLabel(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ""))) {
+    return String(monthKey || "");
+  }
+  const date = new Date(`${monthKey}-01T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return String(monthKey || "");
+  return new Intl.DateTimeFormat("tr-TR", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(date);
+}
+
+async function buildSlackAnalysisReport() {
+  const selectedUsers = SLACK_SELECTED_USERS.map((item) => ({ ...item }));
+  const selectedIds = new Set(selectedUsers.map((item) => item.id));
+  const displayNameById = new Map(selectedUsers.map((item) => [item.id, item.name]));
+  const fallbackMonth = getCurrentMonthKey();
+
+  const notices = [];
+  let source = "";
+  let sourceMissing = false;
+  let records = [];
+  let error = null;
+
+  const monthlyFile = await readJsonFileSafe(SLACK_MONTHLY_ANALYSIS_FILE);
+  if (monthlyFile.error) {
+    notices.push(`Aylık kaynak okunamadı: ${monthlyFile.error}`);
+  } else if (monthlyFile.exists) {
+    source = "data/slack-monthly-analysis.json";
+    records = extractSlackRecords(monthlyFile.value);
+    if (records.length === 0) {
+      notices.push("Aylık kaynak dosyasında gösterilecek kayıt bulunamadı.");
+    }
+  } else {
+    sourceMissing = true;
+  }
+
+  if (records.length === 0) {
+    const countFile = await readJsonFileSafe(SLACK_COUNTS_FILE);
+    if (countFile.error) {
+      error = `Slack sonuç dosyası okunamadı: ${countFile.error}`;
+    } else if (countFile.exists) {
+      source = "slack-counts.json";
+      records = extractSlackRecords(countFile.value).map((row) => ({
+        ...row,
+        month: row.month || fallbackMonth
+      }));
+      if (sourceMissing) {
+        notices.push(
+          "Aylık dosya bulunamadı. Mevcut toplam sonuçlar tek ay satırı olarak gösteriliyor."
+        );
+      }
+    } else if (sourceMissing) {
+      error = "Slack analiz dosyası bulunamadı. Önce script çıktısını kaydedin.";
+    }
+  }
+
+  const monthlyUserCounts = new Map();
+  const totalByUser = new Map(selectedUsers.map((item) => [item.id, 0]));
+
+  records.forEach((record) => {
+    if (!selectedIds.has(record.userId)) return;
+    if (record.name) {
+      displayNameById.set(record.userId, record.name);
+    }
+    const month = normalizeSlackMonth(record.month) || fallbackMonth;
+    if (!monthlyUserCounts.has(month)) {
+      monthlyUserCounts.set(month, new Map());
+    }
+    const monthMap = monthlyUserCounts.get(month);
+    const current = monthMap.get(record.userId) || 0;
+    const nextValue = current + toCountInteger(record.count);
+    monthMap.set(record.userId, nextValue);
+    totalByUser.set(record.userId, (totalByUser.get(record.userId) || 0) + toCountInteger(record.count));
+  });
+
+  selectedUsers.forEach((item) => {
+    item.name = displayNameById.get(item.id) || item.name;
+  });
+
+  const monthKeys = Array.from(monthlyUserCounts.keys()).sort((a, b) => a.localeCompare(b, "tr"));
+  const rows = monthKeys.map((monthKey) => {
+    const monthMap = monthlyUserCounts.get(monthKey) || new Map();
+    const counts = selectedUsers.map((selected) => monthMap.get(selected.id) || 0);
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    return {
+      monthKey,
+      monthLabel: formatSlackMonthLabel(monthKey),
+      counts,
+      total
+    };
+  });
+
+  const totalCounts = selectedUsers.map((selected) => totalByUser.get(selected.id) || 0);
+  const grandTotal = totalCounts.reduce((sum, count) => sum + count, 0);
+
+  return {
+    users: selectedUsers,
+    rows,
+    totals: {
+      counts: totalCounts,
+      grandTotal
+    },
+    source,
+    notice: notices.length > 0 ? notices.join(" ") : null,
+    error
+  };
 }
 
 function stringifyPayload(payload) {
@@ -2037,6 +2295,15 @@ app.get("/reports/all-companies", requireAuth, async (req, res) => {
       error: result.error,
       clusterCount: result.clusterCount || 0
     }
+  });
+});
+
+app.get("/reports/slack-analysis", requireAuth, async (req, res) => {
+  const report = await buildSlackAnalysisReport();
+  res.render("reports-slack-analysis", {
+    user: req.session.user,
+    active: "slack-analysis",
+    report
   });
 });
 

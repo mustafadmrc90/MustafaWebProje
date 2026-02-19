@@ -1947,6 +1947,32 @@ button.ghost {
   white-space: nowrap;
 }
 
+.slack-analysis-note {
+  margin: 0 0 12px;
+}
+
+.slack-analysis-table {
+  min-width: max-content;
+}
+
+.slack-analysis-table th:first-child,
+.slack-analysis-table td:first-child {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.slack-analysis-table th:not(:first-child),
+.slack-analysis-table td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.slack-analysis-table tfoot td {
+  font-weight: 700;
+  border-top: 2px solid #c6d2e0;
+  background: #eef3f8;
+}
+
 .sales-chart {
   display: grid;
   gap: 10px;

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>Slack Analiz</h1>
+          <p>Seçili kullanıcıların aylık mesaj adetleri.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <% if (report.error) { %>
+        <div class="alert inline-alert"><%= report.error %></div>
+      <% } %>
+
+      <section class="table-card panel-card">
+        <div class="table-head">
+          <h2>Aylık Sonuçlar</h2>
+          <div class="table-actions">
+            <span class="pill"><%= report.rows.length %> Ay</span>
+            <span class="pill"><%= report.users.length %> Kullanıcı</span>
+            <% if (report.source) { %>
+              <span class="pill muted">Kaynak: <%= report.source %></span>
+            <% } %>
+            <a class="button-link ghost" href="/reports/slack-analysis">Yenile</a>
+          </div>
+        </div>
+
+        <% if (report.notice) { %>
+          <p class="muted slack-analysis-note"><%= report.notice %></p>
+        <% } %>
+
+        <% if (report.rows.length === 0 && !report.error) { %>
+          <p class="muted">Gösterilecek aylık Slack verisi bulunamadı.</p>
+        <% } %>
+
+        <% if (report.rows.length > 0) { %>
+          <% const formatter = new Intl.NumberFormat("tr-TR"); %>
+          <div class="table-scroll">
+            <table class="slack-analysis-table">
+              <thead>
+                <tr>
+                  <th>Ay</th>
+                  <% report.users.forEach((item) => { %>
+                    <th title="<%= item.id %>"><%= item.name %></th>
+                  <% }) %>
+                  <th>Toplam</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% report.rows.forEach((row) => { %>
+                  <tr>
+                    <td><%= row.monthLabel %></td>
+                    <% row.counts.forEach((count) => { %>
+                      <td><%= formatter.format(count) %></td>
+                    <% }) %>
+                    <td><%= formatter.format(row.total) %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Dip Toplam</td>
+                  <% report.totals.counts.forEach((count) => { %>
+                    <td><%= formatter.format(count) %></td>
+                  <% }) %>
+                  <td><%= formatter.format(report.totals.grandTotal) %></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

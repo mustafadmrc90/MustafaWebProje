@@ -11,6 +11,7 @@
     if (path.startsWith("/users")) return "users";
     if (path.startsWith("/screens")) return "screens";
     if (path.startsWith("/reports/all-companies")) return "all-companies";
+    if (path.startsWith("/reports/slack-analysis")) return "slack-analysis";
     if (path.startsWith("/reports/sales")) return "sales";
     if (path.startsWith("/change-password")) return "password";
     return "dashboard";
