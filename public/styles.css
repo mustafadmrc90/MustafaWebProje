@@ -2351,6 +2351,15 @@ button.ghost {
   grid-template-columns: minmax(220px, 1.4fr) minmax(90px, 0.6fr) minmax(120px, 0.8fr) auto auto;
 }
 
+.permissions-bulk-row {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.8fr) minmax(180px, 1fr) auto;
+}
+
+.permissions-section-row {
+  background: #f8fbff;
+  border-style: dashed;
+}
+
 .permission-name {
   display: inline-flex;
   align-items: center;
@@ -2359,7 +2368,8 @@ button.ghost {
 }
 
 .permission-type,
-.permission-parent {
+.permission-parent,
+.permission-route {
   font-size: 12px;
   color: var(--muted);
 }

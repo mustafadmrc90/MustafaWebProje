@@ -809,10 +809,32 @@
     });
   };
 
+  const initPermissionsBulkForm = () => {
+    const form = document.querySelector("form[action^='/permissions/']");
+    if (!form) return;
+    if (form.dataset.permissionsBound === "1") return;
+    form.dataset.permissionsBound = "1";
+
+    const sectionToggles = Array.from(form.querySelectorAll("[data-section-toggle]"));
+    sectionToggles.forEach((toggle) => {
+      toggle.addEventListener("change", () => {
+        const sectionKey = String(toggle.getAttribute("data-section-toggle") || "").trim();
+        if (!sectionKey) return;
+        form
+          .querySelectorAll(`[data-parent-section="${sectionKey}"] [data-item-checkbox="1"]`)
+          .forEach((checkbox) => {
+            if (checkbox.disabled) return;
+            checkbox.checked = toggle.checked;
+          });
+      });
+    });
+  };
+
   const initEndpointUI = async () => {
     initSalesTabs();
     initSalesReportLoading();
     initSlackReportLoading();
+    initPermissionsBulkForm();
 
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;

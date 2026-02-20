@@ -508,7 +508,6 @@ function buildSidebarModelFromRows(rows) {
   });
 
   const sections = sectionRows
-    .filter((section) => section.canView)
     .map((section) => {
       const visibleItems = (itemsByParent.get(section.key) || [])
         .filter((item) => item.canView && item.route)
@@ -628,7 +627,14 @@ async function syncSidebarMenusAndPermissions() {
 
     await client.query(`
       INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
-      SELECT u.id, m.key, true
+      SELECT
+        u.id,
+        m.key,
+        CASE
+          WHEN m.type = 'section' THEN true
+          WHEN lower(u.username) = 'admin' THEN true
+          ELSE false
+        END
       FROM users u
       CROSS JOIN sidebar_menu_items m
       WHERE m.is_active = true
@@ -650,16 +656,29 @@ async function ensureSidebarPermissionsForUser(userId) {
   await pool.query(
     `
       INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
-      SELECT $1, m.key, true
-      FROM sidebar_menu_items m
+      SELECT
+        u.id,
+        m.key,
+        CASE
+          WHEN m.type = 'section' THEN true
+          WHEN lower(u.username) = 'admin' THEN true
+          ELSE false
+        END
+      FROM users u
+      CROSS JOIN sidebar_menu_items m
       WHERE m.is_active = true
+        AND u.id = $1
       ON CONFLICT (user_id, menu_key) DO NOTHING
     `,
     [userIdNum]
   );
 }
 
-async function loadSidebarForUser(userId) {
+async function loadSidebarForUser(userId, options = {}) {
+  const isAdmin = options?.isAdmin === true;
+  if (isAdmin) {
+    return buildSidebarFallbackModel();
+  }
   const userIdNum = Number(userId);
   if (!Number.isInteger(userIdNum)) {
     return buildSidebarFallbackModel();
@@ -740,10 +759,16 @@ function buildPermissionSections(rows) {
     });
   });
 
-  return Array.from(sectionByKey.values()).map((section) => ({
-    ...section,
-    items: section.items.sort(compareSidebarEntries)
-  }));
+  return Array.from(sectionByKey.values())
+    .map((section) => {
+      const sortedItems = section.items.sort(compareSidebarEntries);
+      return {
+        ...section,
+        items: sortedItems
+      };
+    })
+    .sort(compareSidebarEntries)
+    .filter((section) => section.items.length > 0);
 }
 
 async function loadSidebarPermissionSectionsForUser(userId) {
@@ -783,10 +808,16 @@ function requireMenuAccess(menuKey) {
       return res.redirect("/login");
     }
 
+    if (String(req.session.user?.username || "").toLowerCase() === "admin") {
+      return next();
+    }
+
     try {
       let sidebar = req.sidebar;
       if (!sidebar) {
-        sidebar = await loadSidebarForUser(req.session.user.id);
+        sidebar = await loadSidebarForUser(req.session.user.id, {
+          isAdmin: String(req.session.user?.username || "").toLowerCase() === "admin"
+        });
         req.sidebar = sidebar;
         res.locals.sidebar = sidebar;
       }
@@ -815,7 +846,9 @@ app.use(async (req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
 
   try {
-    const sidebar = await loadSidebarForUser(req.session.user.id);
+    const sidebar = await loadSidebarForUser(req.session.user.id, {
+      isAdmin: String(req.session.user?.username || "").toLowerCase() === "admin"
+    });
     req.sidebar = sidebar;
     res.locals.sidebar = sidebar;
   } catch (err) {
@@ -4154,11 +4187,27 @@ app.get("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (
     );
     const targetUser = userResult.rows[0];
     if (!targetUser) return res.status(404).send("Kullanıcı bulunamadı");
-    const menuSections = await loadSidebarPermissionSectionsForUser(userId);
+    const isTargetAdmin = String(targetUser.username || "").toLowerCase() === "admin";
+    const menuSections = isTargetAdmin
+      ? buildPermissionSections(
+          SIDEBAR_MENU_REGISTRY.map((item) => ({
+            key: item.key,
+            label: item.label,
+            type: item.type,
+            parent_key: item.parentKey || null,
+            route: item.route || null,
+            route_key: item.routeKey || null,
+            sort_order: item.sortOrder,
+            icon_key: item.iconKey || "folder",
+            can_view: true
+          }))
+        )
+      : await loadSidebarPermissionSectionsForUser(userId);
     res.render("permissions", {
       user: req.session.user,
       targetUser,
       menuSections,
+      isTargetAdmin,
       ok: req.query.ok === "1",
       active: "users"
     });
@@ -4171,28 +4220,163 @@ app.get("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (
 app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isInteger(userId)) return res.status(400).send("Geçersiz kullanıcı");
-  const { canView } = req.body;
-  const menuKey = String(req.body.menuKey || "").trim();
-  const canViewBool = canView === "on";
-
-  if (!menuKey) return res.status(400).send("Geçersiz menü seçimi");
-
   try {
-    const menuResult = await pool.query(
-      "SELECT key FROM sidebar_menu_items WHERE key = $1 AND is_active = true",
-      [menuKey]
-    );
-    if (!menuResult.rows.length) {
-      return res.status(400).send("Menü bulunamadı");
+    const targetUserResult = await pool.query("SELECT username FROM users WHERE id = $1", [userId]);
+    if (!targetUserResult.rows.length) {
+      return res.status(404).send("Kullanıcı bulunamadı");
     }
 
-    await pool.query(
-      `INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view, updated_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT(user_id, menu_key)
-       DO UPDATE SET can_view = EXCLUDED.can_view, updated_at = now()`,
-      [userId, menuKey, canViewBool]
+    const isTargetAdmin = String(targetUserResult.rows[0].username || "").toLowerCase() === "admin";
+    if (isTargetAdmin) {
+      return res.redirect(`/permissions/${userId}?ok=1`);
+    }
+
+    await ensureSidebarPermissionsForUser(userId);
+
+    const activeMenusResult = await pool.query(
+      `
+        SELECT key, type, parent_key
+        FROM sidebar_menu_items
+        WHERE is_active = true
+          AND type IN ('section', 'item')
+      `
     );
+    const activeSections = new Set();
+    const activeItems = [];
+    const sectionItemsMap = new Map();
+
+    activeMenusResult.rows.forEach((row) => {
+      const key = String(row.key || "").trim();
+      const type = String(row.type || "").trim();
+      const parentKey = String(row.parent_key || "").trim();
+      if (!key) return;
+      if (type === "section") {
+        activeSections.add(key);
+        return;
+      }
+      if (type !== "item") return;
+      activeItems.push(key);
+      const current = sectionItemsMap.get(parentKey) || [];
+      current.push(key);
+      sectionItemsMap.set(parentKey, current);
+    });
+    const validItemKeys = new Set(activeItems);
+
+    const selectedRaw = req.body.menuKeys;
+    const selectedList = Array.isArray(selectedRaw)
+      ? selectedRaw
+      : typeof selectedRaw === "string" && selectedRaw.trim()
+        ? [selectedRaw]
+        : [];
+    const selectedItemKeys = Array.from(
+      new Set(
+        selectedList
+          .map((value) => String(value || "").trim())
+          .filter((value) => value && validItemKeys.has(value))
+      )
+    );
+
+    const selectedSectionsRaw = req.body.sectionKeys;
+    const selectedSectionList = Array.isArray(selectedSectionsRaw)
+      ? selectedSectionsRaw
+      : typeof selectedSectionsRaw === "string" && selectedSectionsRaw.trim()
+        ? [selectedSectionsRaw]
+        : [];
+    const selectedSectionKeys = Array.from(
+      new Set(
+        selectedSectionList
+          .map((value) => String(value || "").trim())
+          .filter((value) => value && activeSections.has(value))
+      )
+    );
+    const selectedSectionSet = new Set(selectedSectionKeys);
+
+    const previousSectionStateInput = parseJsonSafe(String(req.body.sectionStateJson || ""));
+    const previousSectionState =
+      previousSectionStateInput && typeof previousSectionStateInput === "object" ? previousSectionStateInput : {};
+
+    const changedSectionKeys = new Set();
+    activeSections.forEach((sectionKey) => {
+      const previousChecked = toSidebarBool(previousSectionState[sectionKey], false);
+      const nowChecked = selectedSectionSet.has(sectionKey);
+      if (previousChecked !== nowChecked) {
+        changedSectionKeys.add(sectionKey);
+      }
+    });
+
+    const finalItemSet = new Set(selectedItemKeys);
+    changedSectionKeys.forEach((sectionKey) => {
+      const children = sectionItemsMap.get(sectionKey) || [];
+      if (selectedSectionSet.has(sectionKey)) {
+        children.forEach((itemKey) => finalItemSet.add(itemKey));
+      } else {
+        children.forEach((itemKey) => finalItemSet.delete(itemKey));
+      }
+    });
+    const finalItemKeys = Array.from(finalItemSet);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `
+          UPDATE user_sidebar_permissions usp
+          SET can_view = false, updated_at = now()
+          FROM sidebar_menu_items m
+          WHERE usp.user_id = $1
+            AND usp.menu_key = m.key
+            AND m.is_active = true
+            AND m.type = 'item'
+        `,
+        [userId]
+      );
+
+      if (finalItemKeys.length > 0) {
+        await client.query(
+          `
+            UPDATE user_sidebar_permissions
+            SET can_view = true, updated_at = now()
+            WHERE user_id = $1
+              AND menu_key = ANY($2::text[])
+          `,
+          [userId, finalItemKeys]
+        );
+      }
+
+      await client.query(
+        `
+          UPDATE user_sidebar_permissions usp
+          SET can_view = false, updated_at = now()
+          FROM sidebar_menu_items m
+          WHERE usp.user_id = $1
+            AND usp.menu_key = m.key
+            AND m.is_active = true
+            AND m.type = 'section'
+        `,
+        [userId]
+      );
+
+      if (selectedSectionKeys.length > 0) {
+        await client.query(
+          `
+            UPDATE user_sidebar_permissions
+            SET can_view = true, updated_at = now()
+            WHERE user_id = $1
+              AND menu_key = ANY($2::text[])
+          `,
+          [userId, selectedSectionKeys]
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
     res.redirect(`/permissions/${userId}?ok=1`);
   } catch (err) {
     console.error(err);
