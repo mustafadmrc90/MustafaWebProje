@@ -18,31 +18,6 @@
             <span>Obus API</span>
           </span>
         </a>
-        <a class="nav-item <%= active === 'users' ? 'active' : '' %>" data-route="users" href="/users">
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-              </svg>
-            </span>
-            <span>Kullanıcılar</span>
-          </span>
-        </a>
-        <a class="nav-item <%= active === 'screens' ? 'active' : '' %>" data-route="screens" href="/screens">
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <rect x="3" y="4" width="18" height="14" rx="2"></rect>
-                <path d="M8 20h8"></path>
-                <path d="M12 18v2"></path>
-              </svg>
-            </span>
-            <span>Ekranlar</span>
-          </span>
-        </a>
       </div>
     </details>
     <details
@@ -103,9 +78,22 @@
         </a>
       </div>
     </details>
-    <details class="nav-accordion">
+    <details class="nav-accordion" <%= active === "users" || active === "password" ? "open" : "" %>>
       <summary class="nav-section-toggle">Yönetim</summary>
       <div class="nav-group">
+        <a class="nav-item <%= active === 'users' ? 'active' : '' %>" data-route="users" href="/users">
+          <span class="nav-item-content">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </span>
+            <span>Kullanıcılar</span>
+          </span>
+        </a>
         <a class="nav-item <%= active === 'password' ? 'active' : '' %>" data-route="password" href="/change-password">
           <span class="nav-item-content">
             <span class="nav-icon" aria-hidden="true">
