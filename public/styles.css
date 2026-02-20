@@ -2290,6 +2290,14 @@ button.ghost {
   overflow-wrap: anywhere;
 }
 
+.allowed-lines-public-result {
+  margin-top: 12px;
+}
+
+.allowed-lines-public-result .inline-success {
+  margin: 0;
+}
+
 .allowed-lines-result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

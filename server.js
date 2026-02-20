@@ -1358,6 +1358,45 @@ function extractTokenFromRawText(raw) {
   return "";
 }
 
+function extractPartnerCodeFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+
+  const readValue = (value) => {
+    if (value === undefined || value === null) return "";
+    return String(value).trim();
+  };
+
+  const direct =
+    readValue(payload["partner-code"]) ||
+    readValue(payload.partnerCode) ||
+    readValue(payload.partner_code);
+  if (direct) return direct;
+
+  if (payload.data && typeof payload.data === "object") {
+    const nested =
+      readValue(payload.data["partner-code"]) ||
+      readValue(payload.data.partnerCode) ||
+      readValue(payload.data.partner_code);
+    if (nested) return nested;
+  }
+
+  return "";
+}
+
+function isSuccessStatusPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+
+  const statusText = String(payload.status || "").trim().toLowerCase();
+  if (statusText === "success") return true;
+
+  if (payload.success === true) return true;
+
+  const statusCode = Number(payload["status-code"]);
+  if (Number.isFinite(statusCode) && statusCode === 1) return true;
+
+  return false;
+}
+
 function collectUserLoginBranchCandidates(node, candidates) {
   if (!node || typeof node !== "object") return;
 
@@ -4026,6 +4065,7 @@ function buildAuthorizedLinesReportModel() {
     requested: false,
     status: null,
     error: null,
+    userMessage: "",
     requestBody: "",
     responseBody: "",
     sessionId: "",
@@ -4200,13 +4240,14 @@ async function fetchAuthorizedLinesLoginInfo({
   }
 }
 
-async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token }) {
+async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partnerCode, token }) {
   const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
   if (!normalizedEndpointUrl) {
     return {
       requested: true,
       status: null,
       error: "Hedef URL geçersiz.",
+      userMessage: "",
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -4222,6 +4263,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: "PartnerId zorunludur.",
+      userMessage: "",
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -4237,6 +4279,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: "Token zorunludur.",
+      userMessage: "",
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -4257,6 +4300,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
         requested: true,
         status: null,
         error: sessionResult.error,
+        userMessage: "",
         requestBody,
         responseBody: "",
         sessionId: "",
@@ -4305,6 +4349,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
         requested: true,
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
+        userMessage: "",
         requestBody,
         responseBody: responseBody || "{}",
         sessionId: sessionResult.sessionId,
@@ -4314,10 +4359,38 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       };
     }
 
+    const isSuccess = isSuccessStatusPayload(parsed);
+    if (!isSuccess) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        "İşlem başarısız döndü.";
+      return {
+        requested: true,
+        status: response.status,
+        error: reason,
+        userMessage: "",
+        requestBody,
+        responseBody: responseBody || "{}",
+        sessionId: sessionResult.sessionId,
+        deviceId: sessionResult.deviceId,
+        branchId: "",
+        loginToken: ""
+      };
+    }
+
+    const payloadPartnerCode = extractPartnerCodeFromPayload(parsed);
+    const effectivePartnerCode = String(payloadPartnerCode || partnerCode || "").trim();
+    const userMessage = effectivePartnerCode
+      ? `${effectivePartnerCode} izinli hatlar yüklenmiştir.`
+      : "İzinli hatlar yüklenmiştir.";
+
     return {
       requested: true,
       status: response.status,
       error: null,
+      userMessage,
       requestBody,
       responseBody: responseBody || "{}",
       sessionId: sessionResult.sessionId,
@@ -4330,6 +4403,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: err?.message || "İstek gönderilemedi.",
+      userMessage: "",
       requestBody,
       responseBody: "",
       sessionId: "",
@@ -4501,23 +4575,27 @@ app.get(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.userMessage = "";
           report.requestBody = "{}";
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.userMessage = "";
             report.requestBody = "{}";
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
               partnerId,
+              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
               token: effectiveToken
             });
             report.requested = reportResult.requested;
             report.status = reportResult.status;
             report.error = reportResult.error;
+            report.userMessage = reportResult.userMessage || "";
             report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
             report.sessionId = reportResult.sessionId || report.sessionId;
@@ -4623,23 +4701,27 @@ app.post(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.userMessage = "";
           report.requestBody = "{}";
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.userMessage = "";
             report.requestBody = "{}";
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
               partnerId,
+              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
               token: effectiveToken
             });
             report.requested = reportResult.requested;
             report.status = reportResult.status;
             report.error = reportResult.error;
+            report.userMessage = reportResult.userMessage || "";
             report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
             report.sessionId = reportResult.sessionId || report.sessionId;

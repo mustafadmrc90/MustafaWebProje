@@ -94,29 +94,14 @@
             <% } %>
           </div>
         </div>
-        <div class="stats">
-          <div>
-            <div class="label">Session Id</div>
-            <strong><%= report.sessionId || "-" %></strong>
-          </div>
-          <div>
-            <div class="label">Device Id</div>
-            <strong><%= report.deviceId || "-" %></strong>
-          </div>
-          <div>
-            <div class="label">Login Token</div>
-            <strong><%= report.loginToken || "-" %></strong>
-          </div>
-        </div>
-        <div class="allowed-lines-result-grid">
-          <div class="allowed-lines-result-item">
-            <div class="label">Son İstek Body</div>
-            <pre class="code-output sales-report-output"><%= report.requestBody || "{}" %></pre>
-          </div>
-          <div class="allowed-lines-result-item">
-            <div class="label">Yanıt</div>
-            <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
-          </div>
+        <div class="allowed-lines-public-result">
+          <% if (report.requested && !report.error && report.userMessage) { %>
+            <div class="inline-success"><%= report.userMessage %></div>
+          <% } else if (report.requested && report.error) { %>
+            <div class="pill muted">İşlem tamamlanamadı.</div>
+          <% } else { %>
+            <div class="pill muted">Henüz sonuç yok.</div>
+          <% } %>
         </div>
       </section>
     </section>
