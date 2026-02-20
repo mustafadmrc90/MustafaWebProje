@@ -1250,25 +1250,104 @@ function extractMembershipTokenDataFromPayload(payload) {
     return text;
   };
 
-  const rootToken = payload.token;
-  if (rootToken && typeof rootToken === "object") {
-    const rootTokenData = normalizeString(rootToken.data);
-    if (rootTokenData) return rootTokenData;
-  }
+  const isLikelyTokenString = (value) => {
+    const text = normalizeString(value);
+    if (!text) return false;
+    if (text.length >= 24) return true;
+    return /^eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}$/.test(text);
+  };
 
-  const rootTokenString = normalizeString(rootToken);
-  if (rootTokenString) return rootTokenString;
+  const queue = [payload];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
 
-  const dataBlock = payload.data;
-  if (dataBlock && typeof dataBlock === "object") {
-    const dataToken = dataBlock.token;
-    if (dataToken && typeof dataToken === "object") {
-      const dataTokenData = normalizeString(dataToken.data);
-      if (dataTokenData) return dataTokenData;
+    if (Array.isArray(current)) {
+      current.forEach((item) => queue.push(item));
+      continue;
     }
 
-    const dataTokenString = normalizeString(dataToken);
-    if (dataTokenString) return dataTokenString;
+    for (const [key, value] of Object.entries(current)) {
+      const normalizedKey = normalizeTokenName(key);
+      if (normalizedKey === "token") {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const tokenData = normalizeString(value.data || value.value || value.token);
+          if (isLikelyTokenString(tokenData)) return tokenData;
+        } else if (isLikelyTokenString(value)) {
+          return normalizeString(value);
+        }
+      }
+
+      if (
+        normalizedKey === "accesstoken" ||
+        normalizedKey === "authorizationtoken" ||
+        normalizedKey === "jwttoken" ||
+        normalizedKey === "bearertoken"
+      ) {
+        if (isLikelyTokenString(value)) return normalizeString(value);
+      }
+
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return "";
+}
+
+function extractTokenFromHeaders(headers) {
+  const source = headers && typeof headers === "object" ? headers : {};
+  const authorizationHeader =
+    String(
+      source.authorization ||
+        source.Authorization ||
+        source["x-authorization"] ||
+        source["x-access-token"] ||
+        ""
+    ).trim();
+  if (authorizationHeader) {
+    const bearerMatch = authorizationHeader.match(/Bearer\s+(.+)$/i);
+    if (bearerMatch && String(bearerMatch[1] || "").trim()) {
+      return String(bearerMatch[1] || "").trim();
+    }
+    if (authorizationHeader.length > 20) return authorizationHeader;
+  }
+
+  const cookieHeader =
+    String(source["set-cookie"] || source["Set-Cookie"] || source.cookie || source.Cookie || "").trim();
+  if (cookieHeader) {
+    const tokenMatch = cookieHeader.match(/(?:^|;\s*)(?:token|access[_-]?token|authorization)\s*=\s*([^;]+)/i);
+    if (tokenMatch && String(tokenMatch[1] || "").trim()) {
+      return String(tokenMatch[1] || "").trim();
+    }
+  }
+
+  return "";
+}
+
+function extractTokenFromRawText(raw) {
+  const text = String(raw || "");
+  if (!text.trim()) return "";
+
+  const patterns = [
+    /"token"\s*:\s*\{\s*"data"\s*:\s*"([^"]+)"/i,
+    /"access[_-]?token"\s*:\s*"([^"]+)"/i,
+    /"authorization[_-]?token"\s*:\s*"([^"]+)"/i,
+    /"token"\s*:\s*"([^"]+)"/i,
+    /Bearer\s+([A-Za-z0-9\-._~+/=]+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && String(match[1] || "").trim()) {
+      return String(match[1] || "").trim();
+    }
+  }
+
+  const jwtMatch = text.match(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/);
+  if (jwtMatch && String(jwtMatch[0] || "").trim()) {
+    return String(jwtMatch[0] || "").trim();
   }
 
   return "";
@@ -3918,7 +3997,8 @@ async function fetchAuthorizedLinesLoginInfo({
       sessionId: "",
       deviceId: "",
       branchId: "",
-      token: ""
+      token: "",
+      rawLoginBody: ""
     };
   }
 
@@ -3933,7 +4013,8 @@ async function fetchAuthorizedLinesLoginInfo({
       sessionId: "",
       deviceId: "",
       branchId: "",
-      token: ""
+      token: "",
+      rawLoginBody: ""
     };
   }
 
@@ -3944,6 +4025,7 @@ async function fetchAuthorizedLinesLoginInfo({
     let lastSessionId = "";
     let lastDeviceId = "";
     let lastLoginUrl = "";
+    let lastRawLoginBody = "";
 
     for (const baseUrl of loginBaseUrls) {
       const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
@@ -3990,6 +4072,7 @@ async function fetchAuthorizedLinesLoginInfo({
       });
 
       const raw = await response.text();
+      lastRawLoginBody = raw;
       const parsed = parseJsonSafe(raw);
       const responseHeaders = {};
       response.headers.forEach((value, key) => {
@@ -4008,8 +4091,10 @@ async function fetchAuthorizedLinesLoginInfo({
       }
 
       const tokenValue =
+        String(parsed?.data?.token?.data || "").trim() ||
         extractMembershipTokenDataFromPayload(parsed) ||
-        findNestedValue(parsed, new Set(["token"])) ||
+        extractTokenFromHeaders(responseHeaders) ||
+        extractTokenFromRawText(raw) ||
         findNestedValue(parsed, new Set(["accesstoken"])) ||
         findNestedValue(parsed, new Set(["authorizationtoken"])) ||
         "";
@@ -4029,7 +4114,8 @@ async function fetchAuthorizedLinesLoginInfo({
         deviceId: sessionResult.deviceId,
         branchId: String(branchId || "").trim(),
         token: String(tokenValue || "").trim(),
-        loginUrl
+        loginUrl,
+        rawLoginBody: raw
       };
     }
 
@@ -4040,7 +4126,8 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: lastDeviceId,
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
-      loginUrl: lastLoginUrl
+      loginUrl: lastLoginUrl,
+      rawLoginBody: lastRawLoginBody
     };
   } catch (err) {
     return {
@@ -4050,7 +4137,8 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: "",
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
-      loginUrl: ""
+      loginUrl: "",
+      rawLoginBody: ""
     };
   } finally {
     clearTimeout(timeout);
@@ -4344,11 +4432,12 @@ app.get(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
-          report.responseBody = "{}";
+          report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
@@ -4457,11 +4546,12 @@ app.post(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
-          report.responseBody = "{}";
+          report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
