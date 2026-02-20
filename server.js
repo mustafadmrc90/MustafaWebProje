@@ -1034,9 +1034,12 @@ function extractPartnerItems(payload, clusterLabel) {
     const rawId =
       row.id ??
       row.ID ??
+      row["partner-id"] ??
       row.partner_id ??
+      row.partnerid ??
       row.partnerId ??
       row.partnerID ??
+      row["provider-id"] ??
       row.provider_id ??
       row.providerId;
     const id = rawId === undefined || rawId === null ? "" : String(rawId).trim();
@@ -1515,6 +1518,42 @@ function parseCompanyOptionValue(value) {
   }
 
   return null;
+}
+
+function extractPartnerIdFromCompanyLabel(label) {
+  const text = String(label || "").trim();
+  if (!text) return "";
+
+  // Expected format: "Code - 123 - clusterX"
+  const strictMatch = text.match(/^\s*.+?\s*-\s*([0-9]+)\s*-\s*cluster\d+\s*$/i);
+  if (strictMatch && strictMatch[1]) {
+    return String(strictMatch[1]).trim();
+  }
+
+  // Fallback: first numeric token after a hyphen.
+  const looseMatch = text.match(/-\s*([0-9]+)\b/);
+  if (looseMatch && looseMatch[1]) {
+    return String(looseMatch[1]).trim();
+  }
+
+  return "";
+}
+
+function resolveSelectedPartnerId({ selectedCompanyMeta, selectedCompanyValue, companies }) {
+  const selectedOption =
+    Array.isArray(companies) &&
+    companies.find((item) => !item?.disabled && String(item?.value || "") === String(selectedCompanyValue || ""));
+  const labelId = extractPartnerIdFromCompanyLabel(selectedOption?.label || "");
+  if (labelId) return labelId;
+
+  const parsedValue = parseCompanyOptionValue(selectedCompanyValue);
+  const valueId = String(parsedValue?.id || "").trim();
+  if (valueId) return valueId;
+
+  const metaId = String(selectedCompanyMeta?.id || "").trim();
+  if (metaId) return metaId;
+
+  return "";
 }
 
 async function loadPartnerCodesCache() {
@@ -4407,7 +4446,11 @@ app.get(
       report.requested = true;
       report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
     } else if (shouldRun) {
-      const partnerId = String(selectedCompanyMeta?.id || "").trim();
+      const partnerId = resolveSelectedPartnerId({
+        selectedCompanyMeta,
+        selectedCompanyValue: filters.company,
+        companies
+      });
       if (!partnerId) {
         report.requested = true;
         report.error = "Seçilen firma için PartnerId bulunamadı.";
@@ -4526,7 +4569,11 @@ app.post(
     } else if (!filters.username || !filters.password) {
       report.error = "Kullanıcı adı ve şifre zorunludur.";
     } else {
-      const partnerId = String(selectedCompanyMeta.id || "").trim();
+      const partnerId = resolveSelectedPartnerId({
+        selectedCompanyMeta,
+        selectedCompanyValue: filters.company,
+        companies
+      });
       if (!partnerId) {
         report.error = "Seçilen firma için PartnerId bulunamadı.";
       } else {
