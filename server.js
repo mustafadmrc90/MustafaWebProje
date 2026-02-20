@@ -949,6 +949,7 @@ function normalizePartnerItems(items) {
     let id = "";
     let cluster = "";
     let url = "";
+    let branchId = "";
 
     if (typeof item === "string") {
       code = String(item).trim();
@@ -957,19 +958,29 @@ function normalizePartnerItems(items) {
       id = String(item.id || "").trim();
       cluster = String(item.cluster || "").trim().toLowerCase();
       url = normalizeTargetUrl(item.url || "");
+      branchId = String(item.branchId || "").trim();
     }
 
     if (!code) return;
 
     const key = `${code}__${id}__${cluster}`;
     if (!byKey.has(key)) {
-      byKey.set(key, { code, id, cluster, url });
+      byKey.set(key, { code, id, cluster, url, branchId });
       return;
     }
 
     const current = byKey.get(key);
-    if (current && !current.url && url) {
-      byKey.set(key, { ...current, url });
+    if (!current) return;
+
+    let next = current;
+    if (!next.url && url) {
+      next = { ...next, url };
+    }
+    if (!next.branchId && branchId) {
+      next = { ...next, branchId };
+    }
+    if (next !== current) {
+      byKey.set(key, next);
     }
   });
 
@@ -983,7 +994,10 @@ function normalizePartnerItems(items) {
     const byCluster = a.cluster.localeCompare(b.cluster, "tr");
     if (byCluster !== 0) return byCluster;
 
-    return String(a.url || "").localeCompare(String(b.url || ""), "tr");
+    const byUrl = String(a.url || "").localeCompare(String(b.url || ""), "tr");
+    if (byUrl !== 0) return byUrl;
+
+    return String(a.branchId || "").localeCompare(String(b.branchId || ""), "tr");
   });
 }
 
@@ -1026,6 +1040,18 @@ function extractPartnerItems(payload, clusterLabel) {
       row.provider_id ??
       row.providerId;
     const id = rawId === undefined || rawId === null ? "" : String(rawId).trim();
+    const rawBranchId =
+      row["branch-id"] ??
+      row.branch_id ??
+      row.branchId ??
+      row.branchID ??
+      row.default_branch_id ??
+      row.defaultBranchId ??
+      row.active_branch_id ??
+      row.activeBranchId ??
+      row.selected_branch_id ??
+      row.selectedBranchId;
+    const branchId = rawBranchId === undefined || rawBranchId === null ? "" : String(rawBranchId).trim();
     const rawUrl =
       row.url ??
       row.URL ??
@@ -1035,13 +1061,24 @@ function extractPartnerItems(payload, clusterLabel) {
       row.endpointUrl ??
       row.base_url ??
       row.baseUrl;
-    const url = normalizeTargetUrl(rawUrl);
+    let url = normalizeTargetUrl(rawUrl);
+    if (!url) {
+      const urlEntry = Object.entries(row).find(([key, value]) => {
+        if (!/url/i.test(String(key || ""))) return false;
+        const normalized = normalizeTargetUrl(value);
+        return Boolean(normalized);
+      });
+      if (urlEntry) {
+        url = normalizeTargetUrl(urlEntry[1]);
+      }
+    }
 
     items.push({
       code,
       id,
       cluster: String(clusterLabel || "").trim().toLowerCase(),
-      url
+      url,
+      branchId
     });
   });
 
@@ -1155,6 +1192,53 @@ function parseJsonSafe(text) {
   } catch (err) {
     return null;
   }
+}
+
+function extractBranchIdFromText(raw) {
+  const text = String(raw || "");
+  if (!text.trim()) return "";
+  const match = text.match(/branch[^0-9]{0,20}(\d{1,12})/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function parseJwtPayload(token) {
+  const rawToken = String(token || "").trim();
+  if (!rawToken) return null;
+  const parts = rawToken.split(".");
+  if (parts.length < 2) return null;
+  const payloadPart = parts[1];
+  if (!payloadPart) return null;
+  try {
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padLength = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + "=".repeat(padLength);
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    return parseJsonSafe(decoded);
+  } catch (err) {
+    return null;
+  }
+}
+
+function extractBranchIdFromToken(token) {
+  const payload = parseJwtPayload(token);
+  if (!payload) return "";
+  return (
+    findNestedValue(payload, new Set(["branchid", "defaultbranchid", "activebranchid", "selectedbranchid"])) ||
+    findNestedValue(payload, new Set(["branch", "branchcode"])) ||
+    ""
+  );
+}
+
+function extractBranchIdFromHeaders(headers) {
+  const normalizedHeaders = headers && typeof headers === "object" ? headers : {};
+  const matchingEntry = Object.entries(normalizedHeaders).find(([key]) =>
+    /branch[-_]?id|x[-_]?branch/i.test(String(key || ""))
+  );
+  if (!matchingEntry) return "";
+  const [, value] = matchingEntry;
+  const direct = String(value || "").trim();
+  if (direct) return direct;
+  return "";
 }
 
 function collectUserLoginBranchCandidates(node, candidates) {
@@ -3765,7 +3849,14 @@ function buildAuthorizedLinesReportModel() {
   };
 }
 
-async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerCode, username, password }) {
+async function fetchAuthorizedLinesLoginInfo({
+  endpointUrl,
+  companyUrl,
+  partnerCode,
+  username,
+  password,
+  fallbackBranchId
+}) {
   const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
   if (loginBaseUrls.length === 0) {
     return {
@@ -3873,6 +3964,10 @@ async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerC
 
         const raw = await response.text();
         const parsed = parseJsonSafe(raw);
+        const responseHeaders = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[String(key || "").toLowerCase()] = String(value || "");
+        });
         const errorMessage =
           (parsed &&
             typeof parsed === "object" &&
@@ -3885,14 +3980,18 @@ async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerC
           continue;
         }
 
-        const branchId =
-          extractBranchIdFromUserLoginPayload(parsed) ||
-          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
-          "";
         const tokenValue =
           findNestedValue(parsed, new Set(["token"])) ||
           findNestedValue(parsed, new Set(["accesstoken"])) ||
           findNestedValue(parsed, new Set(["authorizationtoken"])) ||
+          "";
+        const branchId =
+          extractBranchIdFromUserLoginPayload(parsed) ||
+          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
+          extractBranchIdFromToken(tokenValue) ||
+          extractBranchIdFromHeaders(responseHeaders) ||
+          extractBranchIdFromText(raw) ||
+          String(fallbackBranchId || "").trim() ||
           "";
 
         return {
@@ -3911,7 +4010,7 @@ async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerC
       error: lastError,
       sessionId: lastSessionId,
       deviceId: lastDeviceId,
-      branchId: "",
+      branchId: String(fallbackBranchId || "").trim(),
       token: ""
     };
   } catch (err) {
@@ -3920,7 +4019,7 @@ async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerC
       error: err?.message || "UserLogin isteği gönderilemedi.",
       sessionId: "",
       deviceId: "",
-      branchId: "",
+      branchId: String(fallbackBranchId || "").trim(),
       token: ""
     };
   } finally {
@@ -4204,7 +4303,8 @@ app.get(
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
           username: filters.username,
-          password: filters.password
+          password: filters.password,
+          fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
         });
         report.requested = true;
         report.sessionId = loginResult.sessionId || "";
@@ -4318,7 +4418,8 @@ app.post(
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
           username: filters.username,
-          password: filters.password
+          password: filters.password,
+          fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
         });
         report.sessionId = loginResult.sessionId || "";
         report.deviceId = loginResult.deviceId || "";
