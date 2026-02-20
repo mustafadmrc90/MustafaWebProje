@@ -2145,8 +2145,12 @@ button.ghost {
 
 .allowed-lines-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 220px)) minmax(260px, 1fr);
+  grid-template-columns: repeat(3, minmax(170px, 220px));
   gap: 10px 12px;
+}
+
+.allowed-lines-field-url {
+  grid-column: 1 / -1;
 }
 
 .allowed-lines-field {

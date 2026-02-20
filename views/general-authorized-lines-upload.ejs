@@ -52,8 +52,21 @@
               </select>
             </label>
             <label class="allowed-lines-field">
+              <span>Kullanıcı Adı</span>
+              <input type="text" name="username" value="<%= filters.username || '' %>" required />
+            </label>
+            <label class="allowed-lines-field">
+              <span>Şifre</span>
+              <input type="password" name="password" value="<%= filters.password || '' %>" required />
+            </label>
+            <label class="allowed-lines-field">
               <span>Token</span>
-              <input type="text" name="token" value="<%= filters.token %>" required />
+              <input
+                type="text"
+                name="token"
+                value="<%= filters.token %>"
+                placeholder="Boş bırakılırsa UserLogin token kullanılır"
+              />
             </label>
             <label class="allowed-lines-field allowed-lines-field-url">
               <span>Hedef URL</span>
@@ -90,12 +103,20 @@
         </div>
         <div class="stats">
           <div>
+            <div class="label">Branch Id</div>
+            <strong><%= report.branchId || "-" %></strong>
+          </div>
+          <div>
             <div class="label">Session Id</div>
             <strong><%= report.sessionId || "-" %></strong>
           </div>
           <div>
             <div class="label">Device Id</div>
             <strong><%= report.deviceId || "-" %></strong>
+          </div>
+          <div>
+            <div class="label">Login Token</div>
+            <strong><%= report.loginToken || "-" %></strong>
           </div>
         </div>
         <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
