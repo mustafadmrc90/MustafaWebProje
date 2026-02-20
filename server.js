@@ -22,6 +22,7 @@ const REPORTING_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/reporting/obiletsalesreport";
 const REPORTING_API_AUTH =
   process.env.REPORTING_API_AUTH || "Basic TXVyb011aG9BbGlPZ2lIYXJ1bk96YW4K";
+const AUTHORIZED_LINES_API_URL = process.env.AUTHORIZED_LINES_API_URL || "";
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -76,6 +77,16 @@ const SIDEBAR_MENU_REGISTRY = [
     routeKey: "dashboard",
     sortOrder: 11,
     iconKey: "dashboard"
+  },
+  {
+    key: "authorized-lines-upload",
+    type: "item",
+    label: "İzinli Hatları Yükle",
+    parentKey: "general",
+    route: "/general/authorized-lines-upload",
+    routeKey: "authorized-lines-upload",
+    sortOrder: 12,
+    iconKey: "authorized-lines-upload"
   },
   {
     key: "reports",
@@ -3634,6 +3645,125 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
   }
 }
 
+async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token }) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  if (!normalizedEndpointUrl) {
+    return {
+      requested: true,
+      status: null,
+      error: "Hedef URL geçersiz.",
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+  }
+
+  const normalizedPartnerId = String(partnerId || "").trim();
+  if (!normalizedPartnerId) {
+    return {
+      requested: true,
+      status: null,
+      error: "PartnerId zorunludur.",
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+  }
+
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return {
+      requested: true,
+      status: null,
+      error: "Token zorunludur.",
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  try {
+    const sessionUrl = buildSessionUrlForPartnerUrl(normalizedEndpointUrl);
+    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
+    if (sessionResult.error) {
+      return {
+        requested: true,
+        status: null,
+        error: sessionResult.error,
+        responseBody: "",
+        sessionId: "",
+        deviceId: ""
+      };
+    }
+
+    const body = {
+      data: normalizedPartnerId,
+      "device-session": {
+        "session-id": sessionResult.sessionId,
+        "device-id": sessionResult.deviceId
+      },
+      token: normalizedToken,
+      date: "2016-03-11T11:33:00",
+      language: "tr-TR"
+    };
+
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const responseBody =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        requested: true,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        responseBody: responseBody || "{}",
+        sessionId: sessionResult.sessionId,
+        deviceId: sessionResult.deviceId
+      };
+    }
+
+    return {
+      requested: true,
+      status: response.status,
+      error: null,
+      responseBody: responseBody || "{}",
+      sessionId: sessionResult.sessionId,
+      deviceId: sessionResult.deviceId
+    };
+  } catch (err) {
+    return {
+      requested: true,
+      status: null,
+      error: err?.message || "İstek gönderilemedi.",
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.redirect("/login");
@@ -3688,6 +3818,58 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
     loginSuccess: req.query.login === "1"
   });
 });
+
+app.get(
+  "/general/authorized-lines-upload",
+  requireAuth,
+  requireMenuAccess("authorized-lines-upload"),
+  async (req, res) => {
+    const filters = {
+      endpointUrl: String(req.query.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim(),
+      partnerId: String(req.query.partnerId || "").trim(),
+      token: String(req.query.token || "").trim()
+    };
+    const shouldRun = req.query.run === "1";
+    const report = shouldRun
+      ? await fetchAuthorizedLinesUploadReport(filters)
+      : {
+          requested: false,
+          status: null,
+          error: null,
+          responseBody: "",
+          sessionId: "",
+          deviceId: ""
+        };
+
+    res.render("general-authorized-lines-upload", {
+      user: req.session.user,
+      active: "authorized-lines-upload",
+      filters,
+      report
+    });
+  }
+);
+
+app.post(
+  "/general/authorized-lines-upload",
+  requireAuth,
+  requireMenuAccess("authorized-lines-upload"),
+  async (req, res) => {
+    const filters = {
+      endpointUrl: String(req.body.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim(),
+      partnerId: String(req.body.partnerId || "").trim(),
+      token: String(req.body.token || "").trim()
+    };
+    const report = await fetchAuthorizedLinesUploadReport(filters);
+
+    res.render("general-authorized-lines-upload", {
+      user: req.session.user,
+      active: "authorized-lines-upload",
+      filters,
+      report
+    });
+  }
+);
 
 app.get("/change-password", requireAuth, requireMenuAccess("password"), (req, res) => {
   res.render("change-password", {

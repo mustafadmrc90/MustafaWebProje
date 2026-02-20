@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M3 12h18"></path>
+                <path d="M12 3v18"></path>
+                <circle cx="12" cy="12" r="9"></circle>
+              </svg>
+            </span>
+            <span>İzinli Hatları Yükle</span>
+          </h1>
+          <p>Authorization: Basic + JSON body ile servis çağrısı yapılır.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <section class="table-card panel-card allowed-lines-section">
+        <div class="table-head">
+          <h2>İstek Parametreleri</h2>
+        </div>
+
+        <form class="allowed-lines-form" method="post" action="/general/authorized-lines-upload">
+          <div class="allowed-lines-grid">
+            <label class="allowed-lines-field">
+              <span>Partner Id</span>
+              <input type="text" name="partnerId" value="<%= filters.partnerId %>" required />
+            </label>
+            <label class="allowed-lines-field">
+              <span>Token</span>
+              <input type="text" name="token" value="<%= filters.token %>" required />
+            </label>
+            <label class="allowed-lines-field allowed-lines-field-url">
+              <span>Hedef URL</span>
+              <input
+                type="text"
+                name="endpointUrl"
+                value="<%= filters.endpointUrl %>"
+                placeholder="https://..."
+                required
+              />
+            </label>
+          </div>
+          <div class="allowed-lines-actions">
+            <button type="submit">Yükle</button>
+          </div>
+          <div class="allowed-lines-loading-message" hidden>İstek gönderiliyor, lütfen bekleyin...</div>
+        </form>
+
+        <% if (report.requested && report.error) { %>
+          <div class="alert inline-alert"><%= report.error %></div>
+        <% } %>
+      </section>
+
+      <section class="table-card panel-card">
+        <div class="table-head">
+          <h2>Yanıt</h2>
+          <div class="table-actions">
+            <% if (report.requested) { %>
+              <span class="pill"><%= report.status ? `HTTP ${report.status}` : "HTTP -" %></span>
+            <% } else { %>
+              <span class="pill muted">Henüz istek atılmadı</span>
+            <% } %>
+          </div>
+        </div>
+        <div class="stats">
+          <div>
+            <div class="label">Session Id</div>
+            <strong><%= report.sessionId || "-" %></strong>
+          </div>
+          <div>
+            <div class="label">Device Id</div>
+            <strong><%= report.deviceId || "-" %></strong>
+          </div>
+        </div>
+        <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>
