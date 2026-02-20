@@ -828,26 +828,17 @@ function requireMenuAccess(menuKey) {
       }
 
       const fallbackRoute = getFirstAccessibleRoute(sidebar);
-      if (!fallbackRoute && menuKey === "dashboard") {
-        const sectionPermissionResult = await pool.query(
-          `
-            SELECT can_view
-            FROM user_sidebar_permissions
-            WHERE user_id = $1
-              AND menu_key = 'general'
-          `,
-          [req.session.user.id]
-        );
-        if (toSidebarBool(sectionPermissionResult.rows?.[0]?.can_view, false)) {
-          return next();
-        }
-      }
-
       if (req.path.startsWith("/api/")) {
         return res.status(403).json({ ok: false, error: "Bu alana erişim yetkiniz yok." });
       }
       if (fallbackRoute && fallbackRoute !== req.path) {
         return res.redirect(fallbackRoute);
+      }
+      if (req.method === "GET") {
+        return res.status(200).render("empty", {
+          user: req.session.user,
+          active: ""
+        });
       }
       return res.status(403).send("Bu sayfayı görüntüleme yetkiniz yok.");
     } catch (err) {
