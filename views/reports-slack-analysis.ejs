@@ -75,6 +75,9 @@
                 <input type="hidden" name="startDate" value="<%= filters.startDate %>" />
                 <input type="hidden" name="endDate" value="<%= filters.endDate %>" />
                 <input type="hidden" name="source" value="<%= report.source %>" />
+                <input type="hidden" name="totalRequests" value="<%= report.totalRequests %>" />
+                <input type="hidden" name="dbStartDate" value="<%= sqlQuery?.filters?.startDate || filters.startDate %>" />
+                <input type="hidden" name="dbEndDate" value="<%= sqlQuery?.filters?.endDate || filters.endDate %>" />
                 <input type="hidden" name="rowsJson" value="<%= report.rowsJson %>" />
                 <button type="submit" class="button-link">SQL'e Kaydet</button>
               </form>
@@ -117,6 +120,114 @@
                   <td><%= formatter.format(report.totalReplies) %></td>
                 </tr>
               </tfoot>
+            </table>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="table-card panel-card slack-sql-section">
+        <div class="table-head">
+          <h2>SQL Kayıt Sorgu</h2>
+          <div class="table-actions">
+            <% if (sqlQuery?.requested) { %>
+              <span class="pill"><%= (sqlQuery.rows || []).length %> Kayıt</span>
+            <% } %>
+          </div>
+        </div>
+
+        <form class="slack-sql-filter-form" method="get" action="/reports/slack-analysis">
+          <input type="hidden" name="dbRun" value="1" />
+          <input type="hidden" name="startDate" value="<%= filters.startDate %>" />
+          <input type="hidden" name="endDate" value="<%= filters.endDate %>" />
+          <label class="slack-filter-field">
+            <span>Başlangıç Tarihi</span>
+            <input
+              type="date"
+              name="dbStartDate"
+              value="<%= sqlQuery?.filters?.startDate || filters.startDate %>"
+              required
+            />
+          </label>
+          <label class="slack-filter-field">
+            <span>Bitiş Tarihi</span>
+            <input
+              type="date"
+              name="dbEndDate"
+              value="<%= sqlQuery?.filters?.endDate || filters.endDate %>"
+              required
+            />
+          </label>
+          <button type="submit" class="button-link ghost">SQL Kayıtlarını Sorgula</button>
+        </form>
+
+        <% if (sqlQuery?.error) { %>
+          <div class="alert inline-alert"><%= sqlQuery.error %></div>
+        <% } %>
+
+        <% if (sqlQuery?.requested && (sqlQuery.rows || []).length === 0 && !sqlQuery.error) { %>
+          <p class="muted">Seçilen tarih aralığında SQL kaydı bulunamadı.</p>
+        <% } %>
+
+        <% if ((sqlQuery.rows || []).length > 0) { %>
+          <% const formatter = new Intl.NumberFormat("tr-TR"); %>
+          <div class="table-scroll">
+            <table class="slack-sql-table">
+              <thead>
+                <tr>
+                  <th>Kayıt No</th>
+                  <th>Tarih Aralığı</th>
+                  <th>Talep</th>
+                  <th>Yanıt</th>
+                  <th>Kaydetme</th>
+                  <th>Güncelleme</th>
+                  <th>Kullanıcı</th>
+                  <th>Detay</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% sqlQuery.rows.forEach((run) => { %>
+                  <tr>
+                    <td><%= run.runId %></td>
+                    <td><%= run.startDate %> - <%= run.endDate %></td>
+                    <td><%= formatter.format(run.totalRequests) %></td>
+                    <td><%= formatter.format(run.totalReplies) %></td>
+                    <td><%= run.saveCount %>. kez</td>
+                    <td>
+                      <% const updated = new Date(run.updatedAt); %>
+                      <%= Number.isNaN(updated.getTime()) ? (run.updatedAt || "-") : updated.toLocaleString("tr-TR") %>
+                    </td>
+                    <td><%= run.createdByName || "-" %></td>
+                    <td>
+                      <details class="slack-sql-detail">
+                        <summary>Göster</summary>
+                        <% if (!run.items || run.items.length === 0) { %>
+                          <p class="muted">Kullanıcı detayı yok.</p>
+                        <% } %>
+                        <% if (run.items && run.items.length > 0) { %>
+                          <table class="slack-sql-items-table">
+                            <thead>
+                              <tr>
+                                <th>Kullanıcı</th>
+                                <th>Talep</th>
+                                <th>Yanıt</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <% run.items.forEach((item) => { %>
+                                <tr>
+                                  <td title="<%= item.userId %>"><%= item.userName %></td>
+                                  <td><%= formatter.format(item.requestCount) %></td>
+                                  <td><%= formatter.format(item.replyCount) %></td>
+                                </tr>
+                              <% }) %>
+                            </tbody>
+                          </table>
+                        <% } %>
+                      </details>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
             </table>
           </div>
         <% } %>

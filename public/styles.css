@@ -2156,6 +2156,68 @@ button.ghost {
   background: #eef3f8;
 }
 
+.slack-sql-section {
+  margin-top: 12px;
+}
+
+.slack-sql-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.slack-sql-filter-form .button-link {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.slack-sql-table {
+  min-width: 1040px;
+}
+
+.slack-sql-table th,
+.slack-sql-table td {
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.slack-sql-table th:nth-child(1),
+.slack-sql-table td:nth-child(1),
+.slack-sql-table th:nth-child(3),
+.slack-sql-table td:nth-child(3),
+.slack-sql-table th:nth-child(4),
+.slack-sql-table td:nth-child(4) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.slack-sql-detail summary {
+  cursor: pointer;
+  color: #1f2735;
+  font-size: 12px;
+}
+
+.slack-sql-detail p {
+  margin: 8px 0 0;
+}
+
+.slack-sql-items-table {
+  margin-top: 8px;
+  min-width: 360px;
+}
+
+.slack-sql-items-table th:nth-child(2),
+.slack-sql-items-table td:nth-child(2),
+.slack-sql-items-table th:nth-child(3),
+.slack-sql-items-table td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .sales-chart {
   display: grid;
   gap: 10px;
