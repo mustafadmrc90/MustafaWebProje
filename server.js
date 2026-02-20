@@ -1610,7 +1610,6 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const selectedIds = new Set(SLACK_SELECTED_USERS.map((item) => item.id));
   const countByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
-  const seenReplies = new Set();
 
   let channels = [];
   try {
@@ -1730,16 +1729,19 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
             replyTruncatedThreads += 1;
           }
 
+          // Same thread + same user counts once, different users each count once.
+          const uniqueUsersInThread = new Set();
+
           for (const reply of repliesResult.replies || []) {
             if (!reply || reply.ts === message.ts) continue;
             if (!shouldCountSlackMessage(reply)) continue;
 
-            const dedupeKey = `${channelId}:${reply.ts}`;
-            if (seenReplies.has(dedupeKey)) continue;
-            seenReplies.add(dedupeKey);
-
             const userId = String(reply.user || "").trim();
             if (!selectedIds.has(userId)) continue;
+            uniqueUsersInThread.add(userId);
+          }
+
+          for (const userId of uniqueUsersInThread) {
             countByUserId.set(userId, (countByUserId.get(userId) || 0) + 1);
           }
         },
