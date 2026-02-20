@@ -22,7 +22,9 @@ const REPORTING_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/reporting/obiletsalesreport";
 const REPORTING_API_AUTH =
   process.env.REPORTING_API_AUTH || "Basic TXVyb011aG9BbGlPZ2lIYXJ1bk96YW4K";
-const AUTHORIZED_LINES_API_URL = process.env.AUTHORIZED_LINES_API_URL || "";
+const AUTHORIZED_LINES_API_URL =
+  process.env.AUTHORIZED_LINES_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -1475,6 +1477,19 @@ function buildMembershipUserLoginUrl(partnerUrl) {
     const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
     const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
     parsed.pathname = normalizeApiPath(`${apiPrefix}membership/userlogin`, "/api/membership/userlogin");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildAuthorizedLinesUploadUrl(baseUrl, clusterLabel) {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/uetds/UpdateValidRouteCodes";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -4439,9 +4454,10 @@ app.get(
     const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
 
     const rawEndpointUrl = String(req.query.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim();
-    const resolvedEndpointUrl = selectedCompanyMeta?.cluster
-      ? buildUrlForCluster(rawEndpointUrl || PARTNERS_API_URL, selectedCompanyMeta.cluster)
-      : rawEndpointUrl;
+    const resolvedEndpointUrl = buildAuthorizedLinesUploadUrl(
+      rawEndpointUrl || AUTHORIZED_LINES_API_URL,
+      selectedCompanyMeta?.cluster || ""
+    );
     const filters = {
       endpointUrl: resolvedEndpointUrl,
       company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
@@ -4516,7 +4532,7 @@ app.get(
       active: "authorized-lines-upload",
       filters,
       companies,
-      companySourceBaseUrl: PARTNERS_API_URL,
+      companySourceBaseUrl: AUTHORIZED_LINES_API_URL,
       report
     });
   }
@@ -4565,9 +4581,10 @@ app.post(
     const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
 
     const rawEndpointUrl = String(req.body.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim();
-    const resolvedEndpointUrl = selectedCompanyMeta?.cluster
-      ? buildUrlForCluster(rawEndpointUrl || PARTNERS_API_URL, selectedCompanyMeta.cluster)
-      : rawEndpointUrl;
+    const resolvedEndpointUrl = buildAuthorizedLinesUploadUrl(
+      rawEndpointUrl || AUTHORIZED_LINES_API_URL,
+      selectedCompanyMeta?.cluster || ""
+    );
     const filters = {
       endpointUrl: resolvedEndpointUrl,
       company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
@@ -4637,7 +4654,7 @@ app.post(
       active: "authorized-lines-upload",
       filters,
       companies,
-      companySourceBaseUrl: PARTNERS_API_URL,
+      companySourceBaseUrl: AUTHORIZED_LINES_API_URL,
       report
     });
   }
