@@ -1241,6 +1241,39 @@ function extractBranchIdFromHeaders(headers) {
   return "";
 }
 
+function extractMembershipTokenDataFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+
+  const normalizeString = (value) => {
+    if (value === undefined || value === null) return "";
+    const text = String(value).trim();
+    return text;
+  };
+
+  const rootToken = payload.token;
+  if (rootToken && typeof rootToken === "object") {
+    const rootTokenData = normalizeString(rootToken.data);
+    if (rootTokenData) return rootTokenData;
+  }
+
+  const rootTokenString = normalizeString(rootToken);
+  if (rootTokenString) return rootTokenString;
+
+  const dataBlock = payload.data;
+  if (dataBlock && typeof dataBlock === "object") {
+    const dataToken = dataBlock.token;
+    if (dataToken && typeof dataToken === "object") {
+      const dataTokenData = normalizeString(dataToken.data);
+      if (dataTokenData) return dataTokenData;
+    }
+
+    const dataTokenString = normalizeString(dataToken);
+    if (dataTokenString) return dataTokenString;
+  }
+
+  return "";
+}
+
 function collectUserLoginBranchCandidates(node, candidates) {
   if (!node || typeof node !== "object") return;
 
@@ -1352,29 +1385,14 @@ function normalizeApiPath(input, fallbackPath) {
   return raw.startsWith("/") ? raw : `/${raw}`;
 }
 
-async function resolveUserLoginPath() {
-  const fallbackPath = "/api/client/userlogin";
-  try {
-    const result = await pool.query(
-      `SELECT path
-       FROM api_endpoints
-       WHERE lower(title) LIKE '%userlogin%'
-          OR lower(path) LIKE '%userlogin%'
-       ORDER BY updated_at DESC, id DESC
-       LIMIT 1`
-    );
-    const row = result.rows[0];
-    if (!row) return fallbackPath;
-    return normalizeApiPath(row.path, fallbackPath);
-  } catch (err) {
-    return fallbackPath;
-  }
-}
-
-function buildUserLoginUrlForPartnerUrl(partnerUrl, userLoginPath = "/api/client/userlogin") {
+function buildMembershipUserLoginUrl(partnerUrl) {
   try {
     const parsed = new URL(String(partnerUrl || ""));
-    parsed.pathname = normalizeApiPath(userLoginPath, "/api/client/userlogin");
+    const pathname = String(parsed.pathname || "/");
+    const apiMatch = pathname.match(/^(.+?\/api\/?)/i);
+    const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
+    const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
+    parsed.pathname = normalizeApiPath(`${apiPrefix}membership/userlogin`, "/api/membership/userlogin");
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -3926,13 +3944,12 @@ async function fetchAuthorizedLinesLoginInfo({
     let lastSessionId = "";
     let lastDeviceId = "";
     let lastLoginUrl = "";
-    const userLoginPath = await resolveUserLoginPath();
 
     for (const baseUrl of loginBaseUrls) {
       const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
-      const loginUrl = buildUserLoginUrlForPartnerUrl(baseUrl, userLoginPath);
+      const loginUrl = buildMembershipUserLoginUrl(baseUrl);
       if (!loginUrl) {
-        lastError = "UserLogin URL oluşturulamadı.";
+        lastError = "Membership UserLogin URL oluşturulamadı.";
         continue;
       }
       lastLoginUrl = loginUrl;
@@ -3946,102 +3963,74 @@ async function fetchAuthorizedLinesLoginInfo({
       lastSessionId = sessionResult.sessionId || "";
       lastDeviceId = sessionResult.deviceId || "";
 
-      const sharedEnvelope = {
+      const payload = {
+        data: {
+          username: normalizedUsername,
+          password: normalizedPassword,
+          "remember-me": 0,
+          "partner-code": normalizedPartnerCode
+        },
         "device-session": {
           "session-id": sessionResult.sessionId,
           "device-id": sessionResult.deviceId
         },
-        date: "2016-03-11T11:33:00",
+        date: "2020-02-24T18:03:00",
         language: "tr-TR"
       };
 
-      const payloadCandidates = [
-        {
-          data: {
-            "user-name": normalizedUsername,
-            password: normalizedPassword,
-            "partner-code": normalizedPartnerCode
-          },
-          ...sharedEnvelope
+      const response = await fetch(loginUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: PARTNERS_API_AUTH
         },
-        {
-          data: {
-            username: normalizedUsername,
-            password: normalizedPassword,
-            "partner-code": normalizedPartnerCode
-          },
-          ...sharedEnvelope
-        },
-        {
-          data: {
-            username: normalizedUsername,
-            password: normalizedPassword,
-            partnerCode: normalizedPartnerCode
-          },
-          ...sharedEnvelope
-        },
-        {
-          username: normalizedUsername,
-          password: normalizedPassword,
-          "partner-code": normalizedPartnerCode,
-          ...sharedEnvelope
-        }
-      ];
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
 
-      for (const payload of payloadCandidates) {
-        const response = await fetch(loginUrl, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            Authorization: PARTNERS_API_AUTH
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
+      const raw = await response.text();
+      const parsed = parseJsonSafe(raw);
+      const responseHeaders = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[String(key || "").toLowerCase()] = String(value || "");
+      });
+      const errorMessage =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "";
 
-        const raw = await response.text();
-        const parsed = parseJsonSafe(raw);
-        const responseHeaders = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[String(key || "").toLowerCase()] = String(value || "");
-        });
-        const errorMessage =
-          (parsed &&
-            typeof parsed === "object" &&
-            String(parsed.message || parsed.error || "").trim()) ||
-          response.statusText ||
-          "";
-
-        if (!response.ok) {
-          lastError = `UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
-          continue;
-        }
-
-        const tokenValue =
-          findNestedValue(parsed, new Set(["token"])) ||
-          findNestedValue(parsed, new Set(["accesstoken"])) ||
-          findNestedValue(parsed, new Set(["authorizationtoken"])) ||
-          "";
-        const branchId =
-          extractBranchIdFromUserLoginPayload(parsed) ||
-          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
-          extractBranchIdFromToken(tokenValue) ||
-          extractBranchIdFromHeaders(responseHeaders) ||
-          extractBranchIdFromText(raw) ||
-          String(fallbackBranchId || "").trim() ||
-          "";
-
-        return {
-          ok: true,
-          error: null,
-          sessionId: sessionResult.sessionId,
-          deviceId: sessionResult.deviceId,
-          branchId: String(branchId || "").trim(),
-          token: String(tokenValue || "").trim(),
-          loginUrl
-        };
+      if (!response.ok) {
+        lastError = `Membership UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
+        continue;
       }
+
+      const tokenValue =
+        extractMembershipTokenDataFromPayload(parsed) ||
+        findNestedValue(parsed, new Set(["token"])) ||
+        findNestedValue(parsed, new Set(["accesstoken"])) ||
+        findNestedValue(parsed, new Set(["authorizationtoken"])) ||
+        "";
+      const branchId =
+        extractBranchIdFromUserLoginPayload(parsed) ||
+        findNestedValue(parsed, new Set(["branchid", "branch"])) ||
+        extractBranchIdFromToken(tokenValue) ||
+        extractBranchIdFromHeaders(responseHeaders) ||
+        extractBranchIdFromText(raw) ||
+        String(fallbackBranchId || "").trim() ||
+        "";
+
+      return {
+        ok: true,
+        error: null,
+        sessionId: sessionResult.sessionId,
+        deviceId: sessionResult.deviceId,
+        branchId: String(branchId || "").trim(),
+        token: String(tokenValue || "").trim(),
+        loginUrl
+      };
     }
 
     return {

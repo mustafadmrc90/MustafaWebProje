@@ -48,7 +48,7 @@
             value="<%= filters.endpointUrl %>"
           />
           <div class="allowed-lines-grid">
-            <label class="allowed-lines-field">
+            <label class="allowed-lines-field allowed-lines-field-company">
               <span>Firma</span>
               <select name="company" id="allowed-lines-company" required>
                 <% companies.forEach((company) => { %>
@@ -63,11 +63,11 @@
                 <% }) %>
               </select>
             </label>
-            <label class="allowed-lines-field">
+            <label class="allowed-lines-field allowed-lines-field-username">
               <span>Kullanıcı Adı</span>
               <input type="text" name="username" value="<%= filters.username || '' %>" required />
             </label>
-            <label class="allowed-lines-field">
+            <label class="allowed-lines-field allowed-lines-field-password">
               <span>Şifre</span>
               <input type="password" name="password" value="<%= filters.password || '' %>" required />
             </label>
@@ -96,10 +96,6 @@
         </div>
         <div class="stats">
           <div>
-            <div class="label">Branch Id</div>
-            <strong><%= report.branchId || "-" %></strong>
-          </div>
-          <div>
             <div class="label">Session Id</div>
             <strong><%= report.sessionId || "-" %></strong>
           </div>
@@ -110,10 +106,6 @@
           <div>
             <div class="label">Login Token</div>
             <strong><%= report.loginToken || "-" %></strong>
-          </div>
-          <div>
-            <div class="label">Login URL</div>
-            <strong><%= report.loginUrl || "-" %></strong>
           </div>
         </div>
         <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>

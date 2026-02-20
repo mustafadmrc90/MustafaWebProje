@@ -2153,8 +2153,9 @@ button.ghost {
 
 .allowed-lines-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(170px, 220px));
-  gap: 10px 12px;
+  grid-template-columns: minmax(300px, 420px) minmax(180px, 240px) minmax(180px, 240px);
+  gap: 10px 16px;
+  align-items: end;
 }
 
 .allowed-lines-field-url {
@@ -2164,6 +2165,7 @@ button.ghost {
 .allowed-lines-field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .allowed-lines-field span {
@@ -2182,6 +2184,8 @@ button.ghost {
   font-size: 13px;
   min-height: 36px;
   color: #1f2735;
+  width: 100%;
+  min-width: 0;
 }
 
 .allowed-lines-field select {
@@ -2192,6 +2196,11 @@ button.ghost {
   font-size: 13px;
   min-height: 36px;
   color: #1f2735;
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .allowed-lines-field input:focus {
