@@ -30,6 +30,23 @@ const SLACK_MONTHLY_ANALYSIS_FILE = path.join(__dirname, "data", "slack-monthly-
 const SLACK_API_BASE_URL = "https://slack.com/api";
 const SLACK_DEFAULT_LIMIT = 200;
 const SLACK_MAX_RATE_LIMIT_RETRY = 8;
+const SLACK_API_TIMEOUT_MS = Number.parseInt(process.env.SLACK_API_TIMEOUT_MS || "15000", 10) || 15000;
+const SLACK_ANALYSIS_CHANNEL_TYPES_RAW = process.env.SLACK_ANALYSIS_CHANNEL_TYPES || "private_channel";
+const SLACK_ANALYSIS_CACHE_TTL_MS =
+  Number.parseInt(process.env.SLACK_ANALYSIS_CACHE_TTL_MS || "120000", 10) || 120000;
+const SLACK_ANALYSIS_MAX_RUNTIME_MS =
+  Number.parseInt(process.env.SLACK_ANALYSIS_MAX_RUNTIME_MS || "45000", 10) || 45000;
+const SLACK_ANALYSIS_CHANNEL_CONCURRENCY =
+  Number.parseInt(process.env.SLACK_ANALYSIS_CHANNEL_CONCURRENCY || "2", 10) || 2;
+const SLACK_ANALYSIS_THREAD_CONCURRENCY =
+  Number.parseInt(process.env.SLACK_ANALYSIS_THREAD_CONCURRENCY || "4", 10) || 4;
+const SLACK_ANALYSIS_MAX_CHANNELS = Number.parseInt(process.env.SLACK_ANALYSIS_MAX_CHANNELS || "80", 10) || 80;
+const SLACK_ANALYSIS_MAX_HISTORY_PAGES =
+  Number.parseInt(process.env.SLACK_ANALYSIS_MAX_HISTORY_PAGES || "8", 10) || 8;
+const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
+  Number.parseInt(process.env.SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL || "120", 10) || 120;
+const SLACK_ANALYSIS_MAX_REPLY_PAGES =
+  Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
 const SLACK_SELECTED_USERS = [
   { id: "U03M921BDCJ", name: "Onur Uğur - Corp" },
   { id: "U03MBE47P1A", name: "Çağatay Atalay - Corp" },
@@ -39,6 +56,7 @@ const SLACK_SELECTED_USERS = [
   { id: "U03MMMBN1Q9", name: "Uğurcan CORP" },
   { id: "U03M91THFA6", name: "Denizhan Arslan - CORP" }
 ];
+const slackReplyReportCache = new Map();
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -1298,57 +1316,135 @@ async function slackApiGet(method, token, params = {}, retryCount = 0) {
   });
 
   const url = `${SLACK_API_BASE_URL}/${method}${query.toString() ? `?${query.toString()}` : ""}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      "Content-Type": "application/json"
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, SLACK_API_TIMEOUT_MS));
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (response.status === 429) {
+      if (retryCount >= SLACK_MAX_RATE_LIMIT_RETRY) {
+        throw new Error(`${method} HTTP 429 (max retry aşıldı)`);
+      }
+      const retryAfterRaw = response.headers.get("retry-after");
+      const retryAfterSeconds = Number.parseInt(retryAfterRaw || "1", 10);
+      const waitMs = (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000 + 250;
+      await sleep(waitMs);
+      return slackApiGet(method, token, params, retryCount + 1);
     }
-  });
 
-  if (response.status === 429) {
-    if (retryCount >= SLACK_MAX_RATE_LIMIT_RETRY) {
-      throw new Error(`${method} HTTP 429 (max retry aşıldı)`);
+    const raw = await response.text();
+    const data = parseJsonSafe(raw);
+
+    if (!response.ok) {
+      const apiMessage =
+        (data && typeof data === "object" && String(data.error || data.message || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      throw new Error(`${method} HTTP ${response.status}: ${apiMessage}`);
     }
-    const retryAfterRaw = response.headers.get("retry-after");
-    const retryAfterSeconds = Number.parseInt(retryAfterRaw || "1", 10);
-    const waitMs = (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000 + 250;
-    await sleep(waitMs);
-    return slackApiGet(method, token, params, retryCount + 1);
+
+    if (!data || typeof data !== "object") {
+      throw new Error(`${method} API yanıtı JSON parse edilemedi.`);
+    }
+
+    if (!data.ok) {
+      const needed = data.needed ? ` needed=${data.needed}` : "";
+      const provided = data.provided ? ` provided=${data.provided}` : "";
+      throw new Error(`${method} API error: ${data.error || "unknown_error"}${needed}${provided}`);
+    }
+
+    return data;
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`${method} timeout (${Math.round(Math.max(1000, SLACK_API_TIMEOUT_MS) / 1000)}s)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const raw = await response.text();
-  const data = parseJsonSafe(raw);
-
-  if (!response.ok) {
-    const apiMessage =
-      (data && typeof data === "object" && String(data.error || data.message || "").trim()) ||
-      response.statusText ||
-      "Bilinmeyen hata";
-    throw new Error(`${method} HTTP ${response.status}: ${apiMessage}`);
-  }
-
-  if (!data || typeof data !== "object") {
-    throw new Error(`${method} API yanıtı JSON parse edilemedi.`);
-  }
-
-  if (!data.ok) {
-    const needed = data.needed ? ` needed=${data.needed}` : "";
-    const provided = data.provided ? ` provided=${data.provided}` : "";
-    throw new Error(`${method} API error: ${data.error || "unknown_error"}${needed}${provided}`);
-  }
-
-  return data;
 }
 
-async function listSlackChannelsForAnalysis(token) {
+function toBoundedInt(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+function normalizeSlackChannelTypes(raw) {
+  const allowed = new Set(["public_channel", "private_channel", "mpim", "im"]);
+  const tokens = String(raw || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => allowed.has(item));
+  if (tokens.length === 0) return "private_channel";
+  return Array.from(new Set(tokens)).join(",");
+}
+
+function getSlackReplyReportCacheKey(startDate, endDate) {
+  return `${startDate || ""}__${endDate || ""}__${SLACK_SELECTED_USERS.map((item) => item.id).join(",")}`;
+}
+
+function getCachedSlackReplyReport(cacheKey) {
+  const cached = slackReplyReportCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    slackReplyReportCache.delete(cacheKey);
+    return null;
+  }
+  return cached.value;
+}
+
+function setCachedSlackReplyReport(cacheKey, value) {
+  const ttl = Math.max(1000, SLACK_ANALYSIS_CACHE_TTL_MS);
+  slackReplyReportCache.set(cacheKey, {
+    expiresAt: Date.now() + ttl,
+    value
+  });
+}
+
+async function runWithConcurrency(items, concurrency, worker, shouldStop) {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length);
+  const workerCount = Math.max(1, Math.min(list.length || 1, toBoundedInt(concurrency, 1, 1, 20)));
+  let index = 0;
+
+  const runner = async () => {
+    while (true) {
+      if (typeof shouldStop === "function" && shouldStop()) return;
+      const current = index;
+      index += 1;
+      if (current >= list.length) return;
+      try {
+        results[current] = await worker(list[current], current);
+      } catch (err) {
+        results[current] = { error: err };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runner()));
+  return results;
+}
+
+async function listSlackChannelsForAnalysis(token, channelTypes) {
   const channels = [];
   let cursor = "";
+  const types = normalizeSlackChannelTypes(channelTypes);
 
   do {
     const data = await slackApiGet("conversations.list", token, {
-      types: "public_channel,private_channel",
+      types,
       exclude_archived: "true",
       limit: SLACK_DEFAULT_LIMIT,
       cursor
@@ -1361,11 +1457,14 @@ async function listSlackChannelsForAnalysis(token) {
   return channels;
 }
 
-async function listSlackChannelMessagesForAnalysis(token, channelId, oldest, latest) {
+async function listSlackChannelMessagesForAnalysis(token, channelId, oldest, latest, maxPages) {
   const messages = [];
   let cursor = "";
+  let pageCount = 0;
+  const pageLimit = toBoundedInt(maxPages, SLACK_ANALYSIS_MAX_HISTORY_PAGES, 1, 50);
 
   do {
+    pageCount += 1;
     const data = await slackApiGet("conversations.history", token, {
       channel: channelId,
       limit: SLACK_DEFAULT_LIMIT,
@@ -1376,16 +1475,22 @@ async function listSlackChannelMessagesForAnalysis(token, channelId, oldest, lat
     });
     (data.messages || []).forEach((message) => messages.push(message));
     cursor = data.response_metadata?.next_cursor || "";
-  } while (cursor);
+  } while (cursor && pageCount < pageLimit);
 
-  return messages;
+  return {
+    messages,
+    truncated: Boolean(cursor)
+  };
 }
 
-async function listSlackThreadRepliesForAnalysis(token, channelId, threadTs, oldest, latest) {
+async function listSlackThreadRepliesForAnalysis(token, channelId, threadTs, oldest, latest, maxPages) {
   const replies = [];
   let cursor = "";
+  let pageCount = 0;
+  const pageLimit = toBoundedInt(maxPages, SLACK_ANALYSIS_MAX_REPLY_PAGES, 1, 50);
 
   do {
+    pageCount += 1;
     const data = await slackApiGet("conversations.replies", token, {
       channel: channelId,
       ts: threadTs,
@@ -1397,9 +1502,12 @@ async function listSlackThreadRepliesForAnalysis(token, channelId, threadTs, old
     });
     (data.messages || []).forEach((message) => replies.push(message));
     cursor = data.response_metadata?.next_cursor || "";
-  } while (cursor);
+  } while (cursor && pageCount < pageLimit);
 
-  return replies;
+  return {
+    replies,
+    truncated: Boolean(cursor)
+  };
 }
 
 function buildSlackReplyRowsFromCounts(countByUserId, nameByUserId = new Map()) {
@@ -1476,8 +1584,29 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     });
   }
 
+  const cacheKey = getSlackReplyReportCacheKey(startDate, endDate);
+  const cached = getCachedSlackReplyReport(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      notice: cached.notice ? `${cached.notice} (Önbellek)` : "Önbellekten gösteriliyor."
+    };
+  }
+
   const oldest = String(Math.floor(startUtc.getTime() / 1000));
   const latest = String(Math.floor(endUtc.getTime() / 1000));
+  const channelTypes = normalizeSlackChannelTypes(SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
+  const maxRuntimeMs = toBoundedInt(SLACK_ANALYSIS_MAX_RUNTIME_MS, 45000, 5000, 180000);
+  const maxChannels = toBoundedInt(SLACK_ANALYSIS_MAX_CHANNELS, 80, 1, 500);
+  const maxThreadsPerChannel = toBoundedInt(SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL, 120, 1, 2000);
+  const maxHistoryPages = toBoundedInt(SLACK_ANALYSIS_MAX_HISTORY_PAGES, 8, 1, 50);
+  const maxReplyPages = toBoundedInt(SLACK_ANALYSIS_MAX_REPLY_PAGES, 6, 1, 50);
+  const channelConcurrency = toBoundedInt(SLACK_ANALYSIS_CHANNEL_CONCURRENCY, 2, 1, 8);
+  const threadConcurrency = toBoundedInt(SLACK_ANALYSIS_THREAD_CONCURRENCY, 4, 1, 10);
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + maxRuntimeMs;
+  const isDeadlineExceeded = () => Date.now() >= deadlineAt;
+
   const selectedIds = new Set(SLACK_SELECTED_USERS.map((item) => item.id));
   const countByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
@@ -1485,7 +1614,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
 
   let channels = [];
   try {
-    channels = await listSlackChannelsForAnalysis(token);
+    channels = await listSlackChannelsForAnalysis(token, channelTypes);
   } catch (err) {
     return buildSlackReplyReportModel({
       requested: true,
@@ -1502,64 +1631,164 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     });
   }
 
-  const warnings = [];
+  let warningCount = 0;
+  const warningSamples = [];
+  const addWarning = (message) => {
+    warningCount += 1;
+    if (warningSamples.length < 3) {
+      warningSamples.push(String(message || "").trim());
+    }
+  };
+
+  let historyTruncatedChannels = 0;
+  let replyTruncatedThreads = 0;
+  let threadLimitAppliedChannels = 0;
+  let runtimeStopped = false;
+  let runtimeSkippedChannels = 0;
+
   const metrics = {
     channelsTotal: channels.length,
     channelsScanned: 0,
     threadsScanned: 0
   };
 
-  for (const channel of channels) {
-    const channelId = String(channel?.id || "").trim();
-    const channelName = String(channel?.name || channelId || "").trim();
-    if (!channelId) continue;
+  const limitedChannels = channels.slice(0, maxChannels);
+  const skippedByChannelLimit = Math.max(0, channels.length - limitedChannels.length);
 
-    metrics.channelsScanned += 1;
+  await runWithConcurrency(
+    limitedChannels,
+    channelConcurrency,
+    async (channel) => {
+      if (isDeadlineExceeded()) {
+        runtimeStopped = true;
+        runtimeSkippedChannels += 1;
+        return;
+      }
 
-    let messages = [];
-    try {
-      messages = await listSlackChannelMessagesForAnalysis(token, channelId, oldest, latest);
-    } catch (err) {
-      warnings.push(`${channelName}: ${err?.message || "history okunamadı"}`);
-      continue;
-    }
+      const channelId = String(channel?.id || "").trim();
+      const channelName = String(channel?.name || channelId || "").trim();
+      if (!channelId) return;
 
-    for (const message of messages) {
-      const replyCount = Number(message?.reply_count || 0);
-      if (!Number.isFinite(replyCount) || replyCount <= 0) continue;
+      metrics.channelsScanned += 1;
 
-      metrics.threadsScanned += 1;
-
-      let replies = [];
+      let messagesResult;
       try {
-        replies = await listSlackThreadRepliesForAnalysis(token, channelId, message.ts, oldest, latest);
+        messagesResult = await listSlackChannelMessagesForAnalysis(
+          token,
+          channelId,
+          oldest,
+          latest,
+          maxHistoryPages
+        );
       } catch (err) {
-        warnings.push(`${channelName} thread ${message?.ts || "-"}: ${err?.message || "replies okunamadı"}`);
-        continue;
+        addWarning(`${channelName}: ${err?.message || "history okunamadı"}`);
+        return;
       }
 
-      for (const reply of replies) {
-        if (!reply || reply.ts === message.ts) continue;
-        if (!shouldCountSlackMessage(reply)) continue;
-
-        const dedupeKey = `${channelId}:${reply.ts}`;
-        if (seenReplies.has(dedupeKey)) continue;
-        seenReplies.add(dedupeKey);
-
-        const userId = String(reply.user || "").trim();
-        if (!selectedIds.has(userId)) continue;
-        countByUserId.set(userId, (countByUserId.get(userId) || 0) + 1);
+      if (messagesResult.truncated) {
+        historyTruncatedChannels += 1;
       }
-    }
+
+      const threadRoots = (messagesResult.messages || []).filter((message) => {
+        const replyCount = Number(message?.reply_count || 0);
+        return Number.isFinite(replyCount) && replyCount > 0 && String(message?.ts || "").trim();
+      });
+
+      if (threadRoots.length > maxThreadsPerChannel) {
+        threadLimitAppliedChannels += 1;
+      }
+
+      const limitedThreads = threadRoots.slice(0, maxThreadsPerChannel);
+
+      await runWithConcurrency(
+        limitedThreads,
+        threadConcurrency,
+        async (message) => {
+          if (isDeadlineExceeded()) {
+            runtimeStopped = true;
+            return;
+          }
+
+          metrics.threadsScanned += 1;
+
+          let repliesResult;
+          try {
+            repliesResult = await listSlackThreadRepliesForAnalysis(
+              token,
+              channelId,
+              message.ts,
+              oldest,
+              latest,
+              maxReplyPages
+            );
+          } catch (err) {
+            addWarning(`${channelName} thread ${message?.ts || "-"}: ${err?.message || "replies okunamadı"}`);
+            return;
+          }
+
+          if (repliesResult.truncated) {
+            replyTruncatedThreads += 1;
+          }
+
+          for (const reply of repliesResult.replies || []) {
+            if (!reply || reply.ts === message.ts) continue;
+            if (!shouldCountSlackMessage(reply)) continue;
+
+            const dedupeKey = `${channelId}:${reply.ts}`;
+            if (seenReplies.has(dedupeKey)) continue;
+            seenReplies.add(dedupeKey);
+
+            const userId = String(reply.user || "").trim();
+            if (!selectedIds.has(userId)) continue;
+            countByUserId.set(userId, (countByUserId.get(userId) || 0) + 1);
+          }
+        },
+        isDeadlineExceeded
+      );
+    },
+    isDeadlineExceeded
+  );
+
+  if (isDeadlineExceeded()) {
+    runtimeStopped = true;
+    runtimeSkippedChannels += Math.max(0, limitedChannels.length - metrics.channelsScanned);
   }
 
   const rows = buildSlackReplyRowsFromCounts(countByUserId, nameByUserId);
-  const notice =
-    warnings.length > 0
-      ? `${warnings.length} kanal/thread okunamadı. İlk hata: ${warnings[0]}`
-      : null;
+  const noticeParts = [];
 
-  return buildSlackReplyReportModel({
+  if (runtimeStopped) {
+    noticeParts.push(
+      `Süre limiti (${Math.round(maxRuntimeMs / 1000)} sn) nedeniyle kısmi sonuç gösteriliyor.`
+    );
+  }
+  if (runtimeSkippedChannels > 0) {
+    noticeParts.push(`${runtimeSkippedChannels} kanal süre limiti nedeniyle atlandı.`);
+  }
+  if (skippedByChannelLimit > 0) {
+    noticeParts.push(`Kanal limiti nedeniyle ${skippedByChannelLimit} kanal taranmadı.`);
+  }
+  if (historyTruncatedChannels > 0) {
+    noticeParts.push(`${historyTruncatedChannels} kanalda geçmiş mesajlar sayfa limiti nedeniyle kısıtlandı.`);
+  }
+  if (threadLimitAppliedChannels > 0) {
+    noticeParts.push(`${threadLimitAppliedChannels} kanalda thread limiti uygulandı.`);
+  }
+  if (replyTruncatedThreads > 0) {
+    noticeParts.push(`${replyTruncatedThreads} thread'de yanıtlar sayfa limiti nedeniyle kısıtlandı.`);
+  }
+  if (warningCount > 0) {
+    noticeParts.push(
+      `${warningCount} kanal/thread çağrısı hatalı. ${warningSamples[0] ? `İlk hata: ${warningSamples[0]}` : ""}`
+    );
+  }
+  noticeParts.push(
+    `Tip: ${channelTypes}, Kanal: ${metrics.channelsScanned}/${metrics.channelsTotal}, Thread: ${metrics.threadsScanned}`
+  );
+
+  const notice = noticeParts.filter(Boolean).join(" ");
+
+  const report = buildSlackReplyReportModel({
     requested: true,
     rows,
     source: "Slack API",
@@ -1567,6 +1796,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     error: null,
     meta: metrics
   });
+  setCachedSlackReplyReport(cacheKey, report);
+  return report;
 }
 
 async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId }) {
