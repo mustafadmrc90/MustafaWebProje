@@ -764,6 +764,7 @@ function buildPermissionSections(rows) {
       const sortedItems = section.items.sort(compareSidebarEntries);
       return {
         ...section,
+        canView: section.canView || sortedItems.some((item) => item.canView),
         items: sortedItems
       };
     })
@@ -827,6 +828,21 @@ function requireMenuAccess(menuKey) {
       }
 
       const fallbackRoute = getFirstAccessibleRoute(sidebar);
+      if (!fallbackRoute && menuKey === "dashboard") {
+        const sectionPermissionResult = await pool.query(
+          `
+            SELECT can_view
+            FROM user_sidebar_permissions
+            WHERE user_id = $1
+              AND menu_key = 'general'
+          `,
+          [req.session.user.id]
+        );
+        if (toSidebarBool(sectionPermissionResult.rows?.[0]?.can_view, false)) {
+          return next();
+        }
+      }
+
       if (req.path.startsWith("/api/")) {
         return res.status(403).json({ ok: false, error: "Bu alana erişim yetkiniz yok." });
       }
@@ -4290,19 +4306,30 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       )
     );
     const selectedSectionSet = new Set(selectedSectionKeys);
+    const currentSectionPermissionResult = await pool.query(
+      `
+        SELECT usp.menu_key, COALESCE(usp.can_view, false) AS can_view
+        FROM user_sidebar_permissions usp
+        JOIN sidebar_menu_items m
+          ON m.key = usp.menu_key
+        WHERE usp.user_id = $1
+          AND m.is_active = true
+          AND m.type = 'section'
+      `,
+      [userId]
+    );
+    const currentSectionSet = new Set(
+      currentSectionPermissionResult.rows
+        .filter((row) => toSidebarBool(row.can_view, false))
+        .map((row) => String(row.menu_key || "").trim())
+        .filter((value) => activeSections.has(value))
+    );
 
-    const previousSectionStateInput = parseJsonSafe(String(req.body.sectionStateJson || ""));
-    const previousSectionState =
-      previousSectionStateInput && typeof previousSectionStateInput === "object" ? previousSectionStateInput : {};
-
-    const changedSectionKeys = new Set();
-    activeSections.forEach((sectionKey) => {
-      const previousChecked = toSidebarBool(previousSectionState[sectionKey], false);
-      const nowChecked = selectedSectionSet.has(sectionKey);
-      if (previousChecked !== nowChecked) {
-        changedSectionKeys.add(sectionKey);
-      }
-    });
+    const touchedSectionsInput = parseJsonSafe(String(req.body.sectionTouchedJson || ""));
+    const touchedSectionKeys = Array.isArray(touchedSectionsInput)
+      ? touchedSectionsInput.map((value) => String(value || "").trim()).filter((value) => activeSections.has(value))
+      : [];
+    const changedSectionKeys = new Set(touchedSectionKeys);
 
     const finalItemSet = new Set(selectedItemKeys);
     changedSectionKeys.forEach((sectionKey) => {
@@ -4314,6 +4341,21 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       }
     });
     const finalItemKeys = Array.from(finalItemSet);
+    const effectiveSectionSet = new Set(currentSectionSet);
+    changedSectionKeys.forEach((sectionKey) => {
+      if (selectedSectionSet.has(sectionKey)) {
+        effectiveSectionSet.add(sectionKey);
+      } else {
+        effectiveSectionSet.delete(sectionKey);
+      }
+    });
+    sectionItemsMap.forEach((children, sectionKey) => {
+      if (!activeSections.has(sectionKey)) return;
+      if (children.some((itemKey) => finalItemSet.has(itemKey))) {
+        effectiveSectionSet.add(sectionKey);
+      }
+    });
+    const effectiveSectionKeys = Array.from(effectiveSectionSet);
 
     const client = await pool.connect();
     try {
@@ -4357,7 +4399,7 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
         [userId]
       );
 
-      if (selectedSectionKeys.length > 0) {
+      if (effectiveSectionKeys.length > 0) {
         await client.query(
           `
             UPDATE user_sidebar_permissions
@@ -4365,7 +4407,7 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
             WHERE user_id = $1
               AND menu_key = ANY($2::text[])
           `,
-          [userId, selectedSectionKeys]
+          [userId, effectiveSectionKeys]
         );
       }
 

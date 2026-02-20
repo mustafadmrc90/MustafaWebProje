@@ -815,17 +815,38 @@
     if (form.dataset.permissionsBound === "1") return;
     form.dataset.permissionsBound = "1";
 
+    const touchedInput = form.querySelector("input[name='sectionTouchedJson']");
+    const touchedSections = new Set();
+    const syncTouchedInput = () => {
+      if (!touchedInput) return;
+      touchedInput.value = JSON.stringify(Array.from(touchedSections));
+    };
+
     const sectionToggles = Array.from(form.querySelectorAll("[data-section-toggle]"));
     sectionToggles.forEach((toggle) => {
       toggle.addEventListener("change", () => {
         const sectionKey = String(toggle.getAttribute("data-section-toggle") || "").trim();
         if (!sectionKey) return;
+        touchedSections.add(sectionKey);
+        syncTouchedInput();
         form
           .querySelectorAll(`[data-parent-section="${sectionKey}"] [data-item-checkbox="1"]`)
           .forEach((checkbox) => {
             if (checkbox.disabled) return;
             checkbox.checked = toggle.checked;
           });
+      });
+    });
+
+    const itemCheckboxes = Array.from(form.querySelectorAll("[data-item-checkbox='1']"));
+    itemCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        if (!checkbox.checked) return;
+        const sectionKey = String(checkbox.getAttribute("data-parent-section") || "").trim();
+        if (!sectionKey) return;
+        const sectionToggle = form.querySelector(`[data-section-toggle="${sectionKey}"]`);
+        if (!sectionToggle || sectionToggle.disabled) return;
+        sectionToggle.checked = true;
       });
     });
   };

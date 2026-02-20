@@ -41,10 +41,8 @@
         <% if (isTargetAdmin) { %>
           <div class="alert inline-alert">`admin` kullanıcısı her zaman tüm menülere erişir.</div>
         <% } %>
-        <% const sectionStateMap = {}; %>
-        <% menuSections.forEach((section) => { sectionStateMap[section.key] = !!section.canView; }); %>
         <form method="post" action="/permissions/<%= targetUser.id %>">
-          <input type="hidden" name="sectionStateJson" value='<%- JSON.stringify(sectionStateMap) %>' />
+          <input type="hidden" name="sectionTouchedJson" value="[]" />
           <div class="table">
             <div class="row head permissions-bulk-row">
               <span>Menü</span>
@@ -90,6 +88,7 @@
                         name="menuKeys"
                         value="<%= item.key %>"
                         data-item-checkbox="1"
+                        data-parent-section="<%= section.key %>"
                         <%= item.canView ? "checked" : "" %>
                         <%= isTargetAdmin ? "disabled" : "" %>
                       />
@@ -102,7 +101,7 @@
           </div>
           <% if (!isTargetAdmin) { %>
             <div class="table-actions">
-              <button type="submit">Toplu Kaydet</button>
+              <button type="submit">Kaydet</button>
             </div>
           <% } %>
         </form>
