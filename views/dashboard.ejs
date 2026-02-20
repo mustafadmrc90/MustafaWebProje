@@ -11,6 +11,25 @@
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="4" y="4" width="16" height="16" rx="3"></rect>
+                <path d="M9 9h6v6H9z"></path>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path>
+              </svg>
+            </span>
+            <span>Obus API</span>
+          </h1>
+          <p>API endpoint tanımları ve test yönetimi.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
       <div class="api-layout single">
         <section class="api-panel">
           <div class="panel-card">

@@ -157,12 +157,46 @@ body {
   transition: background 0.2s ease;
 }
 
+.nav-item-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(230, 237, 247, 0.88);
+  flex-shrink: 0;
+}
+
+.nav-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.nav-item:hover .nav-icon {
+  color: #fff;
+}
+
 .nav-item.active {
   background: #0f6bdc;
+  color: #fff;
+}
+
+.nav-item.active .nav-icon {
   color: #fff;
 }
 
@@ -191,6 +225,31 @@ body {
 .page-title h1 {
   margin: 0;
   font-family: "Fraunces", serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-title-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8eef7;
+  color: #1f5fa9;
+  flex-shrink: 0;
+}
+
+.page-title-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .page-title p {
