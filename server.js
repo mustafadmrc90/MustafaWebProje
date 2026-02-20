@@ -4279,8 +4279,7 @@ app.get(
       endpointUrl: resolvedEndpointUrl,
       company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
       username: String(req.query.username || "").trim(),
-      password: String(req.query.password || ""),
-      token: String(req.query.token || "").trim()
+      password: String(req.query.password || "")
     };
     const invalidCompanySelection = requestedCompany && !selectedCompanyMeta;
     const shouldRun = req.query.run === "1";
@@ -4316,10 +4315,9 @@ app.get(
           report.error = loginResult.error || "UserLogin başarısız.";
           report.responseBody = "{}";
         } else {
-          const effectiveToken = String(filters.token || loginResult.token || "").trim();
-          filters.token = effectiveToken;
+          const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
-            report.error = "UserLogin yanıtında token bulunamadı. Token girip tekrar deneyin.";
+            report.error = "UserLogin yanıtında token bulunamadı.";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
@@ -4398,8 +4396,7 @@ app.post(
       endpointUrl: resolvedEndpointUrl,
       company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
       username: String(req.body.username || "").trim(),
-      password: String(req.body.password || ""),
-      token: String(req.body.token || "").trim()
+      password: String(req.body.password || "")
     };
     const report = buildAuthorizedLinesReportModel();
     report.requested = true;
@@ -4430,10 +4427,9 @@ app.post(
           report.error = loginResult.error || "UserLogin başarısız.";
           report.responseBody = "{}";
         } else {
-          const effectiveToken = String(filters.token || loginResult.token || "").trim();
-          filters.token = effectiveToken;
+          const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
-            report.error = "UserLogin yanıtında token bulunamadı. Token girip tekrar deneyin.";
+            report.error = "UserLogin yanıtında token bulunamadı.";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
               endpointUrl: filters.endpointUrl,
