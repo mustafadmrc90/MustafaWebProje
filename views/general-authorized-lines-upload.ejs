@@ -41,6 +41,12 @@
           action="/general/authorized-lines-upload"
           data-company-source-url="<%= companySourceBaseUrl %>"
         >
+          <input
+            type="hidden"
+            name="endpointUrl"
+            id="allowed-lines-endpoint-url"
+            value="<%= filters.endpointUrl %>"
+          />
           <div class="allowed-lines-grid">
             <label class="allowed-lines-field">
               <span>Firma</span>
@@ -74,17 +80,6 @@
                 placeholder="Boş bırakılırsa UserLogin token kullanılır"
               />
             </label>
-            <label class="allowed-lines-field allowed-lines-field-url">
-              <span>Hedef URL</span>
-              <input
-                type="text"
-                name="endpointUrl"
-                id="allowed-lines-endpoint-url"
-                value="<%= filters.endpointUrl %>"
-                placeholder="https://..."
-                required
-              />
-            </label>
           </div>
           <div class="allowed-lines-actions">
             <button type="submit">İzinli Hatları Yükle</button>
@@ -97,7 +92,7 @@
         <% } %>
       </section>
 
-      <section class="table-card panel-card">
+      <section class="table-card panel-card allowed-lines-response">
         <div class="table-head">
           <h2>Yanıt</h2>
           <div class="table-actions">
