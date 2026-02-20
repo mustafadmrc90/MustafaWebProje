@@ -108,7 +108,16 @@
             <strong><%= report.loginToken || "-" %></strong>
           </div>
         </div>
-        <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
+        <div class="allowed-lines-result-grid">
+          <div class="allowed-lines-result-item">
+            <div class="label">Son İstek Body</div>
+            <pre class="code-output sales-report-output"><%= report.requestBody || "{}" %></pre>
+          </div>
+          <div class="allowed-lines-result-item">
+            <div class="label">Yanıt</div>
+            <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
+          </div>
+        </div>
       </section>
     </section>
     <script src="/public/app.js" defer></script>

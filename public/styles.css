@@ -2290,6 +2290,21 @@ button.ghost {
   overflow-wrap: anywhere;
 }
 
+.allowed-lines-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.allowed-lines-result-item {
+  min-width: 0;
+}
+
+.allowed-lines-result-item .label {
+  margin-bottom: 6px;
+}
+
 .slack-analysis-summary-table {
   min-width: 420px;
 }
@@ -2838,5 +2853,9 @@ button.ghost {
 
   .allowed-lines-actions {
     justify-content: flex-start;
+  }
+
+  .allowed-lines-result-grid {
+    grid-template-columns: 1fr;
   }
 }

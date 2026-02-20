@@ -4011,6 +4011,7 @@ function buildAuthorizedLinesReportModel() {
     requested: false,
     status: null,
     error: null,
+    requestBody: "",
     responseBody: "",
     sessionId: "",
     deviceId: "",
@@ -4191,6 +4192,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: "Hedef URL geçersiz.",
+      requestBody: "{}",
       responseBody: "",
       sessionId: "",
       deviceId: "",
@@ -4205,6 +4207,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: "PartnerId zorunludur.",
+      requestBody: "{}",
       responseBody: "",
       sessionId: "",
       deviceId: "",
@@ -4219,6 +4222,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: "Token zorunludur.",
+      requestBody: "{}",
       responseBody: "",
       sessionId: "",
       deviceId: "",
@@ -4229,6 +4233,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90000);
+  let requestBody = "{}";
   try {
     const sessionUrl = buildSessionUrlForPartnerUrl(normalizedEndpointUrl);
     const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
@@ -4237,6 +4242,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
         requested: true,
         status: null,
         error: sessionResult.error,
+        requestBody,
         responseBody: "",
         sessionId: "",
         deviceId: "",
@@ -4255,6 +4261,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       date: "2016-03-11T11:33:00",
       language: "tr-TR"
     };
+    requestBody = JSON.stringify(body, null, 2);
 
     const response = await fetch(normalizedEndpointUrl, {
       method: "POST",
@@ -4283,6 +4290,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
         requested: true,
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
+        requestBody,
         responseBody: responseBody || "{}",
         sessionId: sessionResult.sessionId,
         deviceId: sessionResult.deviceId,
@@ -4295,6 +4303,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: response.status,
       error: null,
+      requestBody,
       responseBody: responseBody || "{}",
       sessionId: sessionResult.sessionId,
       deviceId: sessionResult.deviceId,
@@ -4306,6 +4315,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
       requested: true,
       status: null,
       error: err?.message || "İstek gönderilemedi.",
+      requestBody,
       responseBody: "",
       sessionId: "",
       deviceId: "",
@@ -4475,11 +4485,13 @@ app.get(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.requestBody = "{}";
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.requestBody = "{}";
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
@@ -4490,6 +4502,7 @@ app.get(
             report.requested = reportResult.requested;
             report.status = reportResult.status;
             report.error = reportResult.error;
+            report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
             report.sessionId = reportResult.sessionId || report.sessionId;
             report.deviceId = reportResult.deviceId || report.deviceId;
@@ -4593,11 +4606,13 @@ app.post(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.requestBody = "{}";
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.requestBody = "{}";
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
@@ -4608,6 +4623,7 @@ app.post(
             report.requested = reportResult.requested;
             report.status = reportResult.status;
             report.error = reportResult.error;
+            report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
             report.sessionId = reportResult.sessionId || report.sessionId;
             report.deviceId = reportResult.deviceId || report.deviceId;
