@@ -1,112 +1,55 @@
+<%
+  const sidebarModel = sidebar && Array.isArray(sidebar.sections) ? sidebar : { sections: [] };
+  const renderSidebarIcon = (iconKey) => {
+    const key = String(iconKey || "").trim();
+    if (key === "dashboard") {
+      return '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path><path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path></svg>';
+    }
+    if (key === "sales") {
+      return '<svg viewBox="0 0 24 24"><path d="M4 19h16"></path><path d="M7 16v-5"></path><path d="M12 16V8"></path><path d="M17 16v-3"></path></svg>';
+    }
+    if (key === "all-companies") {
+      return '<svg viewBox="0 0 24 24"><path d="M4 20h16"></path><rect x="6" y="10" width="4" height="7"></rect><rect x="10" y="7" width="4" height="10"></rect><rect x="14" y="12" width="4" height="5"></rect></svg>';
+    }
+    if (key === "slack-analysis") {
+      return '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>';
+    }
+    if (key === "users") {
+      return '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
+    }
+    if (key === "password") {
+      return '<svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>';
+    }
+    return '<svg viewBox="0 0 24 24"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg>';
+  };
+%>
 <aside class="sidebar">
   <div class="brand">
     <img src="/public/logo.png?v=2" alt="Bus Product" class="brand-logo" />
   </div>
   <nav class="nav">
-    <details class="nav-accordion" open>
-      <summary class="nav-section-toggle">Genel</summary>
-      <div class="nav-group">
-        <a class="nav-item <%= active === 'dashboard' ? 'active' : '' %>" data-route="dashboard" href="/dashboard">
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <rect x="4" y="4" width="16" height="16" rx="3"></rect>
-                <path d="M9 9h6v6H9z"></path>
-                <path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path>
-              </svg>
-            </span>
-            <span>Obus API</span>
-          </span>
-        </a>
-      </div>
-    </details>
-    <details
-      class="nav-accordion"
-      <%= active === "sales" || active === "all-companies" || active === "slack-analysis" ? "open" : "" %>
-    >
-      <summary class="nav-section-toggle">Raporlar</summary>
-      <div class="nav-group">
-        <a
-          class="nav-item <%= active === 'sales' ? 'active' : '' %>"
-          data-route="sales"
-          href="/reports/sales"
-        >
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M4 19h16"></path>
-                <path d="M7 16v-5"></path>
-                <path d="M12 16V8"></path>
-                <path d="M17 16v-3"></path>
-              </svg>
-            </span>
-            <span>Satışlar</span>
-          </span>
-        </a>
-        <a
-          class="nav-item <%= active === 'all-companies' ? 'active' : '' %>"
-          data-route="all-companies"
-          href="/reports/all-companies"
-        >
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M4 20h16"></path>
-                <rect x="6" y="10" width="4" height="7"></rect>
-                <rect x="10" y="7" width="4" height="10"></rect>
-                <rect x="14" y="12" width="4" height="5"></rect>
-              </svg>
-            </span>
-            <span>Tüm Firmalar</span>
-          </span>
-        </a>
-        <a
-          class="nav-item <%= active === 'slack-analysis' ? 'active' : '' %>"
-          data-route="slack-analysis"
-          href="/reports/slack-analysis"
-        >
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                <path d="M8 9h8"></path>
-                <path d="M8 13h5"></path>
-              </svg>
-            </span>
-            <span>Slack Analiz</span>
-          </span>
-        </a>
-      </div>
-    </details>
-    <details class="nav-accordion" <%= active === "users" || active === "password" ? "open" : "" %>>
-      <summary class="nav-section-toggle">Yönetim</summary>
-      <div class="nav-group">
-        <a class="nav-item <%= active === 'users' ? 'active' : '' %>" data-route="users" href="/users">
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-              </svg>
-            </span>
-            <span>Kullanıcılar</span>
-          </span>
-        </a>
-        <a class="nav-item <%= active === 'password' ? 'active' : '' %>" data-route="password" href="/change-password">
-          <span class="nav-item-content">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <rect x="4" y="11" width="16" height="10" rx="2"></rect>
-                <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
-              </svg>
-            </span>
-            <span>Şifre Değiştir</span>
-          </span>
-        </a>
-      </div>
-    </details>
+    <% sidebarModel.sections.forEach((section) => { %>
+      <details
+        class="nav-accordion"
+        <%= section.items.some((item) => item.routeKey === active) ? "open" : "" %>
+      >
+        <summary class="nav-section-toggle"><%= section.label %></summary>
+        <div class="nav-group">
+          <% section.items.forEach((item) => { %>
+            <a
+              class="nav-item <%= active === item.routeKey ? 'active' : '' %>"
+              data-route="<%= item.routeKey %>"
+              href="<%= item.route %>"
+            >
+              <span class="nav-item-content">
+                <span class="nav-icon" aria-hidden="true"><%- renderSidebarIcon(item.iconKey) %></span>
+                <span><%= item.label %></span>
+              </span>
+            </a>
+          <% }) %>
+        </div>
+      </details>
+    <% }) %>
   </nav>
   <form method="post" action="/logout" class="sidebar-logout">
     <button class="ghost" type="submit">Çıkış</button>

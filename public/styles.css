@@ -2347,6 +2347,38 @@ button.ghost {
   margin: 0;
 }
 
+.permissions-row {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(90px, 0.6fr) minmax(120px, 0.8fr) auto auto;
+}
+
+.permission-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.permission-type,
+.permission-parent {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.permission-child .permission-name {
+  padding-left: 16px;
+  position: relative;
+}
+
+.permission-child .permission-name::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 10px;
+  border-top: 1px dashed #c8ced8;
+  transform: translateY(-50%);
+}
+
 .user-row-actions {
   display: inline-flex;
   gap: 8px;

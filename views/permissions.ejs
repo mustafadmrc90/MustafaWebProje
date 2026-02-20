@@ -13,7 +13,15 @@
     <section class="content">
       <header class="page-header">
         <div class="page-title">
-          <h1>Yetkiler</h1>
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                <path d="M9 12l2 2 4-4"></path>
+              </svg>
+            </span>
+            <span>Yetkiler</span>
+          </h1>
           <p>@<%= targetUser.username %> — <%= targetUser.display_name %></p>
         </div>
         <div class="page-actions">
@@ -27,24 +35,51 @@
 
       <section class="table-card panel-card">
         <div class="table-head">
-          <h2>Ekran Yetkileri</h2>
+          <h2>Menü Yetkileri</h2>
         </div>
         <div class="table">
-          <div class="row head">
-            <span>Ekran</span>
+          <div class="row head permissions-row">
+            <span>Menü</span>
+            <span>Tür</span>
+            <span>Üst Menü</span>
             <span>Görüntüleme</span>
             <span>İşlem</span>
           </div>
-          <% screens.forEach((s) => { %>
-            <form class="row" method="post" action="/permissions/<%= targetUser.id %>">
-              <input type="hidden" name="screenId" value="<%= s.id %>" />
-              <span><%= s.name %> <small class="muted">(<%= s.key %>)</small></span>
+          <% menuSections.forEach((section) => { %>
+            <form class="row permissions-row" method="post" action="/permissions/<%= targetUser.id %>">
+              <input type="hidden" name="menuKey" value="<%= section.key %>" />
+              <span class="permission-name">
+                <strong><%= section.label %></strong>
+                <small class="muted">(<%= section.key %>)</small>
+              </span>
+              <span class="permission-type">Ana Menü</span>
+              <span class="permission-parent">-</span>
               <label class="switch">
-                <input type="checkbox" name="canView" <%= s.can_view ? "checked" : "" %> />
+                <input type="checkbox" name="canView" <%= section.canView ? "checked" : "" %> />
                 <span class="slider"></span>
               </label>
               <button type="submit" class="ghost">Kaydet</button>
             </form>
+
+            <% section.items.forEach((item) => { %>
+              <form class="row permissions-row permission-child" method="post" action="/permissions/<%= targetUser.id %>">
+                <input type="hidden" name="menuKey" value="<%= item.key %>" />
+                <span class="permission-name">
+                  <span><%= item.label %></span>
+                  <small class="muted">(<%= item.key %>)</small>
+                  <% if (item.route) { %>
+                    <small class="muted"><%= item.route %></small>
+                  <% } %>
+                </span>
+                <span class="permission-type">Alt Menü</span>
+                <span class="permission-parent"><%= section.label %></span>
+                <label class="switch">
+                  <input type="checkbox" name="canView" <%= item.canView ? "checked" : "" %> />
+                  <span class="slider"></span>
+                </label>
+                <button type="submit" class="ghost">Kaydet</button>
+              </form>
+            <% }) %>
           <% }) %>
         </div>
       </section>

@@ -7,20 +7,26 @@
   const isModified = (event) =>
     event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 
-  const routeFromPath = (path) => {
-    if (path.startsWith("/users")) return "users";
-    if (path.startsWith("/screens")) return "screens";
-    if (path.startsWith("/reports/all-companies")) return "all-companies";
-    if (path.startsWith("/reports/slack-analysis")) return "slack-analysis";
-    if (path.startsWith("/reports/sales")) return "sales";
-    if (path.startsWith("/change-password")) return "password";
-    return "dashboard";
+  const normalizePath = (value) => {
+    try {
+      const parsed = new URL(value, window.location.origin);
+      const normalized = parsed.pathname.replace(/\/+$/, "");
+      return normalized || "/";
+    } catch (err) {
+      return "/";
+    }
   };
 
   const setActive = (path) => {
-    const route = routeFromPath(path);
+    const targetPath = normalizePath(path);
     document.querySelectorAll(".nav-item").forEach((item) => {
-      item.classList.toggle("active", item.dataset.route === route);
+      const hrefPath = normalizePath(item.getAttribute("href") || "/");
+      item.classList.toggle("active", hrefPath === targetPath);
+    });
+    document.querySelectorAll(".nav-accordion").forEach((section) => {
+      if (section.querySelector(".nav-item.active")) {
+        section.setAttribute("open", "");
+      }
     });
   };
 

@@ -56,6 +56,98 @@ const SLACK_SELECTED_USERS = [
   { id: "U03MMMBN1Q9", name: "Uğurcan CORP" },
   { id: "U03M91THFA6", name: "Denizhan Arslan - CORP" }
 ];
+const SIDEBAR_MENU_REGISTRY = [
+  {
+    key: "general",
+    type: "section",
+    label: "Genel",
+    parentKey: null,
+    route: null,
+    routeKey: null,
+    sortOrder: 10,
+    iconKey: "folder"
+  },
+  {
+    key: "dashboard",
+    type: "item",
+    label: "Obus API",
+    parentKey: "general",
+    route: "/dashboard",
+    routeKey: "dashboard",
+    sortOrder: 11,
+    iconKey: "dashboard"
+  },
+  {
+    key: "reports",
+    type: "section",
+    label: "Raporlar",
+    parentKey: null,
+    route: null,
+    routeKey: null,
+    sortOrder: 20,
+    iconKey: "folder"
+  },
+  {
+    key: "sales",
+    type: "item",
+    label: "Satışlar",
+    parentKey: "reports",
+    route: "/reports/sales",
+    routeKey: "sales",
+    sortOrder: 21,
+    iconKey: "sales"
+  },
+  {
+    key: "all-companies",
+    type: "item",
+    label: "Tüm Firmalar",
+    parentKey: "reports",
+    route: "/reports/all-companies",
+    routeKey: "all-companies",
+    sortOrder: 22,
+    iconKey: "all-companies"
+  },
+  {
+    key: "slack-analysis",
+    type: "item",
+    label: "Slack Analiz",
+    parentKey: "reports",
+    route: "/reports/slack-analysis",
+    routeKey: "slack-analysis",
+    sortOrder: 23,
+    iconKey: "slack-analysis"
+  },
+  {
+    key: "management",
+    type: "section",
+    label: "Yönetim",
+    parentKey: null,
+    route: null,
+    routeKey: null,
+    sortOrder: 30,
+    iconKey: "folder"
+  },
+  {
+    key: "users",
+    type: "item",
+    label: "Kullanıcılar",
+    parentKey: "management",
+    route: "/users",
+    routeKey: "users",
+    sortOrder: 31,
+    iconKey: "users"
+  },
+  {
+    key: "password",
+    type: "item",
+    label: "Şifre Değiştir",
+    parentKey: "management",
+    route: "/change-password",
+    routeKey: "password",
+    sortOrder: 32,
+    iconKey: "password"
+  }
+];
 const slackReplyReportCache = new Map();
 
 if (!process.env.DATABASE_URL) {
@@ -228,6 +320,46 @@ async function initDb() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS sidebar_menu_items (
+      key TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      type TEXT NOT NULL,
+      parent_key TEXT REFERENCES sidebar_menu_items(key) ON DELETE CASCADE,
+      route TEXT,
+      route_key TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      icon_key TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sidebar_permissions (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      menu_key TEXT NOT NULL REFERENCES sidebar_menu_items(key) ON DELETE CASCADE,
+      can_view BOOLEAN NOT NULL DEFAULT true,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, menu_key)
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE sidebar_menu_items
+      ADD COLUMN IF NOT EXISTS route_key TEXT,
+      ADD COLUMN IF NOT EXISTS icon_key TEXT,
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    ALTER TABLE user_sidebar_permissions
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS slack_reply_analysis_runs (
       id SERIAL PRIMARY KEY,
       start_date DATE NOT NULL,
@@ -298,10 +430,401 @@ async function initDb() {
       await pool.query("INSERT INTO screens (key, name) VALUES ($1, $2)", [key, name]);
     }
   }
+
+  await syncSidebarMenusAndPermissions();
 }
 
 initDb().catch((err) => {
   console.error("DB init error:", err);
+});
+
+function toSidebarBool(value, fallback = true) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "true" || normalized === "t" || normalized === "1" || normalized === "yes") return true;
+  if (normalized === "false" || normalized === "f" || normalized === "0" || normalized === "no") return false;
+  return fallback;
+}
+
+function compareSidebarEntries(a, b) {
+  const orderA = Number.isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+  const orderB = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+  if (orderA !== orderB) return orderA - orderB;
+  const byLabel = String(a.label || "").localeCompare(String(b.label || ""), "tr");
+  if (byLabel !== 0) return byLabel;
+  return String(a.key || "").localeCompare(String(b.key || ""), "tr");
+}
+
+function normalizeSidebarRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const key = String(row.key || "").trim();
+      const label = String(row.label || row.name || "").trim();
+      const type = row.type === "section" ? "section" : "item";
+      const parentKeyRaw = row.parent_key ?? row.parentKey ?? null;
+      const parentKey = parentKeyRaw === null || parentKeyRaw === undefined ? null : String(parentKeyRaw).trim() || null;
+      const routeRaw = row.route ?? "";
+      const route = routeRaw ? String(routeRaw).trim() : "";
+      const routeKeyRaw = row.route_key ?? row.routeKey ?? key;
+      const routeKey = routeKeyRaw ? String(routeKeyRaw).trim() : key;
+      const sortOrderRaw = row.sort_order ?? row.sortOrder ?? 0;
+      const sortOrder = Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : 0;
+      const iconKeyRaw = row.icon_key ?? row.iconKey ?? "folder";
+      const iconKey = iconKeyRaw ? String(iconKeyRaw).trim() : "folder";
+      const canViewRaw = row.can_view ?? row.canView ?? true;
+      const canView = toSidebarBool(canViewRaw, true);
+
+      return {
+        key,
+        label,
+        type,
+        parentKey,
+        route,
+        routeKey,
+        sortOrder,
+        iconKey,
+        canView
+      };
+    })
+    .filter((row) => row.key && row.label)
+    .sort(compareSidebarEntries);
+}
+
+function buildSidebarModelFromRows(rows) {
+  const normalizedRows = normalizeSidebarRows(rows);
+  const sectionRows = normalizedRows.filter((row) => row.type === "section");
+  const itemRows = normalizedRows.filter((row) => row.type === "item");
+  const itemsByParent = new Map();
+  const allowedMenuKeys = new Set();
+  const allowedRouteKeys = new Set();
+
+  itemRows.forEach((item) => {
+    if (!item.parentKey) return;
+    const current = itemsByParent.get(item.parentKey) || [];
+    current.push(item);
+    itemsByParent.set(item.parentKey, current);
+  });
+
+  const sections = sectionRows
+    .filter((section) => section.canView)
+    .map((section) => {
+      const visibleItems = (itemsByParent.get(section.key) || [])
+        .filter((item) => item.canView && item.route)
+        .sort(compareSidebarEntries)
+        .map((item) => {
+          allowedMenuKeys.add(item.key);
+          allowedRouteKeys.add(item.routeKey || item.key);
+          return {
+            key: item.key,
+            label: item.label,
+            route: item.route,
+            routeKey: item.routeKey || item.key,
+            iconKey: item.iconKey || "folder"
+          };
+        });
+
+      if (!visibleItems.length) return null;
+
+      allowedMenuKeys.add(section.key);
+      return {
+        key: section.key,
+        label: section.label,
+        iconKey: section.iconKey || "folder",
+        items: visibleItems
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    sections,
+    allowedMenuKeys: Array.from(allowedMenuKeys),
+    allowedRouteKeys: Array.from(allowedRouteKeys)
+  };
+}
+
+function buildSidebarFallbackModel() {
+  const rows = SIDEBAR_MENU_REGISTRY.map((item) => ({
+    key: item.key,
+    label: item.label,
+    type: item.type,
+    parent_key: item.parentKey,
+    route: item.route,
+    route_key: item.routeKey,
+    sort_order: item.sortOrder,
+    icon_key: item.iconKey,
+    can_view: true
+  }));
+  return buildSidebarModelFromRows(rows);
+}
+
+async function syncSidebarMenusAndPermissions() {
+  const menuItems = SIDEBAR_MENU_REGISTRY.map((item) => ({
+    ...item,
+    key: String(item.key || "").trim(),
+    label: String(item.label || "").trim(),
+    type: item.type === "section" ? "section" : "item"
+  })).filter((item) => item.key && item.label);
+
+  if (!menuItems.length) return;
+
+  const registryKeys = menuItems.map((item) => item.key);
+  const sections = menuItems.filter((item) => item.type === "section").sort(compareSidebarEntries);
+  const entries = menuItems.filter((item) => item.type !== "section").sort(compareSidebarEntries);
+  const orderedRows = sections.concat(entries);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+        UPDATE sidebar_menu_items
+        SET is_active = false, updated_at = now()
+        WHERE NOT (key = ANY($1::text[]))
+      `,
+      [registryKeys]
+    );
+
+    for (const item of orderedRows) {
+      await client.query(
+        `
+          INSERT INTO sidebar_menu_items (
+            key,
+            label,
+            type,
+            parent_key,
+            route,
+            route_key,
+            sort_order,
+            icon_key,
+            is_active,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, now())
+          ON CONFLICT (key)
+          DO UPDATE SET
+            label = EXCLUDED.label,
+            type = EXCLUDED.type,
+            parent_key = EXCLUDED.parent_key,
+            route = EXCLUDED.route,
+            route_key = EXCLUDED.route_key,
+            sort_order = EXCLUDED.sort_order,
+            icon_key = EXCLUDED.icon_key,
+            is_active = true,
+            updated_at = now()
+        `,
+        [
+          item.key,
+          item.label,
+          item.type,
+          item.parentKey || null,
+          item.route || null,
+          item.routeKey || null,
+          Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : 0,
+          item.iconKey || "folder"
+        ]
+      );
+    }
+
+    await client.query(`
+      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
+      SELECT u.id, m.key, true
+      FROM users u
+      CROSS JOIN sidebar_menu_items m
+      WHERE m.is_active = true
+      ON CONFLICT (user_id, menu_key) DO NOTHING
+    `);
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function ensureSidebarPermissionsForUser(userId) {
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(userIdNum)) return;
+  await pool.query(
+    `
+      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
+      SELECT $1, m.key, true
+      FROM sidebar_menu_items m
+      WHERE m.is_active = true
+      ON CONFLICT (user_id, menu_key) DO NOTHING
+    `,
+    [userIdNum]
+  );
+}
+
+async function loadSidebarForUser(userId) {
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(userIdNum)) {
+    return buildSidebarFallbackModel();
+  }
+
+  await ensureSidebarPermissionsForUser(userIdNum);
+  const result = await pool.query(
+    `
+      SELECT
+        m.key,
+        m.label,
+        m.type,
+        m.parent_key,
+        m.route,
+        m.route_key,
+        m.sort_order,
+        m.icon_key,
+        COALESCE(usp.can_view, true) AS can_view
+      FROM sidebar_menu_items m
+      LEFT JOIN user_sidebar_permissions usp
+        ON usp.menu_key = m.key
+       AND usp.user_id = $1
+      WHERE m.is_active = true
+      ORDER BY m.sort_order ASC, m.key ASC
+    `,
+    [userIdNum]
+  );
+  return buildSidebarModelFromRows(result.rows);
+}
+
+function getFirstAccessibleRoute(sidebar) {
+  const sections = Array.isArray(sidebar?.sections) ? sidebar.sections : [];
+  for (const section of sections) {
+    const items = Array.isArray(section?.items) ? section.items : [];
+    for (const item of items) {
+      if (item?.route) return item.route;
+    }
+  }
+  return null;
+}
+
+function hasMenuAccess(sidebar, menuKey) {
+  const allowedMenuKeys = new Set(Array.isArray(sidebar?.allowedMenuKeys) ? sidebar.allowedMenuKeys : []);
+  const allowedRouteKeys = new Set(Array.isArray(sidebar?.allowedRouteKeys) ? sidebar.allowedRouteKeys : []);
+  return allowedMenuKeys.has(menuKey) || allowedRouteKeys.has(menuKey);
+}
+
+function buildPermissionSections(rows) {
+  const normalizedRows = normalizeSidebarRows(rows);
+  const sectionRows = normalizedRows.filter((row) => row.type === "section");
+  const itemRows = normalizedRows.filter((row) => row.type === "item");
+  const sectionByKey = new Map();
+
+  sectionRows.forEach((section) => {
+    sectionByKey.set(section.key, {
+      key: section.key,
+      label: section.label,
+      route: section.route || "",
+      routeKey: section.routeKey || "",
+      iconKey: section.iconKey || "folder",
+      sortOrder: section.sortOrder,
+      canView: section.canView,
+      items: []
+    });
+  });
+
+  itemRows.forEach((item) => {
+    const targetSection = sectionByKey.get(item.parentKey || "");
+    if (!targetSection) return;
+    targetSection.items.push({
+      key: item.key,
+      label: item.label,
+      route: item.route || "",
+      routeKey: item.routeKey || item.key,
+      iconKey: item.iconKey || "folder",
+      sortOrder: item.sortOrder,
+      canView: item.canView
+    });
+  });
+
+  return Array.from(sectionByKey.values()).map((section) => ({
+    ...section,
+    items: section.items.sort(compareSidebarEntries)
+  }));
+}
+
+async function loadSidebarPermissionSectionsForUser(userId) {
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(userIdNum)) return [];
+  await ensureSidebarPermissionsForUser(userIdNum);
+  const result = await pool.query(
+    `
+      SELECT
+        m.key,
+        m.label,
+        m.type,
+        m.parent_key,
+        m.route,
+        m.route_key,
+        m.sort_order,
+        m.icon_key,
+        COALESCE(usp.can_view, true) AS can_view
+      FROM sidebar_menu_items m
+      LEFT JOIN user_sidebar_permissions usp
+        ON usp.menu_key = m.key
+       AND usp.user_id = $1
+      WHERE m.is_active = true
+      ORDER BY m.sort_order ASC, m.key ASC
+    `,
+    [userIdNum]
+  );
+  return buildPermissionSections(result.rows);
+}
+
+function requireMenuAccess(menuKey) {
+  return async (req, res, next) => {
+    if (!req.session?.user) {
+      if (req.path.startsWith("/api/")) {
+        return res.status(401).json({ ok: false, error: "Oturum süresi doldu." });
+      }
+      return res.redirect("/login");
+    }
+
+    try {
+      let sidebar = req.sidebar;
+      if (!sidebar) {
+        sidebar = await loadSidebarForUser(req.session.user.id);
+        req.sidebar = sidebar;
+        res.locals.sidebar = sidebar;
+      }
+
+      if (hasMenuAccess(sidebar, menuKey)) {
+        return next();
+      }
+
+      const fallbackRoute = getFirstAccessibleRoute(sidebar);
+      if (req.path.startsWith("/api/")) {
+        return res.status(403).json({ ok: false, error: "Bu alana erişim yetkiniz yok." });
+      }
+      if (fallbackRoute && fallbackRoute !== req.path) {
+        return res.redirect(fallbackRoute);
+      }
+      return res.status(403).send("Bu sayfayı görüntüleme yetkiniz yok.");
+    } catch (err) {
+      console.error("Menu access check error:", err);
+      return res.status(500).send("Yetki kontrolü başarısız.");
+    }
+  };
+}
+
+app.use(async (req, res, next) => {
+  if (!req.session?.user) return next();
+  if (req.path.startsWith("/api/")) return next();
+
+  try {
+    const sidebar = await loadSidebarForUser(req.session.user.id);
+    req.sidebar = sidebar;
+    res.locals.sidebar = sidebar;
+  } catch (err) {
+    console.error("Sidebar load error:", err);
+    const fallback = buildSidebarFallbackModel();
+    req.sidebar = fallback;
+    res.locals.sidebar = fallback;
+  }
+  return next();
 });
 
 function requireAuth(req, res, next) {
@@ -3118,7 +3641,7 @@ app.post("/logout", (req, res) => {
   });
 });
 
-app.get("/dashboard", requireAuth, (req, res) => {
+app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) => {
   res.render("dashboard", {
     user: req.session.user,
     active: "dashboard",
@@ -3126,7 +3649,7 @@ app.get("/dashboard", requireAuth, (req, res) => {
   });
 });
 
-app.get("/change-password", requireAuth, (req, res) => {
+app.get("/change-password", requireAuth, requireMenuAccess("password"), (req, res) => {
   res.render("change-password", {
     user: req.session.user,
     error: null,
@@ -3135,7 +3658,7 @@ app.get("/change-password", requireAuth, (req, res) => {
   });
 });
 
-app.get("/reports/sales", requireAuth, async (req, res) => {
+app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, res) => {
   const normalizeDate = (value) => {
     if (typeof value !== "string") return "";
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
@@ -3232,7 +3755,7 @@ app.get("/reports/sales", requireAuth, async (req, res) => {
   });
 });
 
-app.get("/reports/all-companies", requireAuth, async (req, res) => {
+app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
   const result = await fetchAllPartnerRows();
   res.render("reports-all-companies", {
     user: req.session.user,
@@ -3246,7 +3769,7 @@ app.get("/reports/all-companies", requireAuth, async (req, res) => {
   });
 });
 
-app.get("/reports/slack-analysis", requireAuth, async (req, res) => {
+app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
   const shouldFetchReport = req.query.run === "1";
   const shouldQuerySql = req.query.dbRun === "1";
   const today = getTodayIsoDate();
@@ -3320,7 +3843,7 @@ app.get("/reports/slack-analysis", requireAuth, async (req, res) => {
   });
 });
 
-app.post("/reports/slack-analysis/save", requireAuth, async (req, res) => {
+app.post("/reports/slack-analysis/save", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
   const today = getTodayIsoDate();
   const startDate = normalizeIsoDateInput(req.body.startDate) || today;
   const endDate = normalizeIsoDateInput(req.body.endDate) || today;
@@ -3421,20 +3944,22 @@ app.post("/reports/slack-analysis/save", requireAuth, async (req, res) => {
   });
 });
 
-app.post("/change-password", requireAuth, async (req, res) => {
+app.post("/change-password", requireAuth, requireMenuAccess("password"), async (req, res) => {
   const { currentPassword, newPassword, confirmPassword } = req.body;
   if (!currentPassword || !newPassword || !confirmPassword) {
     return res.status(400).render("change-password", {
       user: req.session.user,
       error: "Tüm alanlar zorunludur.",
-      ok: false
+      ok: false,
+      active: "password"
     });
   }
   if (newPassword !== confirmPassword) {
     return res.status(400).render("change-password", {
       user: req.session.user,
       error: "Yeni şifreler eşleşmiyor.",
-      ok: false
+      ok: false,
+      active: "password"
     });
   }
 
@@ -3447,7 +3972,8 @@ app.post("/change-password", requireAuth, async (req, res) => {
       return res.status(404).render("change-password", {
         user: req.session.user,
         error: "Kullanıcı bulunamadı.",
-        ok: false
+        ok: false,
+        active: "password"
       });
     }
 
@@ -3456,7 +3982,8 @@ app.post("/change-password", requireAuth, async (req, res) => {
       return res.status(401).render("change-password", {
         user: req.session.user,
         error: "Mevcut şifre hatalı.",
-        ok: false
+        ok: false,
+        active: "password"
       });
     }
 
@@ -3471,12 +3998,13 @@ app.post("/change-password", requireAuth, async (req, res) => {
     res.status(500).render("change-password", {
       user: req.session.user,
       error: "Sunucu hatası.",
-      ok: false
+      ok: false,
+      active: "password"
     });
   }
 });
 
-app.get("/users", requireAuth, async (req, res) => {
+app.get("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const errorMessages = {
     missing_fields: "Kullanıcı adı ve görünen isim zorunludur.",
     invalid_user: "Geçersiz kullanıcı seçimi.",
@@ -3512,17 +4040,21 @@ app.get("/users", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/users", requireAuth, async (req, res) => {
+app.post("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const { username, displayName, password } = req.body;
   if (!username || !displayName || !password) {
     return res.redirect("/users?err=missing_fields");
   }
   try {
     const passwordHash = await bcrypt.hash(password, 10);
-    await pool.query(
-      "INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3)",
+    const insertResult = await pool.query(
+      "INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id",
       [username.trim(), passwordHash, displayName.trim()]
     );
+    const newUserId = Number(insertResult.rows?.[0]?.id);
+    if (Number.isInteger(newUserId)) {
+      await ensureSidebarPermissionsForUser(newUserId);
+    }
     res.redirect("/users?ok=1");
   } catch (err) {
     console.error(err);
@@ -3533,7 +4065,7 @@ app.post("/users", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/users/:userId/update", requireAuth, async (req, res) => {
+app.post("/users/:userId/update", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isInteger(userId)) {
     return res.redirect("/users?err=invalid_user");
@@ -3582,7 +4114,7 @@ app.post("/users/:userId/update", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/screens", requireAuth, async (req, res) => {
+app.get("/screens", requireAuth, requireMenuAccess("users"), async (req, res) => {
   try {
     const result = await pool.query("SELECT id, key, name FROM screens ORDER BY id DESC");
     res.render("screens", {
@@ -3597,7 +4129,7 @@ app.get("/screens", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/screens", requireAuth, async (req, res) => {
+app.post("/screens", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const { key, name } = req.body;
   if (!key || !name) {
     return res.status(400).send("Eksik alan");
@@ -3611,7 +4143,7 @@ app.post("/screens", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/permissions/:userId", requireAuth, async (req, res) => {
+app.get("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isInteger(userId)) return res.status(400).send("Geçersiz kullanıcı");
 
@@ -3622,19 +4154,11 @@ app.get("/permissions/:userId", requireAuth, async (req, res) => {
     );
     const targetUser = userResult.rows[0];
     if (!targetUser) return res.status(404).send("Kullanıcı bulunamadı");
-
-    const sql = `
-      SELECT s.id, s.key, s.name, COALESCE(usp.can_view, false) AS can_view
-      FROM screens s
-      LEFT JOIN user_screen_permissions usp
-        ON usp.screen_id = s.id AND usp.user_id = $1
-      ORDER BY s.id ASC
-    `;
-    const screensResult = await pool.query(sql, [userId]);
+    const menuSections = await loadSidebarPermissionSectionsForUser(userId);
     res.render("permissions", {
       user: req.session.user,
       targetUser,
-      screens: screensResult.rows,
+      menuSections,
       ok: req.query.ok === "1",
       active: "users"
     });
@@ -3644,20 +4168,30 @@ app.get("/permissions/:userId", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/permissions/:userId", requireAuth, async (req, res) => {
+app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isInteger(userId)) return res.status(400).send("Geçersiz kullanıcı");
-  const { screenId, canView } = req.body;
-  const screenIdNum = Number(screenId);
+  const { canView } = req.body;
+  const menuKey = String(req.body.menuKey || "").trim();
   const canViewBool = canView === "on";
 
+  if (!menuKey) return res.status(400).send("Geçersiz menü seçimi");
+
   try {
+    const menuResult = await pool.query(
+      "SELECT key FROM sidebar_menu_items WHERE key = $1 AND is_active = true",
+      [menuKey]
+    );
+    if (!menuResult.rows.length) {
+      return res.status(400).send("Menü bulunamadı");
+    }
+
     await pool.query(
-      `INSERT INTO user_screen_permissions (user_id, screen_id, can_view)
+      `INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view, updated_at)
        VALUES ($1, $2, $3)
-       ON CONFLICT(user_id, screen_id)
-       DO UPDATE SET can_view = EXCLUDED.can_view`,
-      [userId, screenIdNum, canViewBool]
+       ON CONFLICT(user_id, menu_key)
+       DO UPDATE SET can_view = EXCLUDED.can_view, updated_at = now()`,
+      [userId, menuKey, canViewBool]
     );
     res.redirect(`/permissions/${userId}?ok=1`);
   } catch (err) {
