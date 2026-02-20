@@ -111,6 +111,10 @@
             <div class="label">Login Token</div>
             <strong><%= report.loginToken || "-" %></strong>
           </div>
+          <div>
+            <div class="label">Login URL</div>
+            <strong><%= report.loginUrl || "-" %></strong>
+          </div>
         </div>
         <pre class="code-output sales-report-output"><%= report.responseBody || "{}" %></pre>
       </section>

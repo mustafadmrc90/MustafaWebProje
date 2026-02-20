@@ -1337,10 +1337,44 @@ function buildSessionUrlForPartnerUrl(partnerUrl) {
   }
 }
 
-function buildUserLoginUrlForPartnerUrl(partnerUrl) {
+function normalizeApiPath(input, fallbackPath) {
+  const fallback = String(fallbackPath || "").trim() || "/";
+  const raw = String(input || "").trim();
+  if (!raw) return fallback;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      return parsed.pathname || fallback;
+    } catch (err) {
+      return fallback;
+    }
+  }
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+async function resolveUserLoginPath() {
+  const fallbackPath = "/api/client/userlogin";
+  try {
+    const result = await pool.query(
+      `SELECT path
+       FROM api_endpoints
+       WHERE lower(title) LIKE '%userlogin%'
+          OR lower(path) LIKE '%userlogin%'
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`
+    );
+    const row = result.rows[0];
+    if (!row) return fallbackPath;
+    return normalizeApiPath(row.path, fallbackPath);
+  } catch (err) {
+    return fallbackPath;
+  }
+}
+
+function buildUserLoginUrlForPartnerUrl(partnerUrl, userLoginPath = "/api/client/userlogin") {
   try {
     const parsed = new URL(String(partnerUrl || ""));
-    parsed.pathname = "/api/client/userlogin";
+    parsed.pathname = normalizeApiPath(userLoginPath, "/api/client/userlogin");
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -3845,7 +3879,8 @@ function buildAuthorizedLinesReportModel() {
     sessionId: "",
     deviceId: "",
     branchId: "",
-    loginToken: ""
+    loginToken: "",
+    loginUrl: ""
   };
 }
 
@@ -3890,18 +3925,21 @@ async function fetchAuthorizedLinesLoginInfo({
     let lastError = "UserLogin çağrısı başarısız.";
     let lastSessionId = "";
     let lastDeviceId = "";
+    let lastLoginUrl = "";
+    const userLoginPath = await resolveUserLoginPath();
 
     for (const baseUrl of loginBaseUrls) {
       const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
-      const loginUrl = buildUserLoginUrlForPartnerUrl(baseUrl);
+      const loginUrl = buildUserLoginUrlForPartnerUrl(baseUrl, userLoginPath);
       if (!loginUrl) {
         lastError = "UserLogin URL oluşturulamadı.";
         continue;
       }
+      lastLoginUrl = loginUrl;
 
       const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
       if (sessionResult.error) {
-        lastError = sessionResult.error;
+        lastError = `${sessionResult.error} (URL: ${loginUrl})`;
         continue;
       }
 
@@ -3976,7 +4014,7 @@ async function fetchAuthorizedLinesLoginInfo({
           "";
 
         if (!response.ok) {
-          lastError = `UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"}`;
+          lastError = `UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
           continue;
         }
 
@@ -4000,7 +4038,8 @@ async function fetchAuthorizedLinesLoginInfo({
           sessionId: sessionResult.sessionId,
           deviceId: sessionResult.deviceId,
           branchId: String(branchId || "").trim(),
-          token: String(tokenValue || "").trim()
+          token: String(tokenValue || "").trim(),
+          loginUrl
         };
       }
     }
@@ -4011,7 +4050,8 @@ async function fetchAuthorizedLinesLoginInfo({
       sessionId: lastSessionId,
       deviceId: lastDeviceId,
       branchId: String(fallbackBranchId || "").trim(),
-      token: ""
+      token: "",
+      loginUrl: lastLoginUrl
     };
   } catch (err) {
     return {
@@ -4020,7 +4060,8 @@ async function fetchAuthorizedLinesLoginInfo({
       sessionId: "",
       deviceId: "",
       branchId: String(fallbackBranchId || "").trim(),
-      token: ""
+      token: "",
+      loginUrl: ""
     };
   } finally {
     clearTimeout(timeout);
@@ -4310,6 +4351,7 @@ app.get(
         report.deviceId = loginResult.deviceId || "";
         report.branchId = loginResult.branchId || "";
         report.loginToken = loginResult.token || "";
+        report.loginUrl = loginResult.loginUrl || "";
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
@@ -4422,6 +4464,7 @@ app.post(
         report.deviceId = loginResult.deviceId || "";
         report.branchId = loginResult.branchId || "";
         report.loginToken = loginResult.token || "";
+        report.loginUrl = loginResult.loginUrl || "";
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
