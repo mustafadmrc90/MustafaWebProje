@@ -731,6 +731,27 @@ function getFirstAccessibleRoute(sidebar) {
   return null;
 }
 
+async function resolveInitialRouteForUser(user) {
+  const sessionUser = user || {};
+  const isAdmin = String(sessionUser.username || "").toLowerCase() === "admin";
+  if (isAdmin) {
+    return "/dashboard";
+  }
+
+  const userIdNum = Number(sessionUser.id);
+  if (!Number.isInteger(userIdNum)) {
+    return "/no-permission-home";
+  }
+
+  try {
+    const sidebar = await loadSidebarForUser(userIdNum, { isAdmin });
+    return getFirstAccessibleRoute(sidebar) || "/no-permission-home";
+  } catch (err) {
+    console.error("Initial route resolve error:", err);
+    return "/no-permission-home";
+  }
+}
+
 function hasMenuAccess(sidebar, menuKey) {
   const allowedMenuKeys = new Set(Array.isArray(sidebar?.allowedMenuKeys) ? sidebar.allowedMenuKeys : []);
   const allowedRouteKeys = new Set(Array.isArray(sidebar?.allowedRouteKeys) ? sidebar.allowedRouteKeys : []);
@@ -846,7 +867,7 @@ function requireMenuAccess(menuKey) {
         return res.redirect(fallbackRoute);
       }
       if (req.method === "GET") {
-        return res.status(200).render("empty", {
+        return res.status(200).render("no-permission-home", {
           user: req.session.user,
           active: ""
         });
@@ -3970,14 +3991,20 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, token 
   }
 }
 
-app.get("/", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  res.redirect("/login");
+app.get("/", async (req, res) => {
+  if (req.session.user) {
+    const targetRoute = await resolveInitialRouteForUser(req.session.user);
+    return res.redirect(targetRoute);
+  }
+  return res.redirect("/login");
 });
 
-app.get("/login", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  res.render("login", { error: null });
+app.get("/login", async (req, res) => {
+  if (req.session.user) {
+    const targetRoute = await resolveInitialRouteForUser(req.session.user);
+    return res.redirect(targetRoute);
+  }
+  return res.render("login", { error: null });
 });
 
 app.post("/login", async (req, res) => {
@@ -4004,7 +4031,8 @@ app.post("/login", async (req, res) => {
       username: user.username,
       displayName: user.display_name
     };
-    res.redirect("/dashboard?login=1");
+    const targetRoute = await resolveInitialRouteForUser(req.session.user);
+    res.redirect(targetRoute);
   } catch (err) {
     console.error(err);
     res.status(500).render("login", { error: "Sunucu hatası." });
@@ -4014,6 +4042,13 @@ app.post("/login", async (req, res) => {
 app.post("/logout", (req, res) => {
   req.session.destroy(() => {
     res.redirect("/login");
+  });
+});
+
+app.get("/no-permission-home", requireAuth, (req, res) => {
+  res.render("no-permission-home", {
+    user: req.session.user,
+    active: ""
   });
 });
 

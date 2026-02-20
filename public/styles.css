@@ -214,6 +214,14 @@ body {
   padding: 28px 32px 40px;
 }
 
+.no-menu-home .content {
+  margin-left: 0;
+}
+
+.no-menu-content {
+  max-width: 900px;
+}
+
 .page-header {
   display: flex;
   align-items: center;
