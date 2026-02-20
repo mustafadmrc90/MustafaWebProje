@@ -809,6 +809,33 @@
     });
   };
 
+  const initAllowedLinesLoading = () => {
+    const form = document.querySelector(".allowed-lines-form");
+    if (!form) return;
+    if (form.dataset.loadingBound === "1") return;
+    form.dataset.loadingBound = "1";
+
+    const submitBtn = form.querySelector(".allowed-lines-actions button[type='submit']");
+    const loadingMessage = form.querySelector(".allowed-lines-loading-message");
+    if (!submitBtn) return;
+
+    form.classList.remove("is-loading");
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Yükle";
+    if (loadingMessage) {
+      loadingMessage.hidden = true;
+    }
+
+    form.addEventListener("submit", () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Yükleniyor...";
+      form.classList.add("is-loading");
+      if (loadingMessage) {
+        loadingMessage.hidden = false;
+      }
+    });
+  };
+
   const initPermissionsBulkForm = () => {
     const form = document.querySelector("form[action^='/permissions/']");
     if (!form) return;
@@ -855,6 +882,7 @@
     initSalesTabs();
     initSalesReportLoading();
     initSlackReportLoading();
+    initAllowedLinesLoading();
     initPermissionsBulkForm();
 
     const modal = document.querySelector("#endpoint-modal");

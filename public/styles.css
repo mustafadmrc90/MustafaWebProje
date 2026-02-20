@@ -2132,6 +2132,122 @@ button.ghost {
   cursor: default;
 }
 
+.allowed-lines-section {
+  margin-bottom: 12px;
+}
+
+.allowed-lines-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 12px;
+  align-items: end;
+}
+
+.allowed-lines-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 220px)) minmax(260px, 1fr);
+  gap: 10px 12px;
+}
+
+.allowed-lines-field {
+  display: grid;
+  gap: 6px;
+}
+
+.allowed-lines-field span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #4f6176;
+}
+
+.allowed-lines-field input {
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #f7f9fc;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-height: 36px;
+  color: #1f2735;
+}
+
+.allowed-lines-field select {
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #f7f9fc;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-height: 36px;
+  color: #1f2735;
+}
+
+.allowed-lines-field input:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.allowed-lines-field select:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.allowed-lines-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.allowed-lines-actions button {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  min-height: 36px;
+  background: transparent;
+  color: #1f2735;
+  border: 1px solid #b9c6d7;
+  box-shadow: none;
+}
+
+.allowed-lines-actions button:hover {
+  transform: none;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.allowed-lines-form.is-loading {
+  opacity: 0.9;
+}
+
+.allowed-lines-loading-message {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #4f6176;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.allowed-lines-form.is-loading .allowed-lines-loading-message {
+  display: inline-flex;
+}
+
+.allowed-lines-loading-message[hidden] {
+  display: none !important;
+}
+
+.allowed-lines-loading-message::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid #b7c5d8;
+  border-top-color: #4f6176;
+  animation: salesSpin 0.8s linear infinite;
+}
+
 .slack-analysis-summary-table {
   min-width: 420px;
 }
@@ -2668,5 +2784,17 @@ button.ghost {
 
   .sales-bar-line {
     grid-template-columns: 58px 1fr 52px;
+  }
+
+  .allowed-lines-form {
+    grid-template-columns: 1fr;
+  }
+
+  .allowed-lines-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .allowed-lines-actions {
+    justify-content: flex-start;
   }
 }

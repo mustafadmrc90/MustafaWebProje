@@ -3824,27 +3824,91 @@ app.get(
   requireAuth,
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
+    const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
+    const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+    const companies = [{ value: "", label: "Firma seçiniz" }].concat(
+      partnerItems.map((item) => {
+        const idText = item.id || "N/A";
+        const clusterText = item.cluster || "cluster";
+        const label = `${item.code} - ${idText} - ${clusterText}`;
+        const value = buildCompanyOptionValue(item);
+        return {
+          value,
+          label,
+          meta: item
+        };
+      })
+    );
+    if (partnerError) {
+      companies.push({
+        value: "__partner_error__",
+        label: `Hata: ${partnerError}`,
+        disabled: true
+      });
+    }
+
+    const selectedCompanyOption = companies.find(
+      (item) => !item.disabled && item.value === requestedCompany && item.meta
+    );
+    const parsedCompany = parseCompanyOptionValue(requestedCompany);
+    const matchedParsedCompany =
+      parsedCompany &&
+      partnerItems.find(
+        (item) =>
+          item.code === parsedCompany.code &&
+          String(item.id || "") === String(parsedCompany.id || "") &&
+          String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+      );
+    const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+    const rawEndpointUrl = String(req.query.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim();
+    const resolvedEndpointUrl = selectedCompanyMeta?.cluster
+      ? buildUrlForCluster(rawEndpointUrl || PARTNERS_API_URL, selectedCompanyMeta.cluster)
+      : rawEndpointUrl;
     const filters = {
-      endpointUrl: String(req.query.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim(),
-      partnerId: String(req.query.partnerId || "").trim(),
+      endpointUrl: resolvedEndpointUrl,
+      company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
       token: String(req.query.token || "").trim()
     };
+    const invalidCompanySelection = requestedCompany && !selectedCompanyMeta;
     const shouldRun = req.query.run === "1";
-    const report = shouldRun
-      ? await fetchAuthorizedLinesUploadReport(filters)
-      : {
-          requested: false,
-          status: null,
-          error: null,
-          responseBody: "",
-          sessionId: "",
-          deviceId: ""
-        };
+    const report = {
+      requested: false,
+      status: null,
+      error: null,
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+
+    if (invalidCompanySelection) {
+      report.requested = true;
+      report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+    } else if (shouldRun) {
+      const partnerId = String(selectedCompanyMeta?.id || "").trim();
+      if (!partnerId) {
+        report.requested = true;
+        report.error = "Seçilen firma için PartnerId bulunamadı.";
+      } else {
+        const reportResult = await fetchAuthorizedLinesUploadReport({
+          endpointUrl: filters.endpointUrl,
+          partnerId,
+          token: filters.token
+        });
+        report.requested = reportResult.requested;
+        report.status = reportResult.status;
+        report.error = reportResult.error;
+        report.responseBody = reportResult.responseBody;
+        report.sessionId = reportResult.sessionId;
+        report.deviceId = reportResult.deviceId;
+      }
+    }
 
     res.render("general-authorized-lines-upload", {
       user: req.session.user,
       active: "authorized-lines-upload",
       filters,
+      companies,
       report
     });
   }
@@ -3855,17 +3919,87 @@ app.post(
   requireAuth,
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
+    const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
+    const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+    const companies = [{ value: "", label: "Firma seçiniz" }].concat(
+      partnerItems.map((item) => {
+        const idText = item.id || "N/A";
+        const clusterText = item.cluster || "cluster";
+        const label = `${item.code} - ${idText} - ${clusterText}`;
+        const value = buildCompanyOptionValue(item);
+        return {
+          value,
+          label,
+          meta: item
+        };
+      })
+    );
+    if (partnerError) {
+      companies.push({
+        value: "__partner_error__",
+        label: `Hata: ${partnerError}`,
+        disabled: true
+      });
+    }
+
+    const selectedCompanyOption = companies.find(
+      (item) => !item.disabled && item.value === requestedCompany && item.meta
+    );
+    const parsedCompany = parseCompanyOptionValue(requestedCompany);
+    const matchedParsedCompany =
+      parsedCompany &&
+      partnerItems.find(
+        (item) =>
+          item.code === parsedCompany.code &&
+          String(item.id || "") === String(parsedCompany.id || "") &&
+          String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+      );
+    const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+    const rawEndpointUrl = String(req.body.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim();
+    const resolvedEndpointUrl = selectedCompanyMeta?.cluster
+      ? buildUrlForCluster(rawEndpointUrl || PARTNERS_API_URL, selectedCompanyMeta.cluster)
+      : rawEndpointUrl;
     const filters = {
-      endpointUrl: String(req.body.endpointUrl || AUTHORIZED_LINES_API_URL || "").trim(),
-      partnerId: String(req.body.partnerId || "").trim(),
+      endpointUrl: resolvedEndpointUrl,
+      company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
       token: String(req.body.token || "").trim()
     };
-    const report = await fetchAuthorizedLinesUploadReport(filters);
+    const report = {
+      requested: true,
+      status: null,
+      error: null,
+      responseBody: "",
+      sessionId: "",
+      deviceId: ""
+    };
+
+    if (!selectedCompanyMeta) {
+      report.error = "Firma seçimi zorunludur.";
+    } else {
+      const partnerId = String(selectedCompanyMeta.id || "").trim();
+      if (!partnerId) {
+        report.error = "Seçilen firma için PartnerId bulunamadı.";
+      } else {
+        const reportResult = await fetchAuthorizedLinesUploadReport({
+          endpointUrl: filters.endpointUrl,
+          partnerId,
+          token: filters.token
+        });
+        report.requested = reportResult.requested;
+        report.status = reportResult.status;
+        report.error = reportResult.error;
+        report.responseBody = reportResult.responseBody;
+        report.sessionId = reportResult.sessionId;
+        report.deviceId = reportResult.deviceId;
+      }
+    }
 
     res.render("general-authorized-lines-upload", {
       user: req.session.user,
       active: "authorized-lines-upload",
       filters,
+      companies,
       report
     });
   }

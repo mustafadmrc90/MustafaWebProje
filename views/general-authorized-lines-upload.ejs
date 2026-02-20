@@ -38,8 +38,18 @@
         <form class="allowed-lines-form" method="post" action="/general/authorized-lines-upload">
           <div class="allowed-lines-grid">
             <label class="allowed-lines-field">
-              <span>Partner Id</span>
-              <input type="text" name="partnerId" value="<%= filters.partnerId %>" required />
+              <span>Firma</span>
+              <select name="company" required>
+                <% companies.forEach((company) => { %>
+                  <option
+                    value="<%= company.value %>"
+                    <%= filters.company === company.value ? "selected" : "" %>
+                    <%= company.disabled ? "disabled" : "" %>
+                  >
+                    <%= company.label %>
+                  </option>
+                <% }) %>
+              </select>
             </label>
             <label class="allowed-lines-field">
               <span>Token</span>
