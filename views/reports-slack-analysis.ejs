@@ -13,7 +13,16 @@
     <section class="content">
       <header class="page-header">
         <div class="page-title">
-          <h1>Slack Analiz</h1>
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                <path d="M8 9h8"></path>
+                <path d="M8 13h5"></path>
+              </svg>
+            </span>
+            <span>Slack Analiz</span>
+          </h1>
           <p>Seçili kullanıcıların tarih aralığına göre yanıt sayıları.</p>
         </div>
         <div class="page-actions">
@@ -54,6 +63,7 @@
           <h2>Yanıt Sonuçları</h2>
           <div class="table-actions">
             <span class="pill"><%= report.rows.length %> Kullanıcı</span>
+            <span class="pill"><%= report.totalRequests %> Talep</span>
             <span class="pill"><%= report.totalReplies %> Yanıt</span>
             <span class="pill muted"><%= report.meta.channelsScanned %>/<%= report.meta.channelsTotal %> Kanal</span>
             <span class="pill muted"><%= report.meta.threadsScanned %> Thread</span>
@@ -87,6 +97,7 @@
               <thead>
                 <tr>
                   <th>Kullanıcı</th>
+                  <th>Talep Sayısı</th>
                   <th>Yanıt Sayısı</th>
                 </tr>
               </thead>
@@ -94,13 +105,15 @@
                 <% report.rows.forEach((row) => { %>
                   <tr>
                     <td title="<%= row.userId %>"><%= row.name %></td>
-                    <td><%= formatter.format(row.count) %></td>
+                    <td><%= formatter.format(row.requestCount) %></td>
+                    <td><%= formatter.format(row.replyCount) %></td>
                   </tr>
                 <% }) %>
               </tbody>
               <tfoot>
                 <tr>
                   <td>Dip Toplam</td>
+                  <td><%= formatter.format(report.totalRequests) %></td>
                   <td><%= formatter.format(report.totalReplies) %></td>
                 </tr>
               </tfoot>
@@ -109,29 +122,6 @@
         <% } %>
       </section>
     </section>
-    <script>
-      (() => {
-        const filterForm = document.querySelector(".slack-filter-form");
-        if (filterForm) {
-          filterForm.addEventListener("submit", () => {
-            filterForm.classList.add("is-loading");
-            const loading = filterForm.querySelector(".slack-loading-message");
-            if (loading) loading.hidden = false;
-          });
-        }
-
-        const saveForm = document.querySelector(".slack-save-form");
-        if (saveForm) {
-          saveForm.addEventListener("submit", () => {
-            const button = saveForm.querySelector("button[type='submit']");
-            if (button) {
-              button.disabled = true;
-              button.textContent = "Kaydediliyor...";
-            }
-          });
-        }
-      })();
-    </script>
     <script src="/public/app.js" defer></script>
   </body>
 </html>

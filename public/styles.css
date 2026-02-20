@@ -2143,7 +2143,9 @@ button.ghost {
 }
 
 .slack-analysis-summary-table th:nth-child(2),
-.slack-analysis-summary-table td:nth-child(2) {
+.slack-analysis-summary-table td:nth-child(2),
+.slack-analysis-summary-table th:nth-child(3),
+.slack-analysis-summary-table td:nth-child(3) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

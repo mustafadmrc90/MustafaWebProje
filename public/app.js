@@ -763,9 +763,50 @@
     });
   };
 
+  const initSlackReportLoading = () => {
+    const form = document.querySelector(".slack-filter-form");
+    if (form) {
+      if (form.dataset.loadingBound !== "1") {
+        form.dataset.loadingBound = "1";
+        const submitBtn = form.querySelector(".slack-filter-actions button[type='submit']");
+        const loadingMessage = form.querySelector(".slack-loading-message");
+
+        if (submitBtn) {
+          form.classList.remove("is-loading");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Filtrele";
+          if (loadingMessage) {
+            loadingMessage.hidden = true;
+          }
+
+          form.addEventListener("submit", () => {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Yükleniyor...";
+            form.classList.add("is-loading");
+            if (loadingMessage) {
+              loadingMessage.hidden = false;
+            }
+          });
+        }
+      }
+    }
+
+    const saveForm = document.querySelector(".slack-save-form");
+    if (!saveForm || saveForm.dataset.loadingBound === "1") return;
+    saveForm.dataset.loadingBound = "1";
+
+    saveForm.addEventListener("submit", () => {
+      const button = saveForm.querySelector("button[type='submit']");
+      if (!button) return;
+      button.disabled = true;
+      button.textContent = "Kaydediliyor...";
+    });
+  };
+
   const initEndpointUI = async () => {
     initSalesTabs();
     initSalesReportLoading();
+    initSlackReportLoading();
 
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;

@@ -232,6 +232,7 @@ async function initDb() {
       id SERIAL PRIMARY KEY,
       start_date DATE NOT NULL,
       end_date DATE NOT NULL,
+      total_requests INTEGER NOT NULL DEFAULT 0,
       total_replies INTEGER NOT NULL DEFAULT 0,
       row_count INTEGER NOT NULL DEFAULT 0,
       source TEXT,
@@ -241,14 +242,25 @@ async function initDb() {
   `);
 
   await pool.query(`
+    ALTER TABLE slack_reply_analysis_runs
+      ADD COLUMN IF NOT EXISTS total_requests INTEGER NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS slack_reply_analysis_items (
       id SERIAL PRIMARY KEY,
       run_id INTEGER NOT NULL REFERENCES slack_reply_analysis_runs(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,
       user_name TEXT NOT NULL,
+      request_count INTEGER NOT NULL DEFAULT 0,
       reply_count INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE slack_reply_analysis_items
+      ADD COLUMN IF NOT EXISTS request_count INTEGER NOT NULL DEFAULT 0
   `);
 
   await pool.query(`
@@ -1510,12 +1522,21 @@ async function listSlackThreadRepliesForAnalysis(token, channelId, threadTs, old
   };
 }
 
-function buildSlackReplyRowsFromCounts(countByUserId, nameByUserId = new Map()) {
+function buildSlackReplyRowsFromCounts(
+  replyCountByUserId,
+  requestCountByUserId = new Map(),
+  nameByUserId = new Map()
+) {
   return SLACK_SELECTED_USERS.map((selected) => ({
     userId: selected.id,
     name: String(nameByUserId.get(selected.id) || selected.name || "").trim() || selected.id,
-    count: toCountInteger(countByUserId.get(selected.id) || 0)
-  })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "tr"));
+    requestCount: toCountInteger(requestCountByUserId.get(selected.id) || 0),
+    replyCount: toCountInteger(replyCountByUserId.get(selected.id) || 0),
+    count: toCountInteger(replyCountByUserId.get(selected.id) || 0)
+  })).sort(
+    (a, b) =>
+      b.replyCount - a.replyCount || b.requestCount - a.requestCount || a.name.localeCompare(b.name, "tr")
+  );
 }
 
 function buildSlackReplyReportModel({
@@ -1529,14 +1550,17 @@ function buildSlackReplyReportModel({
   const allowedIds = new Set(SLACK_SELECTED_USERS.map((item) => item.id));
   const providedRows = Array.isArray(rows) ? rows : [];
   const hasProvidedRows = providedRows.length > 0;
-  const countByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
+  const replyCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
+  const requestCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
 
   providedRows.forEach((row) => {
     const userId = String(row?.userId || row?.user_id || row?.id || "").trim();
     if (!allowedIds.has(userId)) return;
-    const count = toCountInteger(row?.count ?? row?.replyCount ?? row?.reply_count);
-    countByUserId.set(userId, count);
+    const replyCount = toCountInteger(row?.replyCount ?? row?.reply_count ?? row?.count);
+    const requestCount = toCountInteger(row?.requestCount ?? row?.request_count ?? 0);
+    replyCountByUserId.set(userId, replyCount);
+    requestCountByUserId.set(userId, requestCount);
     const nameText = String(row?.name || row?.userName || row?.user_name || "").trim();
     if (nameText) {
       nameByUserId.set(userId, nameText);
@@ -1544,9 +1568,10 @@ function buildSlackReplyReportModel({
   });
 
   const normalizedRows = hasProvidedRows
-    ? buildSlackReplyRowsFromCounts(countByUserId, nameByUserId)
+    ? buildSlackReplyRowsFromCounts(replyCountByUserId, requestCountByUserId, nameByUserId)
     : [];
-  const totalReplies = normalizedRows.reduce((sum, row) => sum + row.count, 0);
+  const totalRequests = normalizedRows.reduce((sum, row) => sum + row.requestCount, 0);
+  const totalReplies = normalizedRows.reduce((sum, row) => sum + row.replyCount, 0);
 
   const normalizedMeta = {
     channelsTotal: Number.isFinite(Number(meta?.channelsTotal)) ? Number(meta.channelsTotal) : 0,
@@ -1558,6 +1583,7 @@ function buildSlackReplyReportModel({
     requested: Boolean(requested),
     rows: requested ? normalizedRows : [],
     rowsJson: JSON.stringify(normalizedRows),
+    totalRequests,
     totalReplies,
     source: String(source || ""),
     notice: notice ? String(notice) : null,
@@ -1608,7 +1634,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const isDeadlineExceeded = () => Date.now() >= deadlineAt;
 
   const selectedIds = new Set(SLACK_SELECTED_USERS.map((item) => item.id));
-  const countByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
+  const replyCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
+  const requestCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
 
   let channels = [];
@@ -1644,6 +1671,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   let threadLimitAppliedChannels = 0;
   let runtimeStopped = false;
   let runtimeSkippedChannels = 0;
+  const scannedChannelNames = new Set();
 
   const metrics = {
     channelsTotal: channels.length,
@@ -1669,6 +1697,9 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       if (!channelId) return;
 
       metrics.channelsScanned += 1;
+      if (channelName) {
+        scannedChannelNames.add(channelName);
+      }
 
       let messagesResult;
       try {
@@ -1689,6 +1720,19 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       }
 
       const threadRoots = (messagesResult.messages || []).filter((message) => {
+        if (shouldCountSlackMessage(message)) {
+          const userId = String(message.user || "").trim();
+          if (selectedIds.has(userId)) {
+            const messageTs = String(message.ts || "").trim();
+            const threadTs = String(message.thread_ts || "").trim();
+            const replyCount = Number(message.reply_count || 0);
+            const hasThread = (Number.isFinite(replyCount) && replyCount > 0) || (threadTs && threadTs !== messageTs);
+            if (!hasThread) {
+              requestCountByUserId.set(userId, (requestCountByUserId.get(userId) || 0) + 1);
+            }
+          }
+        }
+
         const replyCount = Number(message?.reply_count || 0);
         return Number.isFinite(replyCount) && replyCount > 0 && String(message?.ts || "").trim();
       });
@@ -1742,7 +1786,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
           }
 
           for (const userId of uniqueUsersInThread) {
-            countByUserId.set(userId, (countByUserId.get(userId) || 0) + 1);
+            replyCountByUserId.set(userId, (replyCountByUserId.get(userId) || 0) + 1);
           }
         },
         isDeadlineExceeded
@@ -1756,7 +1800,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     runtimeSkippedChannels += Math.max(0, limitedChannels.length - metrics.channelsScanned);
   }
 
-  const rows = buildSlackReplyRowsFromCounts(countByUserId, nameByUserId);
+  const rows = buildSlackReplyRowsFromCounts(replyCountByUserId, requestCountByUserId, nameByUserId);
   const noticeParts = [];
 
   if (runtimeStopped) {
@@ -1784,6 +1828,20 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       `${warningCount} kanal/thread çağrısı hatalı. ${warningSamples[0] ? `İlk hata: ${warningSamples[0]}` : ""}`
     );
   }
+
+  const channelNames = Array.from(scannedChannelNames)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "tr"));
+  if (channelNames.length > 0) {
+    const maxNamesInNotice = 25;
+    const visibleNames = channelNames.slice(0, maxNamesInNotice);
+    const extraCount = Math.max(0, channelNames.length - visibleNames.length);
+    noticeParts.push(
+      `Kanallar: ${visibleNames.join(", ")}${extraCount > 0 ? ` (+${extraCount})` : ""}`
+    );
+  }
+
   noticeParts.push(
     `Tip: ${channelTypes}, Kanal: ${metrics.channelsScanned}/${metrics.channelsTotal}, Thread: ${metrics.threadsScanned}`
   );
@@ -1807,7 +1865,8 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId }) {
     requested: true,
     rows
   }).rows;
-  const totalReplies = normalizedRows.reduce((sum, row) => sum + toCountInteger(row.count), 0);
+  const totalRequests = normalizedRows.reduce((sum, row) => sum + toCountInteger(row.requestCount), 0);
+  const totalReplies = normalizedRows.reduce((sum, row) => sum + toCountInteger(row.replyCount), 0);
 
   const client = await pool.connect();
   try {
@@ -1818,15 +1877,24 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId }) {
         INSERT INTO slack_reply_analysis_runs (
           start_date,
           end_date,
+          total_requests,
           total_replies,
           row_count,
           source,
           created_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
       `,
-      [startDate, endDate, totalReplies, normalizedRows.length, "slack-analysis-ui", userId || null]
+      [
+        startDate,
+        endDate,
+        totalRequests,
+        totalReplies,
+        normalizedRows.length,
+        "slack-analysis-ui",
+        userId || null
+      ]
     );
     const runId = runResult.rows[0]?.id;
 
@@ -1837,11 +1905,12 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId }) {
             run_id,
             user_id,
             user_name,
+            request_count,
             reply_count
           )
-          VALUES ($1, $2, $3, $4)
+          VALUES ($1, $2, $3, $4, $5)
         `,
-        [runId, row.userId, row.name, row.count]
+        [runId, row.userId, row.name, row.requestCount, row.replyCount]
       );
     }
 
@@ -1849,6 +1918,7 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId }) {
     return {
       runId,
       rowCount: normalizedRows.length,
+      totalRequests,
       totalReplies
     };
   } catch (err) {
@@ -3041,7 +3111,7 @@ app.post("/reports/slack-analysis/save", requireAuth, async (req, res) => {
       rows: report.rows,
       userId: req.session.user?.id || null
     });
-    report.notice = `SQL'e kaydedildi. Kayıt No: ${saveResult.runId} | Toplam Yanıt: ${saveResult.totalReplies}`;
+    report.notice = `SQL'e kaydedildi. Kayıt No: ${saveResult.runId} | Toplam Talep: ${saveResult.totalRequests} | Toplam Yanıt: ${saveResult.totalReplies}`;
   } catch (err) {
     report.error = `SQL kaydı başarısız: ${err?.message || "Bilinmeyen hata"}`;
   }
