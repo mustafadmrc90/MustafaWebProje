@@ -35,14 +35,20 @@
           <h2>İstek Parametreleri</h2>
         </div>
 
-        <form class="allowed-lines-form" method="post" action="/general/authorized-lines-upload">
+        <form
+          class="allowed-lines-form"
+          method="post"
+          action="/general/authorized-lines-upload"
+          data-company-source-url="<%= companySourceBaseUrl %>"
+        >
           <div class="allowed-lines-grid">
             <label class="allowed-lines-field">
               <span>Firma</span>
-              <select name="company" required>
+              <select name="company" id="allowed-lines-company" required>
                 <% companies.forEach((company) => { %>
                   <option
                     value="<%= company.value %>"
+                    data-cluster="<%= company.meta && company.meta.cluster ? company.meta.cluster : '' %>"
                     <%= filters.company === company.value ? "selected" : "" %>
                     <%= company.disabled ? "disabled" : "" %>
                   >
@@ -73,6 +79,7 @@
               <input
                 type="text"
                 name="endpointUrl"
+                id="allowed-lines-endpoint-url"
                 value="<%= filters.endpointUrl %>"
                 placeholder="https://..."
                 required
@@ -80,7 +87,7 @@
             </label>
           </div>
           <div class="allowed-lines-actions">
-            <button type="submit">Yükle</button>
+            <button type="submit">İzinli Hatları Yükle</button>
           </div>
           <div class="allowed-lines-loading-message" hidden>İstek gönderiliyor, lütfen bekleyin...</div>
         </form>

@@ -4171,6 +4171,7 @@ app.get(
       active: "authorized-lines-upload",
       filters,
       companies,
+      companySourceBaseUrl: PARTNERS_API_URL,
       report
     });
   }
@@ -4282,6 +4283,7 @@ app.post(
       active: "authorized-lines-upload",
       filters,
       companies,
+      companySourceBaseUrl: PARTNERS_API_URL,
       report
     });
   }

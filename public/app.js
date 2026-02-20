@@ -817,13 +817,56 @@
 
     const submitBtn = form.querySelector(".allowed-lines-actions button[type='submit']");
     const loadingMessage = form.querySelector(".allowed-lines-loading-message");
+    const companySelect = form.querySelector("#allowed-lines-company");
+    const endpointInput = form.querySelector("#allowed-lines-endpoint-url");
+    const companySourceUrl = String(form.dataset.companySourceUrl || "").trim();
     if (!submitBtn) return;
+
+    const replaceClusterInUrl = (urlValue, clusterValue) => {
+      const url = String(urlValue || "").trim();
+      const cluster = String(clusterValue || "").trim().toLowerCase();
+      if (!url || !cluster) return url;
+      if (/cluster\d+/i.test(url)) {
+        return url.replace(/cluster\d+/i, cluster);
+      }
+      return url;
+    };
+
+    const extractClusterFromCompanyValue = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw || !raw.includes("|||")) return "";
+      const parts = raw.split("|||");
+      if (parts.length < 3) return "";
+      return String(parts[2] || "").trim().toLowerCase();
+    };
+
+    const applyCompanyClusterToEndpointUrl = () => {
+      if (!companySelect || !endpointInput) return;
+      const selectedOption = companySelect.options[companySelect.selectedIndex] || null;
+      const selectedCluster =
+        String(selectedOption?.dataset?.cluster || "").trim().toLowerCase() ||
+        extractClusterFromCompanyValue(companySelect.value);
+      if (!selectedCluster) return;
+
+      const baseUrl = companySourceUrl || endpointInput.value || "";
+      const nextUrl = replaceClusterInUrl(baseUrl, selectedCluster);
+      if (nextUrl) {
+        endpointInput.value = nextUrl;
+      }
+    };
 
     form.classList.remove("is-loading");
     submitBtn.disabled = false;
-    submitBtn.textContent = "Yükle";
+    submitBtn.textContent = "İzinli Hatları Yükle";
     if (loadingMessage) {
       loadingMessage.hidden = true;
+    }
+
+    if (companySelect && endpointInput) {
+      companySelect.addEventListener("change", applyCompanyClusterToEndpointUrl);
+      if (!String(endpointInput.value || "").trim()) {
+        applyCompanyClusterToEndpointUrl();
+      }
     }
 
     form.addEventListener("submit", () => {
