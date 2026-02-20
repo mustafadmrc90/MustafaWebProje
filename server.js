@@ -948,6 +948,7 @@ function normalizePartnerItems(items) {
     let code = "";
     let id = "";
     let cluster = "";
+    let url = "";
 
     if (typeof item === "string") {
       code = String(item).trim();
@@ -955,13 +956,20 @@ function normalizePartnerItems(items) {
       code = String(item.code || item.value || "").trim();
       id = String(item.id || "").trim();
       cluster = String(item.cluster || "").trim().toLowerCase();
+      url = normalizeTargetUrl(item.url || "");
     }
 
     if (!code) return;
 
     const key = `${code}__${id}__${cluster}`;
     if (!byKey.has(key)) {
-      byKey.set(key, { code, id, cluster });
+      byKey.set(key, { code, id, cluster, url });
+      return;
+    }
+
+    const current = byKey.get(key);
+    if (current && !current.url && url) {
+      byKey.set(key, { ...current, url });
     }
   });
 
@@ -972,7 +980,10 @@ function normalizePartnerItems(items) {
     const byId = a.id.localeCompare(b.id, "tr");
     if (byId !== 0) return byId;
 
-    return a.cluster.localeCompare(b.cluster, "tr");
+    const byCluster = a.cluster.localeCompare(b.cluster, "tr");
+    if (byCluster !== 0) return byCluster;
+
+    return String(a.url || "").localeCompare(String(b.url || ""), "tr");
   });
 }
 
@@ -1015,11 +1026,22 @@ function extractPartnerItems(payload, clusterLabel) {
       row.provider_id ??
       row.providerId;
     const id = rawId === undefined || rawId === null ? "" : String(rawId).trim();
+    const rawUrl =
+      row.url ??
+      row.URL ??
+      row.api_url ??
+      row.apiUrl ??
+      row.endpoint_url ??
+      row.endpointUrl ??
+      row.base_url ??
+      row.baseUrl;
+    const url = normalizeTargetUrl(rawUrl);
 
     items.push({
       code,
       id,
-      cluster: String(clusterLabel || "").trim().toLowerCase()
+      cluster: String(clusterLabel || "").trim().toLowerCase(),
+      url
     });
   });
 
@@ -1133,6 +1155,58 @@ function parseJsonSafe(text) {
   } catch (err) {
     return null;
   }
+}
+
+function collectUserLoginBranchCandidates(node, candidates) {
+  if (!node || typeof node !== "object") return;
+
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectUserLoginBranchCandidates(item, candidates));
+    return;
+  }
+
+  const keySet = new Set(["branchid", "defaultbranchid", "activebranchid", "selectedbranchid"]);
+  const direct = findNestedValue(node, keySet);
+  if (direct) {
+    candidates.push(String(direct).trim());
+  }
+
+  Object.entries(node).forEach(([key, value]) => {
+    if (!value || typeof value !== "object") return;
+    const normalized = normalizeTokenName(key);
+
+    if (normalized.includes("branch") && Array.isArray(value)) {
+      value.forEach((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return;
+        const branchId =
+          findNestedValue(item, new Set(["branchid"])) ||
+          findNestedValue(item, new Set(["id"]));
+        if (branchId) {
+          candidates.push(String(branchId).trim());
+        }
+      });
+    }
+
+    collectUserLoginBranchCandidates(value, candidates);
+  });
+}
+
+function extractBranchIdFromUserLoginPayload(payload) {
+  const candidates = [];
+  collectUserLoginBranchCandidates(payload, candidates);
+  const firstValid = candidates.find((item) => String(item || "").trim().length > 0);
+  return firstValid ? String(firstValid).trim() : "";
+}
+
+function buildUserLoginBaseUrls(companyUrl, endpointUrl) {
+  const values = [companyUrl, endpointUrl]
+    .map((item) => normalizeTargetUrl(item))
+    .filter(Boolean);
+  const deduped = [];
+  values.forEach((value) => {
+    if (!deduped.includes(value)) deduped.push(value);
+  });
+  return deduped;
 }
 
 function buildClusterPartnerUrls(baseUrl) {
@@ -3691,9 +3765,9 @@ function buildAuthorizedLinesReportModel() {
   };
 }
 
-async function fetchAuthorizedLinesLoginInfo({ endpointUrl, partnerCode, username, password }) {
-  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
-  if (!normalizedEndpointUrl) {
+async function fetchAuthorizedLinesLoginInfo({ endpointUrl, companyUrl, partnerCode, username, password }) {
+  const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
+  if (loginBaseUrls.length === 0) {
     return {
       ok: false,
       error: "Hedef URL geçersiz.",
@@ -3722,125 +3796,121 @@ async function fetchAuthorizedLinesLoginInfo({ endpointUrl, partnerCode, usernam
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90000);
   try {
-    const sessionUrl = buildSessionUrlForPartnerUrl(normalizedEndpointUrl);
-    const loginUrl = buildUserLoginUrlForPartnerUrl(normalizedEndpointUrl);
-    if (!loginUrl) {
-      return {
-        ok: false,
-        error: "UserLogin URL oluşturulamadı.",
-        sessionId: "",
-        deviceId: "",
-        branchId: "",
-        token: ""
-      };
-    }
-
-    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
-    if (sessionResult.error) {
-      return {
-        ok: false,
-        error: sessionResult.error,
-        sessionId: "",
-        deviceId: "",
-        branchId: "",
-        token: ""
-      };
-    }
-
-    const sharedEnvelope = {
-      "device-session": {
-        "session-id": sessionResult.sessionId,
-        "device-id": sessionResult.deviceId
-      },
-      date: "2016-03-11T11:33:00",
-      language: "tr-TR"
-    };
-
-    const payloadCandidates = [
-      {
-        data: {
-          "user-name": normalizedUsername,
-          password: normalizedPassword,
-          "partner-code": normalizedPartnerCode
-        },
-        ...sharedEnvelope
-      },
-      {
-        data: {
-          username: normalizedUsername,
-          password: normalizedPassword,
-          "partner-code": normalizedPartnerCode
-        },
-        ...sharedEnvelope
-      },
-      {
-        data: {
-          username: normalizedUsername,
-          password: normalizedPassword,
-          partnerCode: normalizedPartnerCode
-        },
-        ...sharedEnvelope
-      },
-      {
-        username: normalizedUsername,
-        password: normalizedPassword,
-        "partner-code": normalizedPartnerCode,
-        ...sharedEnvelope
-      }
-    ];
-
     let lastError = "UserLogin çağrısı başarısız.";
-    for (const payload of payloadCandidates) {
-      const response = await fetch(loginUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: PARTNERS_API_AUTH
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
+    let lastSessionId = "";
+    let lastDeviceId = "";
 
-      const raw = await response.text();
-      const parsed = parseJsonSafe(raw);
-      const errorMessage =
-        (parsed &&
-          typeof parsed === "object" &&
-          String(parsed.message || parsed.error || "").trim()) ||
-        response.statusText ||
-        "";
-
-      if (!response.ok) {
-        lastError = `UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"}`;
+    for (const baseUrl of loginBaseUrls) {
+      const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
+      const loginUrl = buildUserLoginUrlForPartnerUrl(baseUrl);
+      if (!loginUrl) {
+        lastError = "UserLogin URL oluşturulamadı.";
         continue;
       }
 
-      const branchId =
-        findNestedValue(parsed, new Set(["branchid"])) ||
-        findNestedValue(parsed, new Set(["branchid", "branch"])) ||
-        "";
-      const tokenValue =
-        findNestedValue(parsed, new Set(["token"])) ||
-        findNestedValue(parsed, new Set(["accesstoken"])) ||
-        findNestedValue(parsed, new Set(["authorizationtoken"])) ||
-        "";
+      const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
+      if (sessionResult.error) {
+        lastError = sessionResult.error;
+        continue;
+      }
 
-      return {
-        ok: true,
-        error: null,
-        sessionId: sessionResult.sessionId,
-        deviceId: sessionResult.deviceId,
-        branchId: String(branchId || "").trim(),
-        token: String(tokenValue || "").trim()
+      lastSessionId = sessionResult.sessionId || "";
+      lastDeviceId = sessionResult.deviceId || "";
+
+      const sharedEnvelope = {
+        "device-session": {
+          "session-id": sessionResult.sessionId,
+          "device-id": sessionResult.deviceId
+        },
+        date: "2016-03-11T11:33:00",
+        language: "tr-TR"
       };
+
+      const payloadCandidates = [
+        {
+          data: {
+            "user-name": normalizedUsername,
+            password: normalizedPassword,
+            "partner-code": normalizedPartnerCode
+          },
+          ...sharedEnvelope
+        },
+        {
+          data: {
+            username: normalizedUsername,
+            password: normalizedPassword,
+            "partner-code": normalizedPartnerCode
+          },
+          ...sharedEnvelope
+        },
+        {
+          data: {
+            username: normalizedUsername,
+            password: normalizedPassword,
+            partnerCode: normalizedPartnerCode
+          },
+          ...sharedEnvelope
+        },
+        {
+          username: normalizedUsername,
+          password: normalizedPassword,
+          "partner-code": normalizedPartnerCode,
+          ...sharedEnvelope
+        }
+      ];
+
+      for (const payload of payloadCandidates) {
+        const response = await fetch(loginUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: PARTNERS_API_AUTH
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+
+        const raw = await response.text();
+        const parsed = parseJsonSafe(raw);
+        const errorMessage =
+          (parsed &&
+            typeof parsed === "object" &&
+            String(parsed.message || parsed.error || "").trim()) ||
+          response.statusText ||
+          "";
+
+        if (!response.ok) {
+          lastError = `UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"}`;
+          continue;
+        }
+
+        const branchId =
+          extractBranchIdFromUserLoginPayload(parsed) ||
+          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
+          "";
+        const tokenValue =
+          findNestedValue(parsed, new Set(["token"])) ||
+          findNestedValue(parsed, new Set(["accesstoken"])) ||
+          findNestedValue(parsed, new Set(["authorizationtoken"])) ||
+          "";
+
+        return {
+          ok: true,
+          error: null,
+          sessionId: sessionResult.sessionId,
+          deviceId: sessionResult.deviceId,
+          branchId: String(branchId || "").trim(),
+          token: String(tokenValue || "").trim()
+        };
+      }
     }
 
     return {
       ok: false,
       error: lastError,
-      sessionId: sessionResult.sessionId,
-      deviceId: sessionResult.deviceId,
+      sessionId: lastSessionId,
+      deviceId: lastDeviceId,
       branchId: "",
       token: ""
     };
@@ -4131,6 +4201,7 @@ app.get(
       } else {
         const loginResult = await fetchAuthorizedLinesLoginInfo({
           endpointUrl: filters.endpointUrl,
+          companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
           username: filters.username,
           password: filters.password
@@ -4244,6 +4315,7 @@ app.post(
       } else {
         const loginResult = await fetchAuthorizedLinesLoginInfo({
           endpointUrl: filters.endpointUrl,
+          companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
           username: filters.username,
           password: filters.password
