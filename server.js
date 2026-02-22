@@ -486,8 +486,8 @@ function normalizeSidebarRows(rows) {
       const sortOrder = Number.isFinite(Number(sortOrderRaw)) ? Number(sortOrderRaw) : 0;
       const iconKeyRaw = row.icon_key ?? row.iconKey ?? "folder";
       const iconKey = iconKeyRaw ? String(iconKeyRaw).trim() : "folder";
-      const canViewRaw = row.can_view ?? row.canView ?? true;
-      const canView = toSidebarBool(canViewRaw, true);
+      const canViewRaw = row.can_view ?? row.canView ?? false;
+      const canView = toSidebarBool(canViewRaw, false);
 
       return {
         key,
@@ -569,6 +569,14 @@ function buildSidebarFallbackModel() {
     can_view: true
   }));
   return buildSidebarModelFromRows(rows);
+}
+
+function buildSidebarEmptyModel() {
+  return {
+    sections: [],
+    allowedMenuKeys: [],
+    allowedRouteKeys: []
+  };
 }
 
 async function syncSidebarMenusAndPermissions() {
@@ -694,7 +702,7 @@ async function loadSidebarForUser(userId, options = {}) {
   }
   const userIdNum = Number(userId);
   if (!Number.isInteger(userIdNum)) {
-    return buildSidebarFallbackModel();
+    return buildSidebarEmptyModel();
   }
 
   await ensureSidebarPermissionsForUser(userIdNum);
@@ -709,7 +717,7 @@ async function loadSidebarForUser(userId, options = {}) {
         m.route_key,
         m.sort_order,
         m.icon_key,
-        COALESCE(usp.can_view, true) AS can_view
+        COALESCE(usp.can_view, false) AS can_view
       FROM sidebar_menu_items m
       LEFT JOIN user_sidebar_permissions usp
         ON usp.menu_key = m.key
@@ -821,7 +829,7 @@ async function loadSidebarPermissionSectionsForUser(userId) {
         m.route_key,
         m.sort_order,
         m.icon_key,
-        COALESCE(usp.can_view, true) AS can_view
+        COALESCE(usp.can_view, false) AS can_view
       FROM sidebar_menu_items m
       LEFT JOIN user_sidebar_permissions usp
         ON usp.menu_key = m.key
@@ -894,7 +902,7 @@ app.use(async (req, res, next) => {
     res.locals.sidebar = sidebar;
   } catch (err) {
     console.error("Sidebar load error:", err);
-    const fallback = buildSidebarFallbackModel();
+    const fallback = buildSidebarEmptyModel();
     req.sidebar = fallback;
     res.locals.sidebar = fallback;
   }
