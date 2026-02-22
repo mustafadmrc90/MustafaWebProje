@@ -22,6 +22,13 @@ const REPORTING_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/reporting/obiletsalesreport";
 const REPORTING_API_AUTH =
   process.env.REPORTING_API_AUTH || "Basic TXVyb011aG9BbGlPZ2lIYXJ1bk96YW4K";
+const SALES_REPORT_TIMEOUT_MS = Number.parseInt(process.env.SALES_REPORT_TIMEOUT_MS || "180000", 10) || 180000;
+const SALES_REPORT_RANGE_CONCURRENCY =
+  Number.parseInt(process.env.SALES_REPORT_RANGE_CONCURRENCY || "4", 10) || 4;
+const SALES_REPORT_TARGET_CONCURRENCY =
+  Number.parseInt(process.env.SALES_REPORT_TARGET_CONCURRENCY || "4", 10) || 4;
+const SALES_REPORT_SESSION_CONCURRENCY =
+  Number.parseInt(process.env.SALES_REPORT_SESSION_CONCURRENCY || "8", 10) || 8;
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
@@ -3594,6 +3601,17 @@ function buildSalesListTotals(rows) {
   };
 }
 
+function buildSalesTotalsFromRows(rows) {
+  return (Array.isArray(rows) ? rows : []).reduce(
+    (acc, row) => {
+      acc.website += toNumber(row?.websiteSaleAmountValue) ?? 0;
+      acc.obilet += toNumber(row?.obiletSaleAmountValue) ?? 0;
+      return acc;
+    },
+    { website: 0, obilet: 0 }
+  );
+}
+
 function extractSalesTimePointsFromPayload(payload) {
   const points = [];
   const dateKeys = [
@@ -3701,11 +3719,7 @@ function extractSalesTotalsFromPayload(payload) {
 
   const listRows = extractSalesRowsFromPayload(payload);
   if (listRows.length > 0) {
-    listRows.forEach((row) => {
-      website += toNumber(row.websiteSaleAmountValue) ?? 0;
-      obilet += toNumber(row.obiletSaleAmountValue) ?? 0;
-    });
-    return { website, obilet };
+    return buildSalesTotalsFromRows(listRows);
   }
 
   const points = extractSalesTimePointsFromPayload(payload);
@@ -3780,7 +3794,7 @@ async function fetchSalesReportFromCluster({
     sessionResult = sessionCache.get(sessionUrl);
   } else {
     sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal, REPORTING_API_AUTH);
-    if (!sessionResult.error && sessionCache) {
+    if (sessionCache) {
       sessionCache.set(sessionUrl, sessionResult);
     }
   }
@@ -3864,7 +3878,7 @@ async function fetchSalesReportFromCluster({
 
 async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), Math.max(10000, SALES_REPORT_TIMEOUT_MS));
 
   try {
     const targets = [];
@@ -3888,22 +3902,60 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     }
 
     const sessionCache = new Map();
+    const requestCache = new Map();
+    const rangeConcurrency = toBoundedInt(SALES_REPORT_RANGE_CONCURRENCY, 4, 1, 20);
+    const targetConcurrency = toBoundedInt(SALES_REPORT_TARGET_CONCURRENCY, 4, 1, 20);
+    const sessionConcurrency = toBoundedInt(SALES_REPORT_SESSION_CONCURRENCY, 8, 1, 20);
+    const sessionUrls = Array.from(new Set(targets.map((target) => buildSessionUrlForPartnerUrl(target.reportUrl))));
+
+    await runWithConcurrency(
+      sessionUrls,
+      sessionConcurrency,
+      async (sessionUrl) => {
+        const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, REPORTING_API_AUTH);
+        sessionCache.set(sessionUrl, sessionResult);
+        return sessionResult;
+      },
+      () => controller.signal.aborted
+    );
+
     const dailyRanges = buildDailyRequestRanges(startDate, endDate);
     const monthlyRanges = buildMonthlyRequestRanges(startDate, endDate);
     const normalizedStart = dailyRanges[0]?.startDate || startDate;
     const normalizedEnd = dailyRanges[dailyRanges.length - 1]?.endDate || endDate;
+    const fetchSalesReportCached = (target, range) => {
+      const requestKey = `${target.clusterLabel}|||${target.partnerId}|||${range.startDate}|||${range.endDate}`;
+      if (requestCache.has(requestKey)) {
+        return requestCache.get(requestKey);
+      }
+
+      const requestPromise = fetchSalesReportFromCluster({
+        clusterLabel: target.clusterLabel,
+        reportUrl: target.reportUrl,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        partnerId: target.partnerId,
+        signal: controller.signal,
+        sessionCache
+      });
+      requestCache.set(requestKey, requestPromise);
+      return requestPromise;
+    };
 
     const runRequestsForRanges = async (
       ranges,
       { collectItems = false, collectListRows = false, groupByCode = false } = {}
     ) => {
+      const validRanges = (Array.isArray(ranges) ? ranges : []).filter(
+        (range) => range && range.startDate && range.endDate
+      );
       const rowsByLabel = new Map();
       const items = [];
       const listRows = [];
       const errors = [];
 
       if (!groupByCode) {
-        (Array.isArray(ranges) ? ranges : []).forEach((range) => {
+        validRanges.forEach((range) => {
           const label = String(range?.label || "").trim();
           if (!label) return;
           if (!rowsByLabel.has(label)) {
@@ -3918,100 +3970,143 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
         });
       }
 
-      for (const range of Array.isArray(ranges) ? ranges : []) {
-        if (!range || !range.startDate || !range.endDate) continue;
+      const rangeResults = await runWithConcurrency(
+        validRanges,
+        rangeConcurrency,
+        async (range) => {
+          const perRangeItems = [];
+          const perRangeListRows = [];
+          const perRangeSeriesRows = [];
+          const perRangeErrors = [];
 
-        const results = await Promise.all(
-          targets.map((target) =>
-            fetchSalesReportFromCluster({
-              clusterLabel: target.clusterLabel,
-              reportUrl: target.reportUrl,
-              startDate: range.startDate,
-              endDate: range.endDate,
-              partnerId: target.partnerId,
-              signal: controller.signal,
-              sessionCache
-            })
-          )
-        );
+          const results = await runWithConcurrency(
+            targets,
+            targetConcurrency,
+            async (target) => fetchSalesReportCached(target, range),
+            () => controller.signal.aborted
+          );
 
-        results.forEach((result, index) => {
-          const target = targets[index];
-          if (collectItems) {
-            items.push({
-              cluster: result.cluster,
-              reportUrl: result.reportUrl,
-              ok: result.ok,
-              status: result.status,
-              error: result.error,
-              payloadText: stringifyPayload(result.payload),
-              periodLabel: range.label,
-              periodStartDate: range.startDate,
-              periodEndDate: range.endDate
-            });
-          }
+          results.forEach((result, index) => {
+            const target = targets[index];
+            if (!result || typeof result !== "object" || !Object.prototype.hasOwnProperty.call(result, "ok")) {
+              const detail =
+                (typeof result?.error === "string" && result.error) ||
+                result?.error?.message ||
+                "Bilinmeyen hata";
+              const clusterText = target?.clusterLabel || "cluster";
+              perRangeErrors.push(`${range.startDate}..${range.endDate} ${clusterText}: ${detail}`);
+              return;
+            }
 
-          if (!result.ok) {
-            const clusterText = result.cluster || target.clusterLabel || "cluster";
-            const detail = result.error || "Bilinmeyen hata";
-            errors.push(`${range.startDate}..${range.endDate} ${clusterText}: ${detail}`);
-            return;
-          }
-
-          if (!result.payload || typeof result.payload !== "object") return;
-
-          if (groupByCode) {
-            const groupedRows = groupSalesRowsByCode(extractSalesRowsFromPayload(result.payload));
-            if (groupedRows.length > 0) {
-              groupedRows.forEach((item) => {
-                const code = String(item.code || "").trim();
-                if (!code) return;
-                const rowKey = `${range.label}__${code}`;
-                const label = `${range.label} - ${code}`;
-                const row = rowsByLabel.get(rowKey) || {
-                  label,
-                  code,
-                  periodStartDate: String(range.startDate || ""),
-                  website: 0,
-                  obilet: 0
-                };
-                row.website += toNumber(item.websiteSaleAmountValue) ?? 0;
-                row.obilet += toNumber(item.obiletSaleAmountValue) ?? 0;
-                rowsByLabel.set(rowKey, row);
+            if (collectItems) {
+              perRangeItems.push({
+                cluster: result.cluster,
+                reportUrl: result.reportUrl,
+                ok: result.ok,
+                status: result.status,
+                error: result.error,
+                payloadText: stringifyPayload(result.payload),
+                periodLabel: range.label,
+                periodStartDate: range.startDate,
+                periodEndDate: range.endDate
               });
+            }
+
+            if (!result.ok) {
+              const clusterText = result.cluster || target.clusterLabel || "cluster";
+              const detail = result.error || "Bilinmeyen hata";
+              perRangeErrors.push(`${range.startDate}..${range.endDate} ${clusterText}: ${detail}`);
+              return;
+            }
+
+            if (!result.payload || typeof result.payload !== "object") return;
+            const extractedRows = extractSalesRowsFromPayload(result.payload);
+
+            if (groupByCode) {
+              const groupedRows = groupSalesRowsByCode(extractedRows);
+              if (groupedRows.length > 0) {
+                groupedRows.forEach((item) => {
+                  const code = String(item.code || "").trim();
+                  if (!code) return;
+                  perRangeSeriesRows.push({
+                    label: `${range.label} - ${code}`,
+                    code,
+                    periodStartDate: String(range.startDate || ""),
+                    website: toNumber(item.websiteSaleAmountValue) ?? 0,
+                    obilet: toNumber(item.obiletSaleAmountValue) ?? 0
+                  });
+                });
+              } else {
+                const totals =
+                  extractedRows.length > 0 ? buildSalesTotalsFromRows(extractedRows) : extractSalesTotalsFromPayload(result.payload);
+                perRangeSeriesRows.push({
+                  label: String(range.label || ""),
+                  code: "",
+                  periodStartDate: String(range.startDate || ""),
+                  website: totals.website,
+                  obilet: totals.obilet
+                });
+              }
             } else {
-              const fallbackKey = String(range.label || "");
-              const row = rowsByLabel.get(fallbackKey) || {
-                label: fallbackKey,
+              const totals =
+                extractedRows.length > 0 ? buildSalesTotalsFromRows(extractedRows) : extractSalesTotalsFromPayload(result.payload);
+              perRangeSeriesRows.push({
+                label: String(range.label || ""),
                 code: "",
                 periodStartDate: String(range.startDate || ""),
-                website: 0,
-                obilet: 0
-              };
-              const totals = extractSalesTotalsFromPayload(result.payload);
-              row.website += totals.website;
-              row.obilet += totals.obilet;
-              rowsByLabel.set(fallbackKey, row);
+                website: totals.website,
+                obilet: totals.obilet
+              });
             }
-          } else {
-            const row = rowsByLabel.get(range.label) || {
-              label: String(range.label || ""),
-              code: "",
-              periodStartDate: String(range.startDate || ""),
-              website: 0,
-              obilet: 0
-            };
-            const totals = extractSalesTotalsFromPayload(result.payload);
-            row.website += totals.website;
-            row.obilet += totals.obilet;
-            rowsByLabel.set(range.label, row);
-          }
 
-          if (collectListRows) {
-            extractSalesRowsFromPayload(result.payload).forEach((item) => listRows.push(item));
-          }
+            if (collectListRows) {
+              extractedRows.forEach((item) => perRangeListRows.push(item));
+            }
+          });
+
+          return {
+            items: perRangeItems,
+            listRows: perRangeListRows,
+            seriesRows: perRangeSeriesRows,
+            errors: perRangeErrors
+          };
+        },
+        () => controller.signal.aborted
+      );
+
+      rangeResults.forEach((result, index) => {
+        const range = validRanges[index];
+        if (!result || typeof result !== "object" || !Object.prototype.hasOwnProperty.call(result, "seriesRows")) {
+          const detail =
+            (typeof result?.error === "string" && result.error) ||
+            result?.error?.message ||
+            "Bilinmeyen hata";
+          const rangeText = range ? `${range.startDate}..${range.endDate}` : "range";
+          errors.push(`${rangeText}: ${detail}`);
+          return;
+        }
+
+        items.push(...(Array.isArray(result.items) ? result.items : []));
+        listRows.push(...(Array.isArray(result.listRows) ? result.listRows : []));
+        errors.push(...(Array.isArray(result.errors) ? result.errors : []));
+
+        (Array.isArray(result.seriesRows) ? result.seriesRows : []).forEach((row) => {
+          const label = String(row?.label || "");
+          if (!label) return;
+          const code = String(row?.code || "").trim();
+          const rowKey = code ? `${label}__${code}` : label;
+          const current = rowsByLabel.get(rowKey) || {
+            label,
+            code,
+            periodStartDate: String(row?.periodStartDate || ""),
+            website: 0,
+            obilet: 0
+          };
+          current.website += toNumber(row?.website) ?? 0;
+          current.obilet += toNumber(row?.obilet) ?? 0;
+          rowsByLabel.set(rowKey, current);
         });
-      }
+      });
 
       return {
         items,
@@ -4035,10 +4130,12 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     const listRowsGrouped = groupSalesRowsByCode(listResult.listRows);
     const listTotals = buildSalesListTotals(listRowsGrouped);
     const shouldGroupSeriesByCode = !selectedCompany;
-    const dailyResult = await runRequestsForRanges(dailyRanges, { groupByCode: shouldGroupSeriesByCode });
-    const monthlyResult = await runRequestsForRanges(monthlyRanges, { groupByCode: shouldGroupSeriesByCode });
+    const [dailyResult, monthlyResult] = await Promise.all([
+      runRequestsForRanges(dailyRanges, { groupByCode: shouldGroupSeriesByCode }),
+      runRequestsForRanges(monthlyRanges, { groupByCode: shouldGroupSeriesByCode })
+    ]);
 
-    const allErrors = [...listResult.errors, ...dailyResult.errors, ...monthlyResult.errors];
+    const allErrors = Array.from(new Set([...listResult.errors, ...dailyResult.errors, ...monthlyResult.errors]));
     const error =
       allErrors.length > 0
         ? `Bazı rapor istekleri alınamadı: ${allErrors.slice(0, 2).join(" | ")}${
