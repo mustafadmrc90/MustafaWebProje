@@ -16,9 +16,18 @@ Uygulama: `http://localhost:3000`
 - `DATABASE_URL` (örnek: `postgres://user:pass@localhost:5432/dashboard`)
 - `SESSION_SECRET`
 
+### Opsiyonel Jira Analiz Ortam Değişkenleri
+
+- `JIRA_BASE_URL` (örnek: `https://firma.atlassian.net`)
+- `JIRA_EMAIL`
+- `JIRA_API_TOKEN`
+- `JIRA_API_TIMEOUT_MS` (varsayılan: `20000`)
+- `JIRA_MAX_RESULTS` (varsayılan: `50`, max `200`)
+
 ## Ekranlar
 
 - Dashboard: `/dashboard`
+- Jira Analiz: `/reports/jira-analysis`
 - Kullanıcılar: `/users`
 - Ekranlar: `/screens`
 - Yetkiler: `/permissions/:userId`

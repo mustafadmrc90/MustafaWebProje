@@ -57,6 +57,11 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL || "120", 10) || 120;
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
+const JIRA_BASE_URL = String(process.env.JIRA_BASE_URL || "").trim();
+const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
+const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
+const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
+const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
 const SLACK_SELECTED_USERS = [
   { id: "U03M921BDCJ", name: "Onur Uğur - Corp" },
   { id: "U03MBE47P1A", name: "Çağatay Atalay - Corp" },
@@ -2333,6 +2338,219 @@ function validateSlackDateRange(startDate, endDate) {
     return "Başlangıç tarihi bitiş tarihinden büyük olamaz.";
   }
   return null;
+}
+
+function getIsoDateDaysAgo(days = 0) {
+  const parsedDays = Number.parseInt(days, 10);
+  const safeDays = Number.isFinite(parsedDays) ? Math.max(0, Math.min(parsedDays, 3650)) : 0;
+  const date = new Date();
+  date.setDate(date.getDate() - safeDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeJiraBaseUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    const cleanPath = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.origin}${cleanPath}`;
+  } catch (err) {
+    return "";
+  }
+}
+
+function normalizeJiraProjectKey(value) {
+  const raw = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!raw) return "";
+  if (!/^[A-Z][A-Z0-9_-]{0,49}$/.test(raw)) return "";
+  return raw;
+}
+
+function buildJiraJql({ projectKey = "", startDate = "", endDate = "", customJql = "" } = {}) {
+  const custom = String(customJql || "").trim();
+  if (custom) return custom;
+
+  const clauses = [];
+  if (projectKey) clauses.push(`project = "${projectKey}"`);
+  if (startDate) clauses.push(`updated >= "${startDate}"`);
+  if (endDate) clauses.push(`updated <= "${endDate}"`);
+
+  if (!clauses.length) return "ORDER BY updated DESC";
+  return `${clauses.join(" AND ")} ORDER BY updated DESC`;
+}
+
+function formatJiraDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleString("tr-TR");
+}
+
+function extractJiraErrorDetails(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const messages = [];
+
+  if (Array.isArray(payload.errorMessages)) {
+    payload.errorMessages.forEach((item) => {
+      const text = String(item || "").trim();
+      if (text) messages.push(text);
+    });
+  }
+
+  if (payload.errors && typeof payload.errors === "object") {
+    Object.values(payload.errors).forEach((item) => {
+      const text = String(item || "").trim();
+      if (text) messages.push(text);
+    });
+  }
+
+  return messages.join(" | ");
+}
+
+function normalizeJiraIssue(issue, baseUrl) {
+  if (!issue || typeof issue !== "object") return null;
+  const key = String(issue.key || "").trim();
+  if (!key) return null;
+
+  const fields = issue.fields && typeof issue.fields === "object" ? issue.fields : {};
+  const issueType = fields.issuetype && typeof fields.issuetype === "object" ? fields.issuetype : null;
+  const status = fields.status && typeof fields.status === "object" ? fields.status : null;
+  const priority = fields.priority && typeof fields.priority === "object" ? fields.priority : null;
+  const assignee = fields.assignee && typeof fields.assignee === "object" ? fields.assignee : null;
+
+  return {
+    key,
+    summary: String(fields.summary || "").trim() || "-",
+    issueType: String(issueType?.name || "").trim() || "-",
+    status: String(status?.name || "").trim() || "-",
+    priority: String(priority?.name || "").trim() || "-",
+    assignee: String(assignee?.displayName || assignee?.emailAddress || "").trim() || "Atanmamış",
+    createdAt: formatJiraDateTime(fields.created),
+    updatedAt: formatJiraDateTime(fields.updated),
+    resolvedAt: formatJiraDateTime(fields.resolutiondate),
+    issueUrl: baseUrl ? `${baseUrl}/browse/${encodeURIComponent(key)}` : ""
+  };
+}
+
+async function fetchJiraIssues({ baseUrl, email, apiToken, jql, maxResults = JIRA_MAX_RESULTS, startAt = 0 }) {
+  const normalizedBaseUrl = normalizeJiraBaseUrl(baseUrl);
+  const normalizedEmail = String(email || "").trim();
+  const normalizedApiToken = String(apiToken || "").trim();
+  const normalizedJql = String(jql || "").trim();
+  const normalizedMaxResults = toBoundedInt(maxResults, JIRA_MAX_RESULTS, 1, 200);
+  const normalizedStartAt = Math.max(0, Number.parseInt(startAt, 10) || 0);
+
+  if (!normalizedBaseUrl || !normalizedEmail || !normalizedApiToken) {
+    return {
+      issues: [],
+      total: 0,
+      startAt: normalizedStartAt,
+      maxResults: normalizedMaxResults,
+      error: "Jira bağlantı bilgileri eksik.",
+      source: "Jira API"
+    };
+  }
+
+  if (!normalizedJql) {
+    return {
+      issues: [],
+      total: 0,
+      startAt: normalizedStartAt,
+      maxResults: normalizedMaxResults,
+      error: "JQL sorgusu boş.",
+      source: "Jira API"
+    };
+  }
+
+  const query = new URLSearchParams({
+    jql: normalizedJql,
+    startAt: String(normalizedStartAt),
+    maxResults: String(normalizedMaxResults),
+    fields: "summary,status,assignee,priority,issuetype,created,updated,resolutiondate"
+  });
+  const url = `${normalizedBaseUrl}/rest/api/3/search?${query.toString()}`;
+  const authValue = Buffer.from(`${normalizedEmail}:${normalizedApiToken}`, "utf8").toString("base64");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(3000, JIRA_API_TIMEOUT_MS));
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Basic ${authValue}`
+      }
+    });
+    const raw = await response.text();
+    const payload = parseJsonSafe(raw);
+
+    if (!response.ok) {
+      const apiMessage = extractJiraErrorDetails(payload);
+      const reason = apiMessage || response.statusText || "Bilinmeyen hata";
+      return {
+        issues: [],
+        total: 0,
+        startAt: normalizedStartAt,
+        maxResults: normalizedMaxResults,
+        error: `Jira API HTTP ${response.status}: ${reason}`,
+        source: "Jira API"
+      };
+    }
+
+    if (!payload || typeof payload !== "object") {
+      return {
+        issues: [],
+        total: 0,
+        startAt: normalizedStartAt,
+        maxResults: normalizedMaxResults,
+        error: "Jira API JSON parse edilemedi.",
+        source: "Jira API"
+      };
+    }
+
+    const issues = (Array.isArray(payload.issues) ? payload.issues : [])
+      .map((item) => normalizeJiraIssue(item, normalizedBaseUrl))
+      .filter(Boolean);
+
+    return {
+      issues,
+      total: Number.isFinite(Number(payload.total)) ? Number(payload.total) : issues.length,
+      startAt: Number.isFinite(Number(payload.startAt)) ? Number(payload.startAt) : normalizedStartAt,
+      maxResults: Number.isFinite(Number(payload.maxResults)) ? Number(payload.maxResults) : normalizedMaxResults,
+      error: null,
+      source: "Jira API"
+    };
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      return {
+        issues: [],
+        total: 0,
+        startAt: normalizedStartAt,
+        maxResults: normalizedMaxResults,
+        error: `Jira API timeout (${Math.round(Math.max(3000, JIRA_API_TIMEOUT_MS) / 1000)}s).`,
+        source: "Jira API"
+      };
+    }
+    return {
+      issues: [],
+      total: 0,
+      startAt: normalizedStartAt,
+      maxResults: normalizedMaxResults,
+      error: `Jira API isteği başarısız: ${err?.message || "Bilinmeyen hata"}`,
+      source: "Jira API"
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function shouldCountSlackMessage(message) {
@@ -5051,10 +5269,91 @@ app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysi
   });
 });
 
-app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"), (req, res) => {
+app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"), async (req, res) => {
+  const shouldFetchReport = req.query.run === "1";
+  const today = getTodayIsoDate();
+  const startDate = normalizeIsoDateInput(req.query.startDate) || getIsoDateDaysAgo(30);
+  const endDate = normalizeIsoDateInput(req.query.endDate) || today;
+  const rawProjectKey = typeof req.query.projectKey === "string" ? req.query.projectKey : "";
+  const normalizedProjectKey = normalizeJiraProjectKey(rawProjectKey);
+  const jql = typeof req.query.jql === "string" ? req.query.jql.trim() : "";
+  const maxResults = toBoundedInt(req.query.maxResults, JIRA_MAX_RESULTS, 1, 200);
+  const jiraBaseUrl = normalizeJiraBaseUrl(JIRA_BASE_URL);
+
+  const filters = {
+    startDate,
+    endDate,
+    projectKey: rawProjectKey ? String(rawProjectKey).trim().toUpperCase() : "",
+    jql,
+    maxResults
+  };
+
+  let report = {
+    requested: shouldFetchReport,
+    jql: "",
+    issues: [],
+    total: 0,
+    startAt: 0,
+    maxResults,
+    source: "",
+    warning: null,
+    error: null
+  };
+
+  if (shouldFetchReport) {
+    const dateValidationError = validateSlackDateRange(startDate, endDate);
+    const missingConfig = [];
+    if (!jiraBaseUrl) missingConfig.push("JIRA_BASE_URL");
+    if (!String(JIRA_EMAIL || "").trim()) missingConfig.push("JIRA_EMAIL");
+    if (!String(JIRA_API_TOKEN || "").trim()) missingConfig.push("JIRA_API_TOKEN");
+
+    if (rawProjectKey && !normalizedProjectKey) {
+      report.error = "Proje anahtarı geçersiz. Örnek: PROJ veya WEB_APP.";
+    } else if (dateValidationError) {
+      report.error = dateValidationError;
+    } else if (missingConfig.length > 0) {
+      report.error = `Jira yapılandırması eksik: ${missingConfig.join(", ")}.`;
+    } else {
+      const effectiveJql = buildJiraJql({
+        projectKey: normalizedProjectKey,
+        startDate,
+        endDate,
+        customJql: jql
+      });
+      const jiraResult = await fetchJiraIssues({
+        baseUrl: jiraBaseUrl,
+        email: JIRA_EMAIL,
+        apiToken: JIRA_API_TOKEN,
+        jql: effectiveJql,
+        maxResults,
+        startAt: 0
+      });
+
+      report = {
+        requested: true,
+        jql: effectiveJql,
+        issues: jiraResult.issues || [],
+        total: Number.isFinite(Number(jiraResult.total)) ? Number(jiraResult.total) : 0,
+        startAt: Number.isFinite(Number(jiraResult.startAt)) ? Number(jiraResult.startAt) : 0,
+        maxResults: Number.isFinite(Number(jiraResult.maxResults)) ? Number(jiraResult.maxResults) : maxResults,
+        source: String(jiraResult.source || "Jira API"),
+        warning: jql
+          ? "Özel JQL kullanıldığı için proje ve tarih filtreleri JQL içeriğine göre değerlendirilir."
+          : null,
+        error: jiraResult.error || null
+      };
+    }
+  }
+
   res.render("reports-jira-analysis", {
     user: req.session.user,
-    active: "jira-analysis"
+    active: "jira-analysis",
+    filters,
+    report,
+    jiraConfig: {
+      baseUrl: jiraBaseUrl,
+      hasConfig: Boolean(jiraBaseUrl && JIRA_EMAIL && JIRA_API_TOKEN)
+    }
   });
 });
 

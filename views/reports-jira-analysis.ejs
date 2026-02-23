@@ -24,18 +24,131 @@
             </span>
             <span>Jira Analiz</span>
           </h1>
-          <p>Jira metrikleri ve raporları bu ekranda gösterilecek.</p>
+          <p>Jira issue verilerini tarih aralığı ve proje filtresiyle listeleyin.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
 
+      <section class="table-card panel-card slack-filter-section">
+        <form class="slack-filter-form jira-filter-form" method="get" action="/reports/jira-analysis">
+          <input type="hidden" name="run" value="1" />
+          <div class="slack-filter-grid">
+            <label class="slack-filter-field">
+              <span>Başlangıç Tarihi</span>
+              <input type="date" name="startDate" value="<%= filters.startDate %>" required />
+            </label>
+            <label class="slack-filter-field">
+              <span>Bitiş Tarihi</span>
+              <input type="date" name="endDate" value="<%= filters.endDate %>" required />
+            </label>
+            <label class="slack-filter-field">
+              <span>Proje Anahtarı</span>
+              <input type="text" name="projectKey" value="<%= filters.projectKey %>" placeholder="WEB" />
+            </label>
+            <label class="slack-filter-field">
+              <span>Kayıt Limiti</span>
+              <input type="number" name="maxResults" min="1" max="200" value="<%= filters.maxResults %>" />
+            </label>
+            <label class="slack-filter-field">
+              <span>Özel JQL (opsiyonel)</span>
+              <input
+                type="text"
+                name="jql"
+                value="<%= filters.jql %>"
+                placeholder='project = "WEB" AND statusCategory != Done ORDER BY updated DESC'
+              />
+            </label>
+          </div>
+          <div class="slack-filter-actions">
+            <button type="submit">Filtrele</button>
+          </div>
+          <div class="slack-loading-message" hidden>Jira kayıtları hazırlanıyor, lütfen bekleyin...</div>
+        </form>
+      </section>
+
+      <% if (!jiraConfig.hasConfig) { %>
+        <div class="alert inline-alert">
+          Jira bağlantısı için `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` ortam değişkenlerini tanımlayın.
+        </div>
+      <% } %>
+
+      <% if (report.warning) { %>
+        <div class="inline-success"><%= report.warning %></div>
+      <% } %>
+
+      <% if (report.error) { %>
+        <div class="alert inline-alert"><%= report.error %></div>
+      <% } %>
+
       <section class="table-card panel-card">
         <div class="table-head">
-          <h2>Hazırlanıyor</h2>
+          <h2>Jira Issue Sonuçları</h2>
+          <div class="table-actions">
+            <span class="pill"><%= report.issues.length %> Kayıt</span>
+            <% if (report.requested) { %>
+              <span class="pill"><%= report.total %> Toplam</span>
+              <span class="pill muted">Limit: <%= report.maxResults %></span>
+            <% } %>
+            <% if (report.source) { %>
+              <span class="pill muted">Kaynak: <%= report.source %></span>
+            <% } %>
+          </div>
         </div>
-        <p class="muted">Bu menü eklendi. Jira bağlantı ve analiz içerikleri sonraki adımda açılacak.</p>
+
+        <% if (report.jql) { %>
+          <p class="muted"><strong>JQL:</strong> <code><%= report.jql %></code></p>
+        <% } %>
+
+        <% if (!report.requested) { %>
+          <p class="muted">Filtreyi doldurup `Filtrele` butonuna basın.</p>
+        <% } %>
+
+        <% if (report.requested && report.issues.length === 0 && !report.error) { %>
+          <p class="muted">Seçilen kriterlerde issue bulunamadı.</p>
+        <% } %>
+
+        <% if (report.requested && report.issues.length > 0) { %>
+          <div class="table-scroll">
+            <table class="jira-issues-table">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Özet</th>
+                  <th>Tip</th>
+                  <th>Durum</th>
+                  <th>Öncelik</th>
+                  <th>Atanan</th>
+                  <th>Oluşturma</th>
+                  <th>Güncelleme</th>
+                  <th>Çözülme</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% report.issues.forEach((item) => { %>
+                  <tr>
+                    <td>
+                      <% if (item.issueUrl) { %>
+                        <a href="<%= item.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= item.key %></a>
+                      <% } else { %>
+                        <%= item.key %>
+                      <% } %>
+                    </td>
+                    <td><%= item.summary %></td>
+                    <td><%= item.issueType %></td>
+                    <td><%= item.status %></td>
+                    <td><%= item.priority %></td>
+                    <td><%= item.assignee %></td>
+                    <td><%= item.createdAt %></td>
+                    <td><%= item.updatedAt %></td>
+                    <td><%= item.resolvedAt %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
       </section>
     </section>
     <script src="/public/app.js" defer></script>
