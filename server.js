@@ -138,6 +138,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "slack-analysis"
   },
   {
+    key: "jira-analysis",
+    type: "item",
+    label: "Jira Analiz",
+    parentKey: "reports",
+    route: "/reports/jira-analysis",
+    routeKey: "jira-analysis",
+    sortOrder: 24,
+    iconKey: "jira-analysis"
+  },
+  {
     key: "management",
     type: "section",
     label: "Yönetim",
@@ -5038,6 +5048,13 @@ app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysi
     },
     report,
     sqlQuery
+  });
+});
+
+app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"), (req, res) => {
+  res.render("reports-jira-analysis", {
+    user: req.session.user,
+    active: "jira-analysis"
   });
 });
 
