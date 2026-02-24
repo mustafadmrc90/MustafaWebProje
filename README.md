@@ -11,12 +11,21 @@ npm run dev
 
 Uygulama: `http://localhost:3000`
 
+`.env` desteği vardır. Hızlı başlangıç:
+
+```bash
+cp .env.example .env
+```
+
 ### Gerekli Ortam Değişkenleri
 
 - `DATABASE_URL` (örnek: `postgres://user:pass@localhost:5432/dashboard`)
 - `SESSION_SECRET`
+- `SLACK_BOT_TOKEN` (Slack analiz için gerekli)
 - `SLACK_ANALYSIS_AUTO_SAVE_TIME` (opsiyonel, varsayılan: `23:59`, format: `HH:MM`)
   - Sunucu uyku/kapalı kalırsa açıldığında kaçırılan günler otomatik yakalanıp SQL'e kaydedilir.
+- `SLACK_CORP_REQUEST_TAG` (opsiyonel, varsayılan: `@corpproduct`)
+- `SLACK_CORP_REQUEST_CHANNELS` (opsiyonel, virgül ile kanal adı/id listesi; boşsa tüm taranan kanallar)
 
 ### Opsiyonel Jira Analiz Ortam Değişkenleri
 

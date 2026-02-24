@@ -2733,8 +2733,19 @@ function normalizeSlackChannelTypes(raw) {
 }
 
 function getSlackReplyReportCacheKey(startDate, endDate) {
-  const version = "v3";
-  return `${version}__${startDate || ""}__${endDate || ""}__${SLACK_SELECTED_USERS.map((item) => item.id).join(",")}`;
+  const version = "v4";
+  const channelTypes = normalizeSlackChannelTypes(SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
+  const corpChannels = Array.from(SLACK_CORP_REQUEST_CHANNEL_FILTER.values()).sort((a, b) => a.localeCompare(b, "tr"));
+  return [
+    version,
+    startDate || "",
+    endDate || "",
+    SLACK_SELECTED_USERS.map((item) => item.id).join(","),
+    channelTypes,
+    String(SLACK_ANALYSIS_MAX_CHANNELS || ""),
+    String(SLACK_CORP_REQUEST_TAG || ""),
+    corpChannels.join(",")
+  ].join("__");
 }
 
 function getCachedSlackReplyReport(cacheKey) {
@@ -3089,7 +3100,14 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     threadsScanned: 0
   };
 
-  const limitedChannels = channels.slice(0, maxChannels);
+  const prioritizedChannels = channels
+    .slice()
+    .sort((a, b) => {
+      const matchA = shouldApplyCorpRequestRuleForChannel(a?.id, a?.name) ? 1 : 0;
+      const matchB = shouldApplyCorpRequestRuleForChannel(b?.id, b?.name) ? 1 : 0;
+      return matchB - matchA;
+    });
+  const limitedChannels = prioritizedChannels.slice(0, maxChannels);
   const skippedByChannelLimit = Math.max(0, channels.length - limitedChannels.length);
 
   await runWithConcurrency(
