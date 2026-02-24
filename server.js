@@ -108,6 +108,7 @@ const SLACK_CORP_REQUEST_TAG = String(process.env.SLACK_CORP_REQUEST_TAG || "@co
   .trim()
   .toLowerCase();
 const SLACK_CORP_REQUEST_CHANNELS_RAW = String(process.env.SLACK_CORP_REQUEST_CHANNELS || "").trim();
+const SLACK_REQUIRED_CHANNEL_COLUMNS = ["sales-corpcx"];
 const JIRA_BASE_URL = String(process.env.JIRA_BASE_URL || "").trim();
 const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
@@ -2749,6 +2750,14 @@ function getPreferredSlackChannelFilterLabels(filterSet, channels = []) {
 
 const SLACK_CORP_REQUEST_CHANNEL_FILTER = parseSlackChannelFilter(SLACK_CORP_REQUEST_CHANNELS_RAW);
 
+function getMandatorySlackChannelColumns(channels = []) {
+  const mergedFilter = new Set([
+    ...Array.from(SLACK_CORP_REQUEST_CHANNEL_FILTER.values()),
+    ...SLACK_REQUIRED_CHANNEL_COLUMNS.map((item) => normalizeSlackChannelLabel(item).toLowerCase()).filter(Boolean)
+  ]);
+  return getPreferredSlackChannelFilterLabels(mergedFilter, channels);
+}
+
 function shouldApplyCorpRequestRuleForChannel(channelId, channelName) {
   if (!SLACK_CORP_REQUEST_CHANNEL_FILTER.size) return true;
   const id = normalizeSlackChannelLabel(channelId).toLowerCase();
@@ -2775,9 +2784,10 @@ function normalizeSlackChannelTypes(raw) {
 }
 
 function getSlackReplyReportCacheKey(startDate, endDate) {
-  const version = "v5";
+  const version = "v6";
   const channelTypes = normalizeSlackChannelTypes(SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
   const corpChannels = Array.from(SLACK_CORP_REQUEST_CHANNEL_FILTER.values()).sort((a, b) => a.localeCompare(b, "tr"));
+  const requiredColumns = SLACK_REQUIRED_CHANNEL_COLUMNS.slice().sort((a, b) => a.localeCompare(b, "tr"));
   return [
     version,
     startDate || "",
@@ -2786,7 +2796,8 @@ function getSlackReplyReportCacheKey(startDate, endDate) {
     channelTypes,
     String(SLACK_ANALYSIS_MAX_CHANNELS || ""),
     String(SLACK_CORP_REQUEST_TAG || ""),
-    corpChannels.join(",")
+    corpChannels.join(","),
+    requiredColumns.join(",")
   ].join("__");
 }
 
@@ -2985,6 +2996,11 @@ function buildSlackReplyReportModel({
       });
       channelReplyByUserId.set(userId, channelMap);
     }
+  });
+
+  getMandatorySlackChannelColumns().forEach((channelName) => {
+    const normalizedName = normalizeSlackChannelLabel(channelName);
+    if (normalizedName) channelColumnsSet.add(normalizedName);
   });
 
   const channelColumns = Array.from(channelColumnsSet).sort((a, b) => a.localeCompare(b, "tr"));
@@ -3324,10 +3340,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const requestCountByUserId = new Map(
     SLACK_SELECTED_USERS.map((item) => [item.id, totalRequestCount])
   );
-  const preferredChannelColumns = getPreferredSlackChannelFilterLabels(
-    SLACK_CORP_REQUEST_CHANNEL_FILTER,
-    channels
-  );
+  const preferredChannelColumns = getMandatorySlackChannelColumns(channels);
   const channelColumnsSet = new Set(channelRequestCountByName.keys());
   preferredChannelColumns.forEach((channelName) => {
     const normalizedName = normalizeSlackChannelLabel(channelName);
