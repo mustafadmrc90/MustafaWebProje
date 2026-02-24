@@ -3109,8 +3109,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       const shouldApplyCorpTagRule = shouldApplyCorpRequestRuleForChannel(channelId, channelName);
 
       metrics.channelsScanned += 1;
-      if (channelName) {
-        scannedChannelNames.add(channelName);
+      if (channelLabel) {
+        scannedChannelNames.add(channelLabel);
       }
 
       let messagesResult;
@@ -3265,6 +3265,10 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     SLACK_SELECTED_USERS.map((item) => [item.id, totalRequestCount])
   );
   const channelColumnsSet = new Set(channelRequestCountByName.keys());
+  scannedChannelNames.forEach((channelName) => {
+    const normalizedName = normalizeSlackChannelLabel(channelName);
+    if (normalizedName) channelColumnsSet.add(normalizedName);
+  });
   channelReplyByUserId.forEach((channelMap) => {
     if (!(channelMap instanceof Map)) return;
     channelMap.forEach((_, channelName) => {
