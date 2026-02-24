@@ -2645,7 +2645,7 @@ function normalizeSlackChannelTypes(raw) {
 }
 
 function getSlackReplyReportCacheKey(startDate, endDate) {
-  const version = "v2";
+  const version = "v3";
   return `${version}__${startDate || ""}__${endDate || ""}__${SLACK_SELECTED_USERS.map((item) => item.id).join(",")}`;
 }
 
@@ -2971,8 +2971,10 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
         if (shouldCountSlackMessage(message)) {
           const messageTs = String(message.ts || "").trim();
           const threadTs = String(message.thread_ts || "").trim();
+          const messageUserId = String(message.user || "").trim();
           const isThreadReply = Boolean(threadTs && threadTs !== messageTs);
-          if (messageTs && !isThreadReply) {
+          // Talep sayısına sadece seçili 7 kişi dışındaki kullanıcıların başlattığı konuşmaları dahil et.
+          if (messageTs && !isThreadReply && messageUserId && !selectedIds.has(messageUserId)) {
             const requestKey = `${channelId}:${messageTs}`;
             if (!seenRequestMessages.has(requestKey)) {
               seenRequestMessages.add(requestKey);
