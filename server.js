@@ -1266,7 +1266,7 @@ function normalizeAllCompaniesReportRows(rows) {
   const reportColumns = [
     "id",
     "code",
-    "name",
+    "source",
     "obilet-partner-id",
     "biletall-partner-id",
     "tradename",
@@ -1296,7 +1296,9 @@ function normalizeAllCompaniesReportRows(rows) {
         ])
       ),
       code: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["code"])),
-      name: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["name"])),
+      source: formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, ["source", "source_cluster", "sourcecluster", "cluster"])
+      ),
       "obilet-partner-id": formatPartnerCellValue(
         readPartnerRawValueByAliases(row, [
           "obilet-partner-id",
