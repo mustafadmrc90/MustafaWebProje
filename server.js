@@ -57,6 +57,7 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL || "120", 10) || 120;
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
+const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
 const JIRA_BASE_URL = String(process.env.JIRA_BASE_URL || "").trim();
 const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
@@ -184,6 +185,10 @@ const SIDEBAR_MENU_REGISTRY = [
   }
 ];
 const slackReplyReportCache = new Map();
+const slackAutoSaveState = {
+  timerId: null,
+  isRunning: false
+};
 
 if (!process.env.DATABASE_URL) {
   console.warn("DATABASE_URL is not set. Add it to your environment.");
@@ -469,9 +474,13 @@ async function initDb() {
   await syncSidebarMenusAndPermissions();
 }
 
-initDb().catch((err) => {
-  console.error("DB init error:", err);
-});
+initDb()
+  .then(() => {
+    startSlackAutoSaveScheduler();
+  })
+  .catch((err) => {
+    console.error("DB init error:", err);
+  });
 
 function toSidebarBool(value, fallback = true) {
   if (value === null || value === undefined) return fallback;
@@ -3254,7 +3263,14 @@ async function fetchSlackSavedReports({ startDate, endDate, limit = 25 }) {
   }
 }
 
-async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId, totalRequests = null }) {
+async function saveSlackReplyReportToDb({
+  startDate,
+  endDate,
+  rows,
+  userId,
+  totalRequests = null,
+  source = "slack-analysis-ui"
+}) {
   const normalizedReport = buildSlackReplyReportModel({
     requested: true,
     rows,
@@ -3303,7 +3319,7 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId, tota
             updated_at = now()
           WHERE id = $1
         `,
-        [runId, normalizedTotalRequests, totalReplies, normalizedRows.length, "slack-analysis-ui", saveCount]
+        [runId, normalizedTotalRequests, totalReplies, normalizedRows.length, source, saveCount]
       );
 
       await client.query(
@@ -3336,7 +3352,7 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId, tota
           totalReplies,
           normalizedRows.length,
           1,
-          "slack-analysis-ui",
+          source,
           ownerId
         ]
       );
@@ -3375,6 +3391,222 @@ async function saveSlackReplyReportToDb({ startDate, endDate, rows, userId, tota
   } finally {
     client.release();
   }
+}
+
+function parseSlackAutoSaveTime(value) {
+  const raw = String(value || "").trim();
+  const matched = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!matched) {
+    return { hour: 23, minute: 59, normalized: "23:59", valid: false };
+  }
+  const hour = Number.parseInt(matched[1], 10);
+  const minute = Number.parseInt(matched[2], 10);
+  return {
+    hour,
+    minute,
+    normalized: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    valid: true
+  };
+}
+
+function formatDateToIsoLocal(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function shiftIsoDateByDays(isoDate, dayDelta) {
+  const normalized = normalizeIsoDateInput(isoDate);
+  if (!normalized) return "";
+  const [yearRaw, monthRaw, dayRaw] = normalized.split("-");
+  const year = Number.parseInt(yearRaw, 10);
+  const month = Number.parseInt(monthRaw, 10);
+  const day = Number.parseInt(dayRaw, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
+
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + (Number.parseInt(dayDelta, 10) || 0));
+  return formatDateToIsoLocal(date);
+}
+
+function isSlackAutoSaveDueForToday(parsedTime, now = new Date()) {
+  const hour = Number.parseInt(parsedTime?.hour, 10);
+  const minute = Number.parseInt(parsedTime?.minute, 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+
+  if (now.getHours() > hour) return true;
+  if (now.getHours() === hour && now.getMinutes() >= minute) return true;
+  return false;
+}
+
+function getDueSlackAutoSaveLimitDate(parsedTime, now = new Date()) {
+  const today = formatDateToIsoLocal(now);
+  if (!today) return "";
+  if (isSlackAutoSaveDueForToday(parsedTime, now)) return today;
+  return shiftIsoDateByDays(today, -1);
+}
+
+async function getLatestAutoSlackSavedDate() {
+  const result = await pool.query(
+    `
+      SELECT MAX(start_date) AS latest_date
+      FROM slack_reply_analysis_runs
+      WHERE source = $1
+        AND created_by IS NULL
+        AND start_date = end_date
+    `,
+    ["slack-analysis-auto"]
+  );
+  const rawDate = normalizeSqlDateValue(result.rows[0]?.latest_date || "");
+  return normalizeIsoDateInput(rawDate);
+}
+
+async function getPendingSlackAutoSaveDates(parsedTime, now = new Date()) {
+  const dueLimitDate = getDueSlackAutoSaveLimitDate(parsedTime, now);
+  if (!dueLimitDate) return [];
+
+  const latestSavedDate = await getLatestAutoSlackSavedDate();
+  let startDate = dueLimitDate;
+
+  if (latestSavedDate) {
+    const nextDate = shiftIsoDateByDays(latestSavedDate, 1);
+    if (nextDate) {
+      startDate = nextDate;
+    }
+  }
+
+  if (startDate > dueLimitDate) return [];
+
+  const pendingDates = [];
+  let cursor = startDate;
+  while (cursor && cursor <= dueLimitDate) {
+    pendingDates.push(cursor);
+    const nextDate = shiftIsoDateByDays(cursor, 1);
+    if (!nextDate || nextDate === cursor) break;
+    cursor = nextDate;
+  }
+  return pendingDates;
+}
+
+async function hasAutoSlackSaveRunForDate(targetDate) {
+  const normalizedDate = normalizeIsoDateInput(targetDate);
+  if (!normalizedDate) return false;
+  const result = await pool.query(
+    `
+      SELECT id
+      FROM slack_reply_analysis_runs
+      WHERE start_date = $1
+        AND end_date = $1
+        AND source = $2
+        AND created_by IS NULL
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [normalizedDate, "slack-analysis-auto"]
+  );
+  return Boolean(result.rows[0]?.id);
+}
+
+async function runSlackAutoSaveForDate(targetDate) {
+  const normalizedDate = normalizeIsoDateInput(targetDate);
+  if (!normalizedDate) {
+    throw new Error("Geçersiz tarih.");
+  }
+
+  const alreadySaved = await hasAutoSlackSaveRunForDate(normalizedDate);
+  if (alreadySaved) {
+    return {
+      skipped: true,
+      reason: "Kayıt zaten mevcut."
+    };
+  }
+
+  const cacheKey = getSlackReplyReportCacheKey(normalizedDate, normalizedDate);
+  slackReplyReportCache.delete(cacheKey);
+  const report = await fetchSlackReplyReportForRange(normalizedDate, normalizedDate);
+  if (report.error) {
+    throw new Error(report.error);
+  }
+  if (!Array.isArray(report.rows)) {
+    throw new Error("Rapor satırları okunamadı.");
+  }
+
+  const saveResult = await saveSlackReplyReportToDb({
+    startDate: normalizedDate,
+    endDate: normalizedDate,
+    rows: report.rows,
+    totalRequests: report.totalRequests,
+    userId: null,
+    source: "slack-analysis-auto"
+  });
+
+  return {
+    skipped: false,
+    saveResult
+  };
+}
+
+function startSlackAutoSaveScheduler() {
+  const parsedTime = parseSlackAutoSaveTime(SLACK_ANALYSIS_AUTO_SAVE_TIME);
+  if (!parsedTime.valid) {
+    console.warn(
+      `[SlackAutoSave] SLACK_ANALYSIS_AUTO_SAVE_TIME değeri geçersiz (${SLACK_ANALYSIS_AUTO_SAVE_TIME}). 23:59 kullanılacak.`
+    );
+  }
+
+  const schedulerLabel = `${String(parsedTime.hour).padStart(2, "0")}:${String(parsedTime.minute).padStart(2, "0")}`;
+  console.log(`[SlackAutoSave] Günlük otomatik SQL kaydı aktif. Saat: ${schedulerLabel}`);
+
+  const tick = async () => {
+    if (slackAutoSaveState.isRunning) return;
+
+    slackAutoSaveState.isRunning = true;
+    try {
+      const pendingDates = await getPendingSlackAutoSaveDates(parsedTime, new Date());
+      if (!pendingDates.length) return;
+
+      const preview = pendingDates.slice(0, 5).join(", ");
+      const extraCount = Math.max(0, pendingDates.length - 5);
+      console.log(
+        `[SlackAutoSave] Bekleyen ${pendingDates.length} gün bulundu: ${preview}${extraCount > 0 ? ` (+${extraCount})` : ""}`
+      );
+
+      for (const targetDate of pendingDates) {
+        try {
+          const result = await runSlackAutoSaveForDate(targetDate);
+          if (result.skipped) {
+            console.log(`[SlackAutoSave] ${targetDate} için otomatik kayıt atlandı: ${result.reason}`);
+          } else {
+            console.log(
+              `[SlackAutoSave] ${targetDate} otomatik kaydedildi. Kayıt No: ${result.saveResult.runId} | Talep: ${result.saveResult.totalRequests} | Yanıt: ${result.saveResult.totalReplies}`
+            );
+          }
+        } catch (err) {
+          console.error(`[SlackAutoSave] ${targetDate} otomatik kayıt hatası: ${err?.message || "Bilinmeyen hata"}`);
+          break;
+        }
+      }
+    } finally {
+      slackAutoSaveState.isRunning = false;
+    }
+  };
+
+  if (slackAutoSaveState.timerId) {
+    clearInterval(slackAutoSaveState.timerId);
+    slackAutoSaveState.timerId = null;
+  }
+
+  slackAutoSaveState.timerId = setInterval(() => {
+    tick().catch((err) => {
+      console.error(`[SlackAutoSave] scheduler tick hatası: ${err?.message || "Bilinmeyen hata"}`);
+    });
+  }, 60000);
+
+  tick().catch((err) => {
+    console.error(`[SlackAutoSave] başlangıç kontrol hatası: ${err?.message || "Bilinmeyen hata"}`);
+  });
 }
 
 function stringifyPayload(payload) {

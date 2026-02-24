@@ -15,6 +15,8 @@ Uygulama: `http://localhost:3000`
 
 - `DATABASE_URL` (örnek: `postgres://user:pass@localhost:5432/dashboard`)
 - `SESSION_SECRET`
+- `SLACK_ANALYSIS_AUTO_SAVE_TIME` (opsiyonel, varsayılan: `23:59`, format: `HH:MM`)
+  - Sunucu uyku/kapalı kalırsa açıldığında kaçırılan günler otomatik yakalanıp SQL'e kaydedilir.
 
 ### Opsiyonel Jira Analiz Ortam Değişkenleri
 
