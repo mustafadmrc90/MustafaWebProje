@@ -1,10 +1,56 @@
 const path = require("path");
+const fsSync = require("fs");
 const fs = require("fs/promises");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 const pgSession = require("connect-pg-simple")(session);
+
+function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
+  try {
+    if (!fsSync.existsSync(filePath)) return;
+    const raw = fsSync.readFileSync(filePath, "utf8");
+    const lines = String(raw || "")
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/);
+
+    for (const line of lines) {
+      const trimmed = String(line || "").trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const normalizedLine = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+      const eqIndex = normalizedLine.indexOf("=");
+      if (eqIndex <= 0) continue;
+
+      const key = normalizedLine.slice(0, eqIndex).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+      if (process.env[key] !== undefined) continue;
+
+      let value = normalizedLine.slice(eqIndex + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        const quote = value[0];
+        value = value.slice(1, -1);
+        if (quote === '"') {
+          value = value
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "\r")
+            .replace(/\\t/g, "\t")
+            .replace(/\\\"/g, '"')
+            .replace(/\\\\/g, "\\");
+        }
+      }
+
+      process.env[key] = value;
+    }
+  } catch (err) {
+    console.warn(`.env okunamadı: ${err?.message || "Bilinmeyen hata"}`);
+  }
+}
+
+loadLocalEnvFile();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +104,10 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
 const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
+const SLACK_CORP_REQUEST_TAG = String(process.env.SLACK_CORP_REQUEST_TAG || "@corpproduct")
+  .trim()
+  .toLowerCase();
+const SLACK_CORP_REQUEST_CHANNELS_RAW = String(process.env.SLACK_CORP_REQUEST_CHANNELS || "").trim();
 const JIRA_BASE_URL = String(process.env.JIRA_BASE_URL || "").trim();
 const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
@@ -2643,6 +2693,35 @@ function toBoundedInt(value, fallback, min, max) {
   return parsed;
 }
 
+function normalizeSlackChannelLabel(value) {
+  return String(value || "").trim();
+}
+
+function parseSlackChannelFilter(raw) {
+  const parsed = String(raw || "")
+    .split(",")
+    .map((item) => normalizeSlackChannelLabel(item).toLowerCase())
+    .filter(Boolean);
+  return new Set(parsed);
+}
+
+const SLACK_CORP_REQUEST_CHANNEL_FILTER = parseSlackChannelFilter(SLACK_CORP_REQUEST_CHANNELS_RAW);
+
+function shouldApplyCorpRequestRuleForChannel(channelId, channelName) {
+  if (!SLACK_CORP_REQUEST_CHANNEL_FILTER.size) return true;
+  const id = normalizeSlackChannelLabel(channelId).toLowerCase();
+  const name = normalizeSlackChannelLabel(channelName).toLowerCase();
+  return SLACK_CORP_REQUEST_CHANNEL_FILTER.has(id) || SLACK_CORP_REQUEST_CHANNEL_FILTER.has(name);
+}
+
+function messageContainsCorpRequestTag(message, tagValue = SLACK_CORP_REQUEST_TAG) {
+  const tag = String(tagValue || "").trim().toLowerCase();
+  if (!tag) return false;
+  const text = String(message?.text || "").trim().toLowerCase();
+  if (!text) return false;
+  return text.includes(tag);
+}
+
 function normalizeSlackChannelTypes(raw) {
   const allowed = new Set(["public_channel", "private_channel", "mpim", "im"]);
   const tokens = String(raw || "")
@@ -2776,15 +2855,31 @@ async function listSlackThreadRepliesForAnalysis(token, channelId, threadTs, old
 function buildSlackReplyRowsFromCounts(
   replyCountByUserId,
   requestCountByUserId = new Map(),
-  nameByUserId = new Map()
+  nameByUserId = new Map(),
+  channelReplyByUserId = new Map(),
+  channelColumns = []
 ) {
-  return SLACK_SELECTED_USERS.map((selected) => ({
-    userId: selected.id,
-    name: String(nameByUserId.get(selected.id) || selected.name || "").trim() || selected.id,
-    requestCount: toCountInteger(requestCountByUserId.get(selected.id) || 0),
-    replyCount: toCountInteger(replyCountByUserId.get(selected.id) || 0),
-    count: toCountInteger(replyCountByUserId.get(selected.id) || 0)
-  })).sort(
+  const normalizedChannelColumns = (Array.isArray(channelColumns) ? channelColumns : [])
+    .map((item) => normalizeSlackChannelLabel(item))
+    .filter(Boolean);
+
+  return SLACK_SELECTED_USERS.map((selected) => {
+    const channelReplyMapRaw = channelReplyByUserId.get(selected.id);
+    const channelReplyMap = channelReplyMapRaw instanceof Map ? channelReplyMapRaw : new Map();
+    const channelReplyCounts = {};
+    normalizedChannelColumns.forEach((channelName) => {
+      channelReplyCounts[channelName] = toCountInteger(channelReplyMap.get(channelName) || 0);
+    });
+
+    return {
+      userId: selected.id,
+      name: String(nameByUserId.get(selected.id) || selected.name || "").trim() || selected.id,
+      requestCount: toCountInteger(requestCountByUserId.get(selected.id) || 0),
+      replyCount: toCountInteger(replyCountByUserId.get(selected.id) || 0),
+      count: toCountInteger(replyCountByUserId.get(selected.id) || 0),
+      channelReplyCounts
+    };
+  }).sort(
     (a, b) =>
       b.replyCount - a.replyCount || b.requestCount - a.requestCount || a.name.localeCompare(b.name, "tr")
   );
@@ -2805,6 +2900,8 @@ function buildSlackReplyReportModel({
   const replyCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const requestCountByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, 0]));
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
+  const channelReplyByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, new Map()]));
+  const channelColumnsSet = new Set();
 
   providedRows.forEach((row) => {
     const userId = String(row?.userId || row?.user_id || row?.id || "").trim();
@@ -2817,10 +2914,35 @@ function buildSlackReplyReportModel({
     if (nameText) {
       nameByUserId.set(userId, nameText);
     }
+
+    const rawChannelCounts =
+      row?.channelReplyCounts && typeof row.channelReplyCounts === "object"
+        ? row.channelReplyCounts
+        : row?.channel_reply_counts && typeof row.channel_reply_counts === "object"
+          ? row.channel_reply_counts
+          : null;
+
+    if (rawChannelCounts) {
+      const channelMap = channelReplyByUserId.get(userId) || new Map();
+      Object.entries(rawChannelCounts).forEach(([rawChannelName, rawCount]) => {
+        const channelName = normalizeSlackChannelLabel(rawChannelName);
+        if (!channelName) return;
+        channelMap.set(channelName, toCountInteger(rawCount));
+        channelColumnsSet.add(channelName);
+      });
+      channelReplyByUserId.set(userId, channelMap);
+    }
   });
 
+  const channelColumns = Array.from(channelColumnsSet).sort((a, b) => a.localeCompare(b, "tr"));
   const normalizedRows = hasProvidedRows
-    ? buildSlackReplyRowsFromCounts(replyCountByUserId, requestCountByUserId, nameByUserId)
+    ? buildSlackReplyRowsFromCounts(
+      replyCountByUserId,
+      requestCountByUserId,
+      nameByUserId,
+      channelReplyByUserId,
+      channelColumns
+    )
     : [];
   const computedTotalRequests = normalizedRows.reduce((sum, row) => sum + row.requestCount, 0);
   const normalizedTotalRequests =
@@ -2828,6 +2950,13 @@ function buildSlackReplyReportModel({
       ? computedTotalRequests
       : toCountInteger(totalRequests);
   const totalReplies = normalizedRows.reduce((sum, row) => sum + row.replyCount, 0);
+  const channelReplyTotals = {};
+  channelColumns.forEach((channelName) => {
+    channelReplyTotals[channelName] = normalizedRows.reduce(
+      (sum, row) => sum + toCountInteger(row?.channelReplyCounts?.[channelName] || 0),
+      0
+    );
+  });
 
   const normalizedMeta = {
     channelsTotal: Number.isFinite(Number(meta?.channelsTotal)) ? Number(meta.channelsTotal) : 0,
@@ -2844,7 +2973,9 @@ function buildSlackReplyReportModel({
     source: String(source || ""),
     notice: notice ? String(notice) : null,
     error: error ? String(error) : null,
-    meta: normalizedMeta
+    meta: normalizedMeta,
+    channelColumns,
+    channelReplyTotals
   };
 }
 
@@ -2894,6 +3025,26 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   let totalRequestCount = 0;
   const nameByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, item.name]));
   const seenRequestMessages = new Set();
+  const channelReplyByUserId = new Map(SLACK_SELECTED_USERS.map((item) => [item.id, new Map()]));
+  const channelRequestCountByName = new Map();
+
+  const addChannelRequestCount = (channelName, count = 1) => {
+    const normalizedName = normalizeSlackChannelLabel(channelName);
+    if (!normalizedName) return;
+    channelRequestCountByName.set(
+      normalizedName,
+      (channelRequestCountByName.get(normalizedName) || 0) + toCountInteger(count)
+    );
+  };
+
+  const addChannelReplyCount = (userId, channelName, count = 1) => {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedName = normalizeSlackChannelLabel(channelName);
+    if (!normalizedUserId || !normalizedName || !selectedIds.has(normalizedUserId)) return;
+    const userMap = channelReplyByUserId.get(normalizedUserId) || new Map();
+    userMap.set(normalizedName, (userMap.get(normalizedName) || 0) + toCountInteger(count));
+    channelReplyByUserId.set(normalizedUserId, userMap);
+  };
 
   let channels = [];
   try {
@@ -2929,6 +3080,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   let runtimeStopped = false;
   let runtimeSkippedChannels = 0;
   const scannedChannelNames = new Set();
+  let corpTaggedRequestCount = 0;
+  let corpFirstResponderCount = 0;
 
   const metrics = {
     channelsTotal: channels.length,
@@ -2952,6 +3105,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       const channelId = String(channel?.id || "").trim();
       const channelName = String(channel?.name || channelId || "").trim();
       if (!channelId) return;
+      const channelLabel = normalizeSlackChannelLabel(channelName || channelId);
+      const shouldApplyCorpTagRule = shouldApplyCorpRequestRuleForChannel(channelId, channelName);
 
       metrics.channelsScanned += 1;
       if (channelName) {
@@ -2976,6 +3131,51 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
         historyTruncatedChannels += 1;
       }
 
+      if (shouldApplyCorpTagRule && SLACK_CORP_REQUEST_TAG) {
+        const timelineMessages = (messagesResult.messages || [])
+          .filter((message) => String(message?.ts || "").trim())
+          .slice()
+          .sort((a, b) => {
+            const tsA = Number.parseFloat(String(a?.ts || "0"));
+            const tsB = Number.parseFloat(String(b?.ts || "0"));
+            return tsA - tsB;
+          });
+        const pendingCorpTagRequests = [];
+
+        for (const message of timelineMessages) {
+          const messageTs = String(message?.ts || "").trim();
+          const messageTsNum = Number.parseFloat(messageTs || "0");
+          if (!messageTs || !Number.isFinite(messageTsNum)) continue;
+
+          const userId = String(message?.user || "").trim();
+          if (pendingCorpTagRequests.length > 0 && shouldCountSlackMessage(message) && selectedIds.has(userId)) {
+            const pendingRequest = pendingCorpTagRequests[0];
+            if (messageTsNum > pendingRequest.tsNum) {
+              pendingCorpTagRequests.shift();
+              replyCountByUserId.set(userId, (replyCountByUserId.get(userId) || 0) + 1);
+              addChannelReplyCount(userId, channelLabel, 1);
+              corpFirstResponderCount += 1;
+            }
+          }
+
+          if (!messageContainsCorpRequestTag(message)) continue;
+
+          const corpRequestKey = `${channelId}:corp-tag:${messageTs}`;
+          const baseRequestKey = `${channelId}:${messageTs}`;
+          if (seenRequestMessages.has(corpRequestKey) || seenRequestMessages.has(baseRequestKey)) {
+            continue;
+          }
+
+          seenRequestMessages.add(corpRequestKey);
+          totalRequestCount += 1;
+          corpTaggedRequestCount += 1;
+          addChannelRequestCount(channelLabel, 1);
+          pendingCorpTagRequests.push({
+            tsNum: messageTsNum
+          });
+        }
+      }
+
       const threadRoots = (messagesResult.messages || []).filter((message) => {
         if (shouldCountSlackMessage(message)) {
           const messageTs = String(message.ts || "").trim();
@@ -2988,6 +3188,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
             if (!seenRequestMessages.has(requestKey)) {
               seenRequestMessages.add(requestKey);
               totalRequestCount += 1;
+              addChannelRequestCount(channelLabel, 1);
             }
           }
         }
@@ -3046,6 +3247,7 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
 
           for (const userId of uniqueUsersInThread) {
             replyCountByUserId.set(userId, (replyCountByUserId.get(userId) || 0) + 1);
+            addChannelReplyCount(userId, channelLabel, 1);
           }
         },
         isDeadlineExceeded
@@ -3062,7 +3264,22 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const requestCountByUserId = new Map(
     SLACK_SELECTED_USERS.map((item) => [item.id, totalRequestCount])
   );
-  const rows = buildSlackReplyRowsFromCounts(replyCountByUserId, requestCountByUserId, nameByUserId);
+  const channelColumnsSet = new Set(channelRequestCountByName.keys());
+  channelReplyByUserId.forEach((channelMap) => {
+    if (!(channelMap instanceof Map)) return;
+    channelMap.forEach((_, channelName) => {
+      const normalizedName = normalizeSlackChannelLabel(channelName);
+      if (normalizedName) channelColumnsSet.add(normalizedName);
+    });
+  });
+  const channelColumns = Array.from(channelColumnsSet).sort((a, b) => a.localeCompare(b, "tr"));
+  const rows = buildSlackReplyRowsFromCounts(
+    replyCountByUserId,
+    requestCountByUserId,
+    nameByUserId,
+    channelReplyByUserId,
+    channelColumns
+  );
   const noticeParts = [];
 
   if (runtimeStopped) {
@@ -3089,6 +3306,9 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     noticeParts.push(
       `${warningCount} kanal/thread çağrısı hatalı. ${warningSamples[0] ? `İlk hata: ${warningSamples[0]}` : ""}`
     );
+  }
+  if (corpTaggedRequestCount > 0 || corpFirstResponderCount > 0) {
+    noticeParts.push(`@corpproduct Talep: ${corpTaggedRequestCount}, İlk Yanıt: ${corpFirstResponderCount}`);
   }
 
   const channelNames = Array.from(scannedChannelNames)

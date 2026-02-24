@@ -100,6 +100,9 @@
               <thead>
                 <tr>
                   <th>Kullanıcı</th>
+                  <% (report.channelColumns || []).forEach((channelName) => { %>
+                    <th><%= channelName %></th>
+                  <% }) %>
                   <th>Talep Sayısı</th>
                   <th>Yanıt Sayısı</th>
                 </tr>
@@ -108,6 +111,9 @@
                 <% report.rows.forEach((row) => { %>
                   <tr>
                     <td title="<%= row.userId %>"><%= row.name %></td>
+                    <% (report.channelColumns || []).forEach((channelName) => { %>
+                      <td><%= formatter.format(row.channelReplyCounts?.[channelName] || 0) %></td>
+                    <% }) %>
                     <td><%= formatter.format(row.requestCount) %></td>
                     <td><%= formatter.format(row.replyCount) %></td>
                   </tr>
@@ -116,6 +122,9 @@
               <tfoot>
                 <tr>
                   <td>Dip Toplam</td>
+                  <% (report.channelColumns || []).forEach((channelName) => { %>
+                    <td><%= formatter.format(report.channelReplyTotals?.[channelName] || 0) %></td>
+                  <% }) %>
                   <td><%= formatter.format(report.totalRequests) %></td>
                   <td><%= formatter.format(report.totalReplies) %></td>
                 </tr>

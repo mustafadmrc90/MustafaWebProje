@@ -2314,7 +2314,7 @@ button.ghost {
 }
 
 .slack-analysis-summary-table {
-  min-width: 420px;
+  min-width: 620px;
 }
 
 .slack-analysis-summary-table th:first-child,
@@ -2323,10 +2323,8 @@ button.ghost {
   white-space: nowrap;
 }
 
-.slack-analysis-summary-table th:nth-child(2),
-.slack-analysis-summary-table td:nth-child(2),
-.slack-analysis-summary-table th:nth-child(3),
-.slack-analysis-summary-table td:nth-child(3) {
+.slack-analysis-summary-table th:not(:first-child),
+.slack-analysis-summary-table td:not(:first-child) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
