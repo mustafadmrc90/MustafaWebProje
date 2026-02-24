@@ -24,7 +24,7 @@
             </span>
             <span>Tüm Firmalar</span>
           </h1>
-          <p>Partner servisinden dönen tüm alanlar kolon bazlı gösterilir.</p>
+          <p>Status=1 kayıtlar sabit kolon yapısıyla listelenir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -64,7 +64,8 @@
                 <% report.rows.forEach((row) => { %>
                   <tr>
                     <% report.columns.forEach((column) => { %>
-                      <td title="<%= row[column] || '' %>"><%= row[column] || "-" %></td>
+                      <% const value = row[column]; %>
+                      <td title="<%= value ?? '' %>"><%= value === undefined || value === null ? "-" : value %></td>
                     <% }) %>
                   </tr>
                 <% }) %>

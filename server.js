@@ -1247,6 +1247,89 @@ function buildPartnerRawColumns(rows) {
   return orderedPreferred.concat(orderedRest);
 }
 
+function readPartnerRawValueByAliases(row, aliases = []) {
+  if (!row || typeof row !== "object") return undefined;
+  const aliasSet = new Set(
+    (Array.isArray(aliases) ? aliases : [])
+      .map((item) => normalizeTokenName(item))
+      .filter(Boolean)
+  );
+  if (aliasSet.size === 0) return undefined;
+
+  for (const [key, value] of Object.entries(row)) {
+    if (aliasSet.has(normalizeTokenName(key))) return value;
+  }
+  return undefined;
+}
+
+function normalizeAllCompaniesReportRows(rows) {
+  const reportColumns = [
+    "id",
+    "code",
+    "name",
+    "obilet-partner-id",
+    "biletall-partner-id",
+    "tradename",
+    "url",
+    "ObusMerkezSubeID"
+  ];
+
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .filter((row) => {
+      const statusRaw = readPartnerRawValueByAliases(row, ["status", "status-code", "status_code"]);
+      return Number(statusRaw) === 1;
+    })
+    .map((row) => ({
+      id: formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, [
+          "id",
+          "partner-id",
+          "partner_id",
+          "partnerid",
+          "partnerId",
+          "partnerID",
+          "provider-id",
+          "provider_id",
+          "providerid",
+          "providerId",
+          "providerID"
+        ])
+      ),
+      code: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["code"])),
+      name: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["name"])),
+      "obilet-partner-id": formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, [
+          "obilet-partner-id",
+          "obilet_partner_id",
+          "obiletpartnerid",
+          "obiletPartnerId",
+          "obiletPartnerID"
+        ])
+      ),
+      "biletall-partner-id": formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, [
+          "biletall-partner-id",
+          "biletall_partner_id",
+          "biletallpartnerid",
+          "biletallPartnerId",
+          "biletallPartnerID"
+        ])
+      ),
+      tradename: formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, ["tradename", "trade-name", "trade_name", "tradeName"])
+      ),
+      url: formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, ["url", "api_url", "apiUrl", "endpoint_url", "endpointUrl", "base_url", "baseUrl"])
+      ),
+      ObusMerkezSubeID: ""
+    }));
+
+  return {
+    columns: reportColumns,
+    rows: normalizedRows
+  };
+}
+
 function normalizeTokenName(value) {
   return String(value || "")
     .toLowerCase()
@@ -2063,14 +2146,9 @@ async function fetchAllPartnerRows() {
       return String(a?.id || "").localeCompare(String(b?.id || ""), "tr");
     });
 
-    const columns = buildPartnerRawColumns(mergedRows);
-    const rows = mergedRows.map((row) => {
-      const normalized = {};
-      columns.forEach((column) => {
-        normalized[column] = formatPartnerCellValue(row[column]);
-      });
-      return normalized;
-    });
+    const normalizedReport = normalizeAllCompaniesReportRows(mergedRows);
+    const columns = normalizedReport.columns;
+    const rows = normalizedReport.rows;
 
     let error = null;
     if (errors.length > 0) {
