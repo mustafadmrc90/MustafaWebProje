@@ -2697,12 +2697,54 @@ function normalizeSlackChannelLabel(value) {
   return String(value || "").trim();
 }
 
+function isLikelySlackChannelId(value) {
+  return /^[cg][a-z0-9]{8,}$/i.test(String(value || "").trim());
+}
+
 function parseSlackChannelFilter(raw) {
   const parsed = String(raw || "")
     .split(",")
     .map((item) => normalizeSlackChannelLabel(item).toLowerCase())
     .filter(Boolean);
   return new Set(parsed);
+}
+
+function getPreferredSlackChannelFilterLabels(filterSet, channels = []) {
+  const values = Array.from(filterSet.values())
+    .map((item) => normalizeSlackChannelLabel(item))
+    .filter(Boolean);
+  if (!values.length) return [];
+
+  const channelNameById = new Map();
+  const channelNameByLower = new Map();
+  (Array.isArray(channels) ? channels : []).forEach((channel) => {
+    const channelId = normalizeSlackChannelLabel(channel?.id).toLowerCase();
+    const channelName = normalizeSlackChannelLabel(channel?.name);
+    if (channelId && channelName) {
+      channelNameById.set(channelId, channelName);
+    }
+    if (channelName) {
+      channelNameByLower.set(channelName.toLowerCase(), channelName);
+    }
+  });
+
+  const seen = new Set();
+  const preferredLabels = [];
+  values.forEach((value) => {
+    const lowerValue = value.toLowerCase();
+    const resolvedLabel = normalizeSlackChannelLabel(
+      (isLikelySlackChannelId(value) ? channelNameById.get(lowerValue) : null)
+      || channelNameByLower.get(lowerValue)
+      || value
+    );
+    if (!resolvedLabel) return;
+    const key = resolvedLabel.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    preferredLabels.push(resolvedLabel);
+  });
+
+  return preferredLabels;
 }
 
 const SLACK_CORP_REQUEST_CHANNEL_FILTER = parseSlackChannelFilter(SLACK_CORP_REQUEST_CHANNELS_RAW);
@@ -2733,7 +2775,7 @@ function normalizeSlackChannelTypes(raw) {
 }
 
 function getSlackReplyReportCacheKey(startDate, endDate) {
-  const version = "v4";
+  const version = "v5";
   const channelTypes = normalizeSlackChannelTypes(SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
   const corpChannels = Array.from(SLACK_CORP_REQUEST_CHANNEL_FILTER.values()).sort((a, b) => a.localeCompare(b, "tr"));
   return [
@@ -3282,7 +3324,15 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const requestCountByUserId = new Map(
     SLACK_SELECTED_USERS.map((item) => [item.id, totalRequestCount])
   );
+  const preferredChannelColumns = getPreferredSlackChannelFilterLabels(
+    SLACK_CORP_REQUEST_CHANNEL_FILTER,
+    channels
+  );
   const channelColumnsSet = new Set(channelRequestCountByName.keys());
+  preferredChannelColumns.forEach((channelName) => {
+    const normalizedName = normalizeSlackChannelLabel(channelName);
+    if (normalizedName) channelColumnsSet.add(normalizedName);
+  });
   scannedChannelNames.forEach((channelName) => {
     const normalizedName = normalizeSlackChannelLabel(channelName);
     if (normalizedName) channelColumnsSet.add(normalizedName);
@@ -3294,7 +3344,14 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       if (normalizedName) channelColumnsSet.add(normalizedName);
     });
   });
-  const channelColumns = Array.from(channelColumnsSet).sort((a, b) => a.localeCompare(b, "tr"));
+  const preferredChannelKeySet = new Set(
+    preferredChannelColumns.map((item) => normalizeSlackChannelLabel(item).toLowerCase()).filter(Boolean)
+  );
+  const remainingChannelColumns = Array.from(channelColumnsSet)
+    .map((item) => normalizeSlackChannelLabel(item))
+    .filter((item) => item && !preferredChannelKeySet.has(item.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, "tr"));
+  const channelColumns = [...preferredChannelColumns, ...remainingChannelColumns];
   const rows = buildSlackReplyRowsFromCounts(
     replyCountByUserId,
     requestCountByUserId,
