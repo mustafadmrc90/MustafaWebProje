@@ -2192,112 +2192,50 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
 
 function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") {
   const map = new Map();
-  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
-
   const partnerIdAliases = [
     "partner-id",
     "partner_id",
     "partnerid",
     "partnerId",
-    "partnerID",
-    "company-id",
-    "company_id",
-    "companyid",
-    "companyId",
-    "companyID",
-    "firm-id",
-    "firm_id",
-    "firmid",
-    "firmId",
-    "firmID",
-    "provider-id",
-    "provider_id",
-    "providerid",
-    "providerId",
-    "providerID",
-    "bus-ticket-provider-id",
-    "bus_ticket_provider_id",
-    "busticketproviderid",
-    "busTicketProviderId",
-    "busTicketProviderID"
+    "partnerID"
   ];
-  const partnerCodeAliases = [
-    "partner-code",
-    "partner_code",
-    "partnercode",
-    "partnerCode",
-    "partnerID",
-    "code",
-    "company-code",
-    "company_code",
-    "companycode",
-    "companyCode"
-  ];
-  const branchIdAliases = ["id", "branch-id", "branch_id", "branchid", "branchId"];
-  const branchNameAliases = [
-    "name",
-    "branch-name",
-    "branch_name",
-    "branchname",
-    "display-name",
-    "display_name",
-    "displayname",
-    "title"
-  ];
-  const inferPartnerIdFromNode = (node) => {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return "";
+  const branchIdAliases = ["id"];
+  const branchNameAliases = ["name"];
+  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
 
-    const explicitPartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
-    if (explicitPartnerId) return explicitPartnerId;
-
-    const idValue = formatPartnerCellValue(readPartnerRawValueByAliases(node, ["id"]));
-    if (!idValue) return "";
-
-    const hasPartnerCode = Boolean(formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerCodeAliases)));
-    const hasBranchCollection = Object.entries(node).some(([key, value]) => {
-      const keyText = String(key || "").toLowerCase();
-      if (!/branch|sube/i.test(keyText)) return false;
-      return Array.isArray(value) || (value && typeof value === "object");
-    });
-    const hasProviderMarker = Object.keys(node).some((key) => /partner|provider|company|firma/i.test(String(key || "")));
-
-    // Branch satırındaki "id" ile firma "id"yi karıştırmamak için yalnızca firma benzeri nodelarda infer et.
-    if (hasPartnerCode || hasBranchCollection || hasProviderMarker) return idValue;
-    return "";
-  };
-
-  const walk = (node, inheritedPartnerId = "") => {
+  const walk = (node) => {
     if (node === null || node === undefined) return;
     if (typeof node === "string") {
       const trimmed = node.trim();
       if (!trimmed) return;
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         const parsed = parseJsonSafe(trimmed);
-        if (parsed !== null) walk(parsed, inheritedPartnerId);
+        if (parsed !== null) walk(parsed);
       }
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((item) => walk(item, inheritedPartnerId));
+      node.forEach((item) => walk(item));
       return;
     }
     if (typeof node !== "object") return;
 
-    const nodePartnerId = inferPartnerIdFromNode(node);
-    const activePartnerId = String(nodePartnerId || inheritedPartnerId || normalizedFallbackPartnerId).trim();
-
     const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
     if (normalizeTokenName(branchName) === "obusmerkez") {
+      const partnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
-      if (branchId && activePartnerId && !map.has(activePartnerId)) {
-        map.set(activePartnerId, branchId);
+      if (partnerId && branchId && !map.has(partnerId)) {
+        map.set(partnerId, branchId);
+      } else if (!partnerId && branchId && normalizedFallbackPartnerId && !map.has(normalizedFallbackPartnerId)) {
+        // Fallback only when API omits partner-id unexpectedly.
+        map.set(normalizedFallbackPartnerId, branchId);
       }
     }
 
-    Object.values(node).forEach((value) => walk(value, activePartnerId));
+    Object.values(node).forEach((value) => walk(value));
   };
 
-  walk(payload, normalizedFallbackPartnerId);
+  walk(payload);
   return map;
 }
 
