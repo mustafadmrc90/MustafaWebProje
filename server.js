@@ -91,6 +91,8 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 );
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER =
+  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "5", 10) || 5;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -1508,10 +1510,12 @@ function extractMembershipTokenDataFromPayload(payload) {
     return text;
   };
 
-  const isLikelyTokenString = (value) => {
+  const isLikelyTokenString = (value, minLen = 8) => {
     const text = normalizeString(value);
     if (!text) return false;
-    if (text.length >= 24) return true;
+    if (/^(null|undefined|true|false)$/i.test(text)) return false;
+    if (/\s/.test(text)) return false;
+    if (text.length >= Math.max(8, minLen)) return true;
     return /^eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}$/.test(text);
   };
 
@@ -1529,20 +1533,40 @@ function extractMembershipTokenDataFromPayload(payload) {
       const normalizedKey = normalizeTokenName(key);
       if (normalizedKey === "token") {
         if (value && typeof value === "object" && !Array.isArray(value)) {
-          const tokenData = normalizeString(value.data || value.value || value.token);
-          if (isLikelyTokenString(tokenData)) return tokenData;
-        } else if (isLikelyTokenString(value)) {
+          const tokenCandidates = [
+            value.data,
+            value.value,
+            value.token,
+            value.access_token,
+            value.accessToken,
+            value.authorization_token,
+            value.authorizationToken,
+            value.bearer,
+            value.jwt,
+            value.id
+          ];
+          for (const candidate of tokenCandidates) {
+            const tokenData = normalizeString(candidate);
+            if (isLikelyTokenString(tokenData, 8)) return tokenData;
+          }
+        } else if (isLikelyTokenString(value, 8)) {
           return normalizeString(value);
         }
       }
 
       if (
+        normalizedKey.includes("token") ||
         normalizedKey === "accesstoken" ||
         normalizedKey === "authorizationtoken" ||
         normalizedKey === "jwttoken" ||
         normalizedKey === "bearertoken"
       ) {
-        if (isLikelyTokenString(value)) return normalizeString(value);
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const tokenData = normalizeString(value.data || value.value || value.token || value.id);
+          if (isLikelyTokenString(tokenData, 8)) return tokenData;
+        } else if (isLikelyTokenString(value, 8)) {
+          return normalizeString(value);
+        }
       }
 
       if (value && typeof value === "object") {
@@ -1556,6 +1580,23 @@ function extractMembershipTokenDataFromPayload(payload) {
 
 function extractTokenFromHeaders(headers) {
   const source = headers && typeof headers === "object" ? headers : {};
+  const directTokenHeader =
+    String(
+      source.token ||
+        source.Token ||
+        source["x-token"] ||
+        source["x-auth-token"] ||
+        source["access-token"] ||
+        source["access_token"] ||
+        source["authorization-token"] ||
+        source["authorization_token"] ||
+        ""
+    ).trim();
+  if (directTokenHeader) {
+    const tokenValue = directTokenHeader.replace(/^Bearer\s+/i, "").trim();
+    if (tokenValue) return tokenValue;
+  }
+
   const authorizationHeader =
     String(
       source.authorization ||
@@ -1575,9 +1616,11 @@ function extractTokenFromHeaders(headers) {
   const cookieHeader =
     String(source["set-cookie"] || source["Set-Cookie"] || source.cookie || source.Cookie || "").trim();
   if (cookieHeader) {
-    const tokenMatch = cookieHeader.match(/(?:^|;\s*)(?:token|access[_-]?token|authorization)\s*=\s*([^;]+)/i);
+    const tokenMatch = cookieHeader.match(/(?:^|[;,]\s*)(?:token|access[_-]?token|authorization)\s*=\s*([^;,\s]+)/i);
     if (tokenMatch && String(tokenMatch[1] || "").trim()) {
-      return String(tokenMatch[1] || "").trim();
+      return String(tokenMatch[1] || "")
+        .trim()
+        .replace(/^"+|"+$/g, "");
     }
   }
 
@@ -2233,11 +2276,15 @@ async function fetchObusMerkezBranchMapForTarget({
   const sessionId = String(loginResult.sessionId || "").trim();
   const deviceId = String(loginResult.deviceId || "").trim();
   const token = String(loginResult.token || "").trim();
-  if (!sessionId || !deviceId || !token) {
+  const missingFields = [];
+  if (!sessionId) missingFields.push("session-id");
+  if (!deviceId) missingFields.push("device-id");
+  if (!token) missingFields.push("token");
+  if (missingFields.length > 0) {
     return {
       cluster,
       map: new Map(),
-      error: "UserLogin sonucu session-id/device-id/token eksik."
+      error: `UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`
     };
   }
 
@@ -2306,18 +2353,16 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
 
   const errors = [];
   const branchByPartnerId = new Map();
-  const clusterTargetsByKey = new Map();
+  const clusterCodesByLabel = new Map();
 
   sourceRows.forEach((row) => {
     const cluster = extractClusterLabel(row?.source);
     const code = String(row?.code || "").trim();
     if (!cluster || !code) return;
-    if (!clusterTargetsByKey.has(cluster)) {
-      clusterTargetsByKey.set(cluster, {
-        clusterLabel: cluster,
-        partnerCode: code
-      });
+    if (!clusterCodesByLabel.has(cluster)) {
+      clusterCodesByLabel.set(cluster, new Set());
     }
+    clusterCodesByLabel.get(cluster).add(code);
   });
 
   const mergeTargetResult = (result) => {
@@ -2332,20 +2377,40 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     });
   };
 
-  const clusterTargets = Array.from(clusterTargetsByKey.values());
+  const maxCodesPerCluster = toBoundedInt(INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER, 5, 1, 20);
+  const clusterTargets = Array.from(clusterCodesByLabel.entries()).map(([clusterLabel, codesSet]) => ({
+    clusterLabel,
+    partnerCodes: Array.from(codesSet.values()).slice(0, maxCodesPerCluster)
+  }));
   await runWithConcurrency(
     clusterTargets,
     toBoundedInt(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY, 4, 1, 20),
     async (target) => {
-      const result = await fetchObusMerkezBranchMapForTarget({
-        clusterLabel: target.clusterLabel,
-        partnerCode: target.partnerCode,
-        signal
-      });
-      if (result.error) {
-        errors.push(`${target.clusterLabel}: ${result.error}`);
+      let lastError = "";
+      let hasMappedAnyPartner = false;
+
+      for (const partnerCode of target.partnerCodes) {
+        if (Boolean(signal?.aborted)) break;
+        const result = await fetchObusMerkezBranchMapForTarget({
+          clusterLabel: target.clusterLabel,
+          partnerCode,
+          signal
+        });
+        if (result.error) {
+          lastError = `${partnerCode}: ${result.error}`;
+          continue;
+        }
+
+        mergeTargetResult(result);
+        if (result.map instanceof Map && result.map.size > 0) {
+          hasMappedAnyPartner = true;
+          break;
+        }
       }
-      mergeTargetResult(result);
+
+      if (!hasMappedAnyPartner && lastError) {
+        errors.push(`${target.clusterLabel}: ${lastError}`);
+      }
     },
     () => Boolean(signal?.aborted)
   );
