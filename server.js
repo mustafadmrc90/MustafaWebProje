@@ -91,8 +91,6 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 );
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
-const INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY =
-  Number.parseInt(process.env.INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY || "6", 10) || 6;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -2220,7 +2218,8 @@ async function fetchObusMerkezBranchMapForTarget({
     partnerCode: normalizedPartnerCode,
     username: INVENTORY_BRANCHES_LOGIN_USERNAME,
     password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
-    fallbackBranchId: normalizedFallbackPartnerId
+    fallbackBranchId: normalizedFallbackPartnerId,
+    timeoutMs: 20000
   });
 
   if (!loginResult.ok) {
@@ -2345,42 +2344,6 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       });
       if (result.error) {
         errors.push(`${target.clusterLabel}: ${result.error}`);
-      }
-      mergeTargetResult(result);
-    },
-    () => Boolean(signal?.aborted)
-  );
-
-  const fallbackTargetsByKey = new Map();
-  sourceRows.forEach((row) => {
-    const partnerId = String(row?.id || "").trim();
-    if (!partnerId || branchByPartnerId.has(partnerId)) return;
-    const cluster = extractClusterLabel(row?.source);
-    const code = String(row?.code || "").trim();
-    if (!cluster || !code) return;
-    const key = `${cluster}|||${partnerId}|||${code}`;
-    if (!fallbackTargetsByKey.has(key)) {
-      fallbackTargetsByKey.set(key, {
-        clusterLabel: cluster,
-        partnerCode: code,
-        fallbackPartnerId: partnerId
-      });
-    }
-  });
-
-  const fallbackTargets = Array.from(fallbackTargetsByKey.values());
-  await runWithConcurrency(
-    fallbackTargets,
-    toBoundedInt(INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY, 6, 1, 20),
-    async (target) => {
-      const result = await fetchObusMerkezBranchMapForTarget({
-        clusterLabel: target.clusterLabel,
-        partnerCode: target.partnerCode,
-        fallbackPartnerId: target.fallbackPartnerId,
-        signal
-      });
-      if (result.error) {
-        errors.push(`${target.clusterLabel}/${target.fallbackPartnerId}: ${result.error}`);
       }
       mergeTargetResult(result);
     },
@@ -5413,7 +5376,8 @@ async function fetchAuthorizedLinesLoginInfo({
   partnerCode,
   username,
   password,
-  fallbackBranchId
+  fallbackBranchId,
+  timeoutMs = 90000
 }) {
   const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
   if (loginBaseUrls.length === 0) {
@@ -5445,7 +5409,10 @@ async function fetchAuthorizedLinesLoginInfo({
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(timeoutMs, 90000, 5000, 180000)
+  );
   try {
     let lastError = "UserLogin çağrısı başarısız.";
     let lastSessionId = "";

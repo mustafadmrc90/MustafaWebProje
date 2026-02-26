@@ -35,7 +35,6 @@ cp .env.example .env
 - `INVENTORY_BRANCHES_LOGIN_PASSWORD` (`ObusMerkezSubeID` doldurmak için gerekli)
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
-- `INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY` (varsayılan: `6`)
 
 ### Opsiyonel Jira Analiz Ortam Değişkenleri
 
