@@ -2411,6 +2411,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         }
       }
 
+      if (clusterAttemptErrors.length > 0) {
+        errors.push(
+          `${target.clusterLabel}: ${clusterAttemptErrors[0]}${
+            clusterAttemptErrors.length > 1 ? ` (+${clusterAttemptErrors.length - 1} hata)` : ""
+          }${hasMappedAnyPartner ? " (başarılı deneme sonrası)" : ""}`
+        );
+      }
+
       if (hasMappedAnyPartner) {
         return;
       }
@@ -2420,12 +2428,8 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         return;
       }
 
-      if (clusterAttemptErrors.length > 0) {
-        errors.push(
-          `${target.clusterLabel}: ${clusterAttemptErrors[0]}${
-            clusterAttemptErrors.length > 1 ? ` (+${clusterAttemptErrors.length - 1} hata)` : ""
-          }`
-        );
+      if (clusterAttemptErrors.length === 0) {
+        errors.push(`${target.clusterLabel}: UserLogin/GetBranches yanıtı alınamadı.`);
       }
     },
     () => Boolean(signal?.aborted)
