@@ -2201,7 +2201,7 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
   ];
   const branchIdAliases = ["id"];
   const branchNameAliases = ["name"];
-  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
+  void fallbackPartnerId;
 
   const walk = (node) => {
     if (node === null || node === undefined) return;
@@ -2226,9 +2226,6 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
       if (partnerId && branchId && !map.has(partnerId)) {
         map.set(partnerId, branchId);
-      } else if (!partnerId && branchId && normalizedFallbackPartnerId && !map.has(normalizedFallbackPartnerId)) {
-        // Fallback only when API omits partner-id unexpectedly.
-        map.set(normalizedFallbackPartnerId, branchId);
       }
     }
 
