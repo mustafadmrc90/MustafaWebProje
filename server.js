@@ -2325,7 +2325,7 @@ async function fetchObusMerkezBranchMapForTarget({
   }
 
   const body = {
-    data: {},
+    data: "{}",
     "device-session": {
       "session-id": sessionId,
       "device-id": deviceId
