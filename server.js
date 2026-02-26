@@ -2350,15 +2350,9 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   }
 
   const errors = [];
-  const branchByClusterPartnerId = new Map();
+  const branchByPartnerId = new Map();
   const clusterLoginCodesByLabel = new Map();
   const clusterErrorByLabel = new Map();
-  const buildClusterPartnerKey = (clusterLabel, partnerId) => {
-    const normalizedCluster = extractClusterLabel(clusterLabel);
-    const normalizedPartnerId = String(partnerId || "").trim();
-    if (!normalizedCluster || !normalizedPartnerId) return "";
-    return `${normalizedCluster}:::${normalizedPartnerId}`;
-  };
   const clusterRank = (clusterLabel) => {
     const match = String(clusterLabel || "").match(/cluster(\d+)/i);
     if (!match) return Number.MAX_SAFE_INTEGER;
@@ -2384,15 +2378,15 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     if (!codeList.includes(code)) codeList.push(code);
   });
 
-  const mergeTargetResult = (clusterLabel, result) => {
+  const mergeTargetResult = (result) => {
     if (!result || !(result.map instanceof Map)) return;
     result.map.forEach((branchId, partnerId) => {
       const normalizedPartnerId = String(partnerId || "").trim();
       const normalizedBranchId = String(branchId || "").trim();
       if (!normalizedPartnerId || !normalizedBranchId) return;
-      const mapKey = buildClusterPartnerKey(clusterLabel, normalizedPartnerId);
-      if (!mapKey) return;
-      if (!branchByClusterPartnerId.has(mapKey)) branchByClusterPartnerId.set(mapKey, normalizedBranchId);
+      if (!branchByPartnerId.has(normalizedPartnerId)) {
+        branchByPartnerId.set(normalizedPartnerId, normalizedBranchId);
+      }
     });
   };
 
@@ -2438,7 +2432,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       }
 
       resolved = true;
-      mergeTargetResult(target.clusterLabel, result);
+      mergeTargetResult(result);
       const mapSize = result.map instanceof Map ? result.map.size : 0;
       if (mapSize > 0) {
         resolvedWithMatch = true;
@@ -2467,15 +2461,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
 
   const enrichedRows = sourceRows.map((row) => {
     const partnerId = String(row?.id || "").trim();
-    const cluster = extractClusterLabel(row?.source);
-    const mapKey = buildClusterPartnerKey(cluster, partnerId);
-    if (mapKey && branchByClusterPartnerId.has(mapKey)) {
+    if (partnerId && branchByPartnerId.has(partnerId)) {
       return {
         ...row,
-        ObusMerkezSubeID: String(branchByClusterPartnerId.get(mapKey) || "").trim()
+        ObusMerkezSubeID: String(branchByPartnerId.get(partnerId) || "").trim()
       };
     }
 
+    const cluster = extractClusterLabel(row?.source);
     const clusterError = cluster ? String(clusterErrorByLabel.get(cluster) || "").trim() : "";
     let rowError = clusterError;
 
