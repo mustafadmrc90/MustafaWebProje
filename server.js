@@ -93,6 +93,7 @@ const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
+const PARTNER_CLUSTER_TOTAL = PARTNER_CLUSTER_MAX - PARTNER_CLUSTER_MIN + 1;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
 const SLACK_COUNTS_FILE = path.join(__dirname, "slack-counts.json");
 const SLACK_MONTHLY_ANALYSIS_FILE = path.join(__dirname, "data", "slack-monthly-analysis.json");
@@ -521,6 +522,26 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_slack_reply_analysis_runs_lookup
     ON slack_reply_analysis_runs (start_date, end_date, created_by, id)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS obus_merkez_branches (
+      partner_id TEXT PRIMARY KEY,
+      branch_id TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT 'OBUSMERKEZ',
+      source_cluster TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE obus_merkez_branches
+      ADD COLUMN IF NOT EXISTS branch_id TEXT,
+      ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'OBUSMERKEZ',
+      ADD COLUMN IF NOT EXISTS source_cluster TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   `);
 
   const userCount = await pool.query("SELECT COUNT(*)::int AS count FROM users");
@@ -2634,6 +2655,267 @@ async function fetchAllPartnerRows() {
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+function buildEmptyAllCompaniesReport(clusterCount = PARTNER_CLUSTER_TOTAL) {
+  const normalized = normalizeAllCompaniesReportRows([]);
+  const resolvedClusterCount = Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL;
+  return {
+    columns: normalized.columns,
+    rows: [],
+    error: null,
+    clusterCount: Math.max(0, resolvedClusterCount),
+    requested: false
+  };
+}
+
+function buildObusMerkezBranchServiceReport(overrides = {}) {
+  return {
+    requested: false,
+    rows: [],
+    count: 0,
+    sourceRowCount: 0,
+    clusterCount: PARTNER_CLUSTER_TOTAL,
+    notice: null,
+    error: null,
+    saved: null,
+    ...overrides
+  };
+}
+
+function normalizeObusMerkezBranchRows(rows) {
+  const recordByPartnerId = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const partnerId = String(row?.partnerId || row?.["partner-id"] || "").trim();
+    const branchId = String(row?.branchId || row?.id || "").trim();
+    const cluster = String(row?.cluster || row?.source || "").trim().toLowerCase();
+    const branchName = String(row?.name || "").trim();
+
+    if (!partnerId || !branchId) return;
+    if (normalizeTokenName(branchName) !== "obusmerkez") return;
+    if (recordByPartnerId.has(partnerId)) return;
+
+    recordByPartnerId.set(partnerId, {
+      partnerId,
+      name: "OBUSMERKEZ",
+      branchId,
+      cluster
+    });
+  });
+
+  return Array.from(recordByPartnerId.values()).sort((a, b) =>
+    String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr", { numeric: true })
+  );
+}
+
+async function collectObusMerkezBranchRowsForAllCompanies(
+  allCompanyRows,
+  { clusterCount = PARTNER_CLUSTER_TOTAL, baseError = null } = {}
+) {
+  const sourceRows = Array.isArray(allCompanyRows) ? allCompanyRows : [];
+  const compactErrorText = (value, maxLen = 180) => {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    if (text.length <= maxLen) return text;
+    return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
+  };
+  const clusterRank = (clusterLabel) => {
+    const match = String(clusterLabel || "").match(/cluster(\d+)/i);
+    if (!match) return Number.MAX_SAFE_INTEGER;
+    const parsed = Number.parseInt(match[1], 10);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  };
+
+  if (sourceRows.length === 0) {
+    return {
+      rows: [],
+      sourceRowCount: 0,
+      clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
+      error: String(baseError || "").trim() || "GetBranches için firma listesi boş."
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(30000, ALL_COMPANIES_FETCH_TIMEOUT_MS));
+
+  try {
+    const clusterLoginCodesByLabel = new Map();
+    sourceRows.forEach((row) => {
+      const cluster = extractClusterLabel(row?.source);
+      const code = String(row?.code || "").trim();
+      if (!cluster || !code) return;
+      if (!clusterLoginCodesByLabel.has(cluster)) clusterLoginCodesByLabel.set(cluster, []);
+      const codeList = clusterLoginCodesByLabel.get(cluster);
+      if (!Array.isArray(codeList)) return;
+      if (!codeList.includes(code)) codeList.push(code);
+    });
+
+    const clusterTargets = Array.from(clusterLoginCodesByLabel.entries())
+      .map(([clusterLabel, partnerCodes]) => ({
+        clusterLabel,
+        partnerCodes: Array.isArray(partnerCodes)
+          ? partnerCodes.map((code) => String(code || "").trim()).filter(Boolean)
+          : []
+      }))
+      .sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
+
+    const recordsByPartnerId = new Map();
+    const errors = [];
+
+    for (const target of clusterTargets) {
+      if (Boolean(controller.signal.aborted)) break;
+      const attemptCodes = Array.from(
+        new Set(["", ...(Array.isArray(target.partnerCodes) ? target.partnerCodes : [])].map((code) => String(code || "")))
+      );
+      if (attemptCodes.length === 0) {
+        errors.push(`${target.clusterLabel}: Kullanılabilir partner-code bulunamadı.`);
+        continue;
+      }
+
+      const attemptErrors = [];
+      let resolved = false;
+      let resolvedWithMatch = false;
+
+      for (const partnerCode of attemptCodes) {
+        if (Boolean(controller.signal.aborted)) break;
+        const partnerCodeLabel = partnerCode ? partnerCode : "(boş)";
+
+        const result = await fetchObusMerkezBranchMapForTarget({
+          clusterLabel: target.clusterLabel,
+          partnerCode,
+          signal: controller.signal
+        });
+
+        if (result.error) {
+          attemptErrors.push(`${partnerCodeLabel}: ${compactErrorText(result.error)}`);
+          continue;
+        }
+
+        resolved = true;
+        if (result.map instanceof Map) {
+          result.map.forEach((branchId, partnerId) => {
+            const normalizedPartnerId = String(partnerId || "").trim();
+            const normalizedBranchId = String(branchId || "").trim();
+            if (!normalizedPartnerId || !normalizedBranchId) return;
+            if (recordsByPartnerId.has(normalizedPartnerId)) return;
+            recordsByPartnerId.set(normalizedPartnerId, {
+              partnerId: normalizedPartnerId,
+              name: "OBUSMERKEZ",
+              branchId: normalizedBranchId,
+              cluster: target.clusterLabel
+            });
+          });
+        }
+
+        const mapSize = result.map instanceof Map ? result.map.size : 0;
+        if (mapSize > 0) {
+          resolvedWithMatch = true;
+          break;
+        }
+      }
+
+      if (resolvedWithMatch) continue;
+      if (resolved) {
+        errors.push(`${target.clusterLabel}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`);
+        continue;
+      }
+
+      const uniqueAttemptErrors = Array.from(new Set(attemptErrors.filter(Boolean)));
+      errors.push(
+        `${target.clusterLabel}: ${
+          uniqueAttemptErrors.length > 0
+            ? `${uniqueAttemptErrors.slice(0, 2).join(" | ")}${
+                uniqueAttemptErrors.length > 2 ? ` (+${uniqueAttemptErrors.length - 2} hata)` : ""
+              }`
+            : "UserLogin/GetBranches başarısız."
+        }`
+      );
+    }
+
+    const rows = normalizeObusMerkezBranchRows(Array.from(recordsByPartnerId.values()));
+    const uniqueErrors = Array.from(new Set(errors.filter(Boolean)));
+    const warningParts = [];
+    if (String(baseError || "").trim()) warningParts.push(compactErrorText(baseError, 220));
+    if (uniqueErrors.length > 0) {
+      warningParts.push(
+        `GetBranches: ${uniqueErrors.slice(0, 2).join(" | ")}${uniqueErrors.length > 2 ? ` (+${uniqueErrors.length - 2} hata)` : ""}`
+      );
+    }
+    if (Boolean(controller.signal.aborted)) warningParts.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
+
+    return {
+      rows,
+      sourceRowCount: sourceRows.length,
+      clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
+      error: warningParts.length > 0 ? warningParts.join(" | ") : null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function saveObusMerkezBranchRows(rows) {
+  const normalizedRows = normalizeObusMerkezBranchRows(rows);
+  if (normalizedRows.length === 0) {
+    return {
+      savedCount: 0,
+      insertedCount: 0,
+      updatedCount: 0,
+      error: "Kaydedilecek OBUSMERKEZ kaydı bulunamadı."
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const partnerIds = normalizedRows.map((item) => item.partnerId);
+    const existingResult = await client.query(
+      "SELECT partner_id FROM obus_merkez_branches WHERE partner_id = ANY($1::text[])",
+      [partnerIds]
+    );
+    const existingSet = new Set(
+      (existingResult.rows || []).map((row) => String(row?.partner_id || "").trim()).filter(Boolean)
+    );
+
+    const upsertSql = `
+      INSERT INTO obus_merkez_branches (partner_id, branch_id, name, source_cluster, updated_at)
+      VALUES ($1, $2, $3, $4, now())
+      ON CONFLICT (partner_id)
+      DO UPDATE SET
+        branch_id = EXCLUDED.branch_id,
+        name = EXCLUDED.name,
+        source_cluster = EXCLUDED.source_cluster,
+        updated_at = now()
+    `;
+
+    let insertedCount = 0;
+    let updatedCount = 0;
+
+    for (const row of normalizedRows) {
+      await client.query(upsertSql, [row.partnerId, row.branchId, row.name, row.cluster || null]);
+      if (existingSet.has(row.partnerId)) updatedCount += 1;
+      else insertedCount += 1;
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      savedCount: normalizedRows.length,
+      insertedCount,
+      updatedCount,
+      error: null
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    return {
+      savedCount: 0,
+      insertedCount: 0,
+      updatedCount: 0,
+      error: `SQL kayıt hatası: ${err?.message || "Bilinmeyen hata"}`
+    };
+  } finally {
+    client.release();
   }
 }
 
@@ -6287,18 +6569,120 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 });
 
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
-  const result = await fetchAllPartnerRows();
+  const shouldFetchPartners = req.query.runPartners === "1";
+  const shouldFetchBranches = req.query.runBranches === "1";
+
+  let report = buildEmptyAllCompaniesReport();
+  let branchReport = buildObusMerkezBranchServiceReport();
+  let partnerResult = null;
+
+  if (shouldFetchPartners || shouldFetchBranches) {
+    partnerResult = await fetchAllPartnerRows();
+  }
+
+  if (shouldFetchPartners) {
+    report = {
+      columns: partnerResult?.columns || report.columns,
+      rows: partnerResult?.rows || [],
+      error: partnerResult?.error || null,
+      clusterCount:
+        Number.isFinite(Number(partnerResult?.clusterCount)) && Number(partnerResult?.clusterCount) > 0
+          ? Number(partnerResult.clusterCount)
+          : report.clusterCount,
+      requested: true
+    };
+  } else if (Number.isFinite(Number(partnerResult?.clusterCount)) && Number(partnerResult?.clusterCount) > 0) {
+    report.clusterCount = Number(partnerResult.clusterCount);
+  }
+
+  if (shouldFetchBranches) {
+    const branchResult = await collectObusMerkezBranchRowsForAllCompanies(partnerResult?.rows || [], {
+      clusterCount: partnerResult?.clusterCount || report.clusterCount,
+      baseError: partnerResult?.error || null
+    });
+    branchReport = buildObusMerkezBranchServiceReport({
+      requested: true,
+      rows: branchResult.rows || [],
+      count: Array.isArray(branchResult.rows) ? branchResult.rows.length : 0,
+      sourceRowCount: Number.isFinite(Number(branchResult.sourceRowCount)) ? Number(branchResult.sourceRowCount) : 0,
+      clusterCount:
+        Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
+          ? Number(branchResult.clusterCount)
+          : report.clusterCount,
+      error: branchResult.error || null
+    });
+    if (!branchReport.error && branchReport.count > 0) {
+      branchReport.notice = `${branchReport.count} OBUSMERKEZ kaydı bulundu.`;
+    }
+  }
+
   res.render("reports-all-companies", {
     user: req.session.user,
     active: "all-companies",
-    report: {
-      columns: result.columns || [],
-      rows: result.rows || [],
-      error: result.error,
-      clusterCount: result.clusterCount || 0
-    }
+    report,
+    branchReport
   });
 });
+
+app.post(
+  "/reports/all-companies/branches/save",
+  requireAuth,
+  requireMenuAccess("all-companies"),
+  async (req, res) => {
+    const report = buildEmptyAllCompaniesReport();
+    let branchReport = buildObusMerkezBranchServiceReport({ requested: true });
+
+    const partnerResult = await fetchAllPartnerRows();
+    const branchResult = await collectObusMerkezBranchRowsForAllCompanies(partnerResult?.rows || [], {
+      clusterCount: partnerResult?.clusterCount || report.clusterCount,
+      baseError: partnerResult?.error || null
+    });
+
+    const branchRows = Array.isArray(branchResult.rows) ? branchResult.rows : [];
+    branchReport = buildObusMerkezBranchServiceReport({
+      requested: true,
+      rows: branchRows,
+      count: branchRows.length,
+      sourceRowCount: Number.isFinite(Number(branchResult.sourceRowCount)) ? Number(branchResult.sourceRowCount) : 0,
+      clusterCount:
+        Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
+          ? Number(branchResult.clusterCount)
+          : report.clusterCount,
+      error: branchResult.error || null
+    });
+
+    if (branchRows.length === 0) {
+      if (!branchReport.error) {
+        branchReport.error = "Kaydedilecek OBUSMERKEZ kaydı bulunamadı.";
+      }
+      return res.render("reports-all-companies", {
+        user: req.session.user,
+        active: "all-companies",
+        report,
+        branchReport
+      });
+    }
+
+    const saveResult = await saveObusMerkezBranchRows(branchRows);
+    if (saveResult.error) {
+      branchReport.error = branchReport.error ? `${branchReport.error} | ${saveResult.error}` : saveResult.error;
+    } else {
+      branchReport.saved = {
+        total: saveResult.savedCount,
+        inserted: saveResult.insertedCount,
+        updated: saveResult.updatedCount
+      };
+      branchReport.notice = `GetBranches sonuçları SQL'e kaydedildi. Toplam ${saveResult.savedCount}, yeni ${saveResult.insertedCount}, güncellenen ${saveResult.updatedCount}.`;
+    }
+
+    res.render("reports-all-companies", {
+      user: req.session.user,
+      active: "all-companies",
+      report,
+      branchReport
+    });
+  }
+);
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
   const shouldFetchReport = req.query.run === "1";
