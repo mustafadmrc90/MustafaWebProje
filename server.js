@@ -2699,6 +2699,7 @@ function buildObusMerkezBranchServiceReport(overrides = {}) {
     clusterCount: PARTNER_CLUSTER_TOTAL,
     notice: null,
     error: null,
+    failures: [],
     saved: null,
     ...overrides
   };
@@ -2759,7 +2760,8 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       rows: [],
       sourceRowCount: 0,
       clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
-      error: String(baseError || "").trim() || "GetBranches için firma listesi boş."
+      error: String(baseError || "").trim() || "GetBranches için firma listesi boş.",
+      failures: []
     };
   }
 
@@ -2869,9 +2871,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
     const warningParts = [];
     if (String(baseError || "").trim()) warningParts.push(compactErrorText(baseError, 220));
     if (uniqueErrors.length > 0) {
-      warningParts.push(
-        `GetBranches: ${uniqueErrors.slice(0, 2).join(" | ")}${uniqueErrors.length > 2 ? ` (+${uniqueErrors.length - 2} hata)` : ""}`
-      );
+      warningParts.push(`GetBranches: ${uniqueErrors.length} başarısız istek var.`);
     }
     if (Boolean(controller.signal.aborted)) warningParts.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
 
@@ -2879,7 +2879,8 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       rows,
       sourceRowCount: sourceRows.length,
       clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
-      error: warningParts.length > 0 ? warningParts.join(" | ") : null
+      error: warningParts.length > 0 ? warningParts.join(" | ") : null,
+      failures: uniqueErrors
     };
   } finally {
     clearTimeout(timeout);
@@ -6640,7 +6641,8 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
           ? Number(branchResult.clusterCount)
           : report.clusterCount,
-      error: branchResult.error || null
+      error: branchResult.error || null,
+      failures: Array.isArray(branchResult.failures) ? branchResult.failures : []
     });
     if (!branchReport.error && branchReport.count > 0) {
       branchReport.notice = `${branchReport.count} OBUSMERKEZ kaydı bulundu.`;
@@ -6679,7 +6681,8 @@ app.post(
         Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
           ? Number(branchResult.clusterCount)
           : report.clusterCount,
-      error: branchResult.error || null
+      error: branchResult.error || null,
+      failures: Array.isArray(branchResult.failures) ? branchResult.failures : []
     });
 
     if (branchRows.length === 0) {

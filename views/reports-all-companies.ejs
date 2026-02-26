@@ -9,7 +9,7 @@
   </head>
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
-    <% const branch = branchReport || { requested: false, rows: [], count: 0, clusterCount: 0, error: null, notice: null, saved: null, sourceRowCount: 0 }; %>
+    <% const branch = branchReport || { requested: false, rows: [], count: 0, clusterCount: 0, error: null, notice: null, saved: null, sourceRowCount: 0, failures: [] }; %>
 
     <section class="content">
       <header class="page-header">
@@ -42,6 +42,34 @@
 
       <% if (branch.error) { %>
         <div class="alert inline-alert"><%= branch.error %></div>
+      <% } %>
+      <% if (branch.failures && branch.failures.length > 0) { %>
+        <section class="table-card panel-card">
+          <div class="table-head">
+            <h2>GetBranches Başarısız İstekler</h2>
+            <div class="table-actions">
+              <span class="pill muted"><%= branch.failures.length %> Hata</span>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="partners-raw-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Detay</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% branch.failures.forEach((failure, index) => { %>
+                  <tr>
+                    <td><%= index + 1 %></td>
+                    <td><%= failure %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </section>
       <% } %>
 
       <section class="table-card panel-card">
