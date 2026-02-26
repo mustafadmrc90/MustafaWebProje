@@ -1878,8 +1878,10 @@ function extractObusMerkezBranchKeyFromUserLoginPayload(payload) {
 
     const stateValue =
       String(readPartnerRawValueByAliases(current, ["state", "login-state", "login_state"]) || "").trim();
-    const hasMultipleBranchesState = normalizeTokenName(stateValue) === "multiplebranches";
-    const currentContext = Boolean(multipleBranchesContext || hasMultipleBranchesState);
+    const normalizedState = normalizeTokenName(stateValue);
+    const hasBranchSelectionState =
+      normalizedState === "multiplebranches" || normalizedState === "multipleusermodules";
+    const currentContext = Boolean(multipleBranchesContext || hasBranchSelectionState);
 
     if (currentContext) {
       for (const [key, value] of Object.entries(current)) {
