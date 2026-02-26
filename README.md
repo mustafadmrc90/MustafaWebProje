@@ -27,6 +27,16 @@ cp .env.example .env
 - `SLACK_CORP_REQUEST_TAG` (opsiyonel, varsayılan: `@corpproduct`)
 - `SLACK_CORP_REQUEST_CHANNELS` (opsiyonel, virgül ile kanal adı/id listesi; boşsa tüm taranan kanallar)
 
+### Opsiyonel Tüm Firmalar / ObusMerkezSubeID Ortam Değişkenleri
+
+- `INVENTORY_BRANCHES_API_URL` (varsayılan: `https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches`)
+- `INVENTORY_BRANCHES_API_AUTH` (varsayılan: `Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt`)
+- `INVENTORY_BRANCHES_LOGIN_USERNAME` (`ObusMerkezSubeID` doldurmak için gerekli)
+- `INVENTORY_BRANCHES_LOGIN_PASSWORD` (`ObusMerkezSubeID` doldurmak için gerekli)
+- `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
+- `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
+- `INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY` (varsayılan: `6`)
+
 ### Opsiyonel Jira Analiz Ortam Değişkenleri
 
 - `JIRA_BASE_URL` (örnek: `https://firma.atlassian.net`)

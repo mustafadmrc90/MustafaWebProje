@@ -69,6 +69,8 @@ const REPORTING_API_URL =
 const REPORTING_API_AUTH =
   process.env.REPORTING_API_AUTH || "Basic TXVyb011aG9BbGlPZ2lIYXJ1bk96YW4K";
 const SALES_REPORT_TIMEOUT_MS = Number.parseInt(process.env.SALES_REPORT_TIMEOUT_MS || "180000", 10) || 180000;
+const ALL_COMPANIES_FETCH_TIMEOUT_MS =
+  Number.parseInt(process.env.ALL_COMPANIES_FETCH_TIMEOUT_MS || "180000", 10) || 180000;
 const SALES_REPORT_RANGE_CONCURRENCY =
   Number.parseInt(process.env.SALES_REPORT_RANGE_CONCURRENCY || "4", 10) || 4;
 const SALES_REPORT_TARGET_CONCURRENCY =
@@ -78,6 +80,19 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
+const INVENTORY_BRANCHES_API_URL =
+  process.env.INVENTORY_BRANCHES_API_URL ||
+  "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
+const INVENTORY_BRANCHES_API_AUTH =
+  process.env.INVENTORY_BRANCHES_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const INVENTORY_BRANCHES_LOGIN_USERNAME = String(process.env.INVENTORY_BRANCHES_LOGIN_USERNAME || "admin").trim();
+const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
+  process.env.INVENTORY_BRANCHES_LOGIN_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
+);
+const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
+  Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY =
+  Number.parseInt(process.env.INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY || "6", 10) || 6;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -1338,7 +1353,6 @@ function normalizeAllCompaniesReportRows(rows) {
     "source",
     "obilet-partner-id",
     "biletall-partner-id",
-    "tradename",
     "url",
     "ObusMerkezSubeID"
   ];
@@ -1385,9 +1399,6 @@ function normalizeAllCompaniesReportRows(rows) {
           "biletallPartnerId",
           "biletallPartnerID"
         ])
-      ),
-      tradename: formatPartnerCellValue(
-        readPartnerRawValueByAliases(row, ["tradename", "trade-name", "trade_name", "tradeName"])
       ),
       url: formatPartnerCellValue(
         readPartnerRawValueByAliases(row, ["url", "api_url", "apiUrl", "endpoint_url", "endpointUrl", "base_url", "baseUrl"])
@@ -2113,6 +2124,293 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
   }
 }
 
+function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") {
+  const map = new Map();
+  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
+
+  const partnerIdAliases = [
+    "partner-id",
+    "partner_id",
+    "partnerid",
+    "partnerId",
+    "partnerID",
+    "provider-id",
+    "provider_id",
+    "providerid",
+    "providerId",
+    "providerID"
+  ];
+  const branchIdAliases = ["id", "branch-id", "branch_id", "branchid", "branchId"];
+  const branchNameAliases = [
+    "name",
+    "branch-name",
+    "branch_name",
+    "branchname",
+    "display-name",
+    "display_name",
+    "displayname",
+    "title"
+  ];
+
+  const addCandidate = (node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return;
+
+    const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
+    if (normalizeTokenName(branchName) !== "obusmerkez") return;
+
+    const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
+    if (!branchId) return;
+
+    const partnerId = formatPartnerCellValue(
+      readPartnerRawValueByAliases(node, partnerIdAliases) || normalizedFallbackPartnerId
+    );
+    if (!partnerId) return;
+
+    if (!map.has(partnerId)) {
+      map.set(partnerId, branchId);
+    }
+  };
+
+  const walk = (node) => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed);
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item));
+      return;
+    }
+    if (typeof node !== "object") return;
+
+    addCandidate(node);
+    Object.values(node).forEach((value) => walk(value));
+  };
+
+  walk(payload);
+  return map;
+}
+
+async function fetchObusMerkezBranchMapForTarget({
+  clusterLabel,
+  partnerCode,
+  fallbackPartnerId = "",
+  signal
+}) {
+  const cluster = extractClusterLabel(clusterLabel);
+  const endpointUrl = normalizeTargetUrl(buildUrlForCluster(INVENTORY_BRANCHES_API_URL, cluster));
+  const normalizedPartnerCode = String(partnerCode || "").trim();
+  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
+
+  if (!endpointUrl) {
+    return { cluster, map: new Map(), error: "GetBranches endpoint URL geçersiz." };
+  }
+  if (!normalizedPartnerCode) {
+    return { cluster, map: new Map(), error: "partner-code bulunamadı." };
+  }
+
+  const loginResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl: endpointUrl,
+    partnerCode: normalizedPartnerCode,
+    username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+    password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+    fallbackBranchId: normalizedFallbackPartnerId
+  });
+
+  if (!loginResult.ok) {
+    return {
+      cluster,
+      map: new Map(),
+      error: `UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`
+    };
+  }
+
+  const sessionId = String(loginResult.sessionId || "").trim();
+  const deviceId = String(loginResult.deviceId || "").trim();
+  const token = String(loginResult.token || "").trim();
+  if (!sessionId || !deviceId || !token) {
+    return {
+      cluster,
+      map: new Map(),
+      error: "UserLogin sonucu session-id/device-id/token eksik."
+    };
+  }
+
+  const body = {
+    data: {},
+    "device-session": {
+      "session-id": sessionId,
+      "device-id": deviceId
+    },
+    token,
+    date: "2016-03-11T11:33:00",
+    language: "tr-TR"
+  };
+
+  try {
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: INVENTORY_BRANCHES_API_AUTH
+      },
+      body: JSON.stringify(body),
+      signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        cluster,
+        map: new Map(),
+        error: `GetBranches HTTP ${response.status}: ${reason}`
+      };
+    }
+
+    const map = extractObusMerkezBranchMapFromPayload(parsed ?? raw, normalizedFallbackPartnerId);
+    return { cluster, map, error: null };
+  } catch (err) {
+    return {
+      cluster,
+      map: new Map(),
+      error: err?.message || "GetBranches isteği başarısız."
+    };
+  }
+}
+
+async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (sourceRows.length === 0) {
+    return { rows: [], notice: null };
+  }
+
+  if (!INVENTORY_BRANCHES_LOGIN_USERNAME || !INVENTORY_BRANCHES_LOGIN_PASSWORD) {
+    return {
+      rows: sourceRows,
+      notice: "ObusMerkezSubeID için INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD gerekli."
+    };
+  }
+
+  const errors = [];
+  const branchByPartnerId = new Map();
+  const clusterTargetsByKey = new Map();
+
+  sourceRows.forEach((row) => {
+    const cluster = extractClusterLabel(row?.source);
+    const code = String(row?.code || "").trim();
+    if (!cluster || !code) return;
+    if (!clusterTargetsByKey.has(cluster)) {
+      clusterTargetsByKey.set(cluster, {
+        clusterLabel: cluster,
+        partnerCode: code
+      });
+    }
+  });
+
+  const mergeTargetResult = (result) => {
+    if (!result || !(result.map instanceof Map)) return;
+    result.map.forEach((branchId, partnerId) => {
+      const normalizedPartnerId = String(partnerId || "").trim();
+      const normalizedBranchId = String(branchId || "").trim();
+      if (!normalizedPartnerId || !normalizedBranchId) return;
+      if (!branchByPartnerId.has(normalizedPartnerId)) {
+        branchByPartnerId.set(normalizedPartnerId, normalizedBranchId);
+      }
+    });
+  };
+
+  const clusterTargets = Array.from(clusterTargetsByKey.values());
+  await runWithConcurrency(
+    clusterTargets,
+    toBoundedInt(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY, 4, 1, 20),
+    async (target) => {
+      const result = await fetchObusMerkezBranchMapForTarget({
+        clusterLabel: target.clusterLabel,
+        partnerCode: target.partnerCode,
+        signal
+      });
+      if (result.error) {
+        errors.push(`${target.clusterLabel}: ${result.error}`);
+      }
+      mergeTargetResult(result);
+    },
+    () => Boolean(signal?.aborted)
+  );
+
+  const fallbackTargetsByKey = new Map();
+  sourceRows.forEach((row) => {
+    const partnerId = String(row?.id || "").trim();
+    if (!partnerId || branchByPartnerId.has(partnerId)) return;
+    const cluster = extractClusterLabel(row?.source);
+    const code = String(row?.code || "").trim();
+    if (!cluster || !code) return;
+    const key = `${cluster}|||${partnerId}|||${code}`;
+    if (!fallbackTargetsByKey.has(key)) {
+      fallbackTargetsByKey.set(key, {
+        clusterLabel: cluster,
+        partnerCode: code,
+        fallbackPartnerId: partnerId
+      });
+    }
+  });
+
+  const fallbackTargets = Array.from(fallbackTargetsByKey.values());
+  await runWithConcurrency(
+    fallbackTargets,
+    toBoundedInt(INVENTORY_BRANCHES_PARTNER_FALLBACK_CONCURRENCY, 6, 1, 20),
+    async (target) => {
+      const result = await fetchObusMerkezBranchMapForTarget({
+        clusterLabel: target.clusterLabel,
+        partnerCode: target.partnerCode,
+        fallbackPartnerId: target.fallbackPartnerId,
+        signal
+      });
+      if (result.error) {
+        errors.push(`${target.clusterLabel}/${target.fallbackPartnerId}: ${result.error}`);
+      }
+      mergeTargetResult(result);
+    },
+    () => Boolean(signal?.aborted)
+  );
+
+  const enrichedRows = sourceRows.map((row) => {
+    const partnerId = String(row?.id || "").trim();
+    return {
+      ...row,
+      ObusMerkezSubeID: String(branchByPartnerId.get(partnerId) || "").trim()
+    };
+  });
+
+  const uniqueErrors = Array.from(new Set(errors.filter(Boolean)));
+  if (Boolean(signal?.aborted)) {
+    uniqueErrors.unshift("zaman aşımı nedeniyle kısmi sonuç üretildi");
+  }
+
+  const notice =
+    uniqueErrors.length > 0
+      ? `ObusMerkezSubeID: ${uniqueErrors.slice(0, 2).join(" | ")}${uniqueErrors.length > 2 ? ` (+${uniqueErrors.length - 2} hata)` : ""}`
+      : null;
+
+  return {
+    rows: enrichedRows,
+    notice
+  };
+}
+
 async function fetchPartnerCodes() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
@@ -2180,7 +2478,7 @@ async function fetchPartnerCodes() {
 
 async function fetchAllPartnerRows() {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(() => controller.abort(), Math.max(30000, ALL_COMPANIES_FETCH_TIMEOUT_MS));
 
   try {
     const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
@@ -2219,15 +2517,20 @@ async function fetchAllPartnerRows() {
 
     const normalizedReport = normalizeAllCompaniesReportRows(mergedRows);
     const columns = normalizedReport.columns;
-    const rows = normalizedReport.rows;
+    const obusEnriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedReport.rows, controller.signal);
+    const rows = obusEnriched.rows;
 
-    let error = null;
+    const errorParts = [];
     if (errors.length > 0) {
-      error = `${errors.length}/${partnerUrls.length} cluster alınamadı.`;
+      errorParts.push(`${errors.length}/${partnerUrls.length} cluster alınamadı.`);
     }
-    if (!error && rows.length === 0) {
-      error = "Partner API sonucunda gösterilecek kayıt bulunamadı.";
+    if (obusEnriched.notice) {
+      errorParts.push(obusEnriched.notice);
     }
+    if (errorParts.length === 0 && rows.length === 0) {
+      errorParts.push("Partner API sonucunda gösterilecek kayıt bulunamadı.");
+    }
+    const error = errorParts.length > 0 ? errorParts.join(" ") : null;
 
     return {
       columns,
