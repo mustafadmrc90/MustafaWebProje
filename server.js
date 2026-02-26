@@ -2211,8 +2211,8 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
   }
 }
 
-function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") {
-  const map = new Map();
+function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "") {
+  const rows = [];
   const partnerIdAliases = [
     "partner-id",
     "partner_id",
@@ -2245,8 +2245,12 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
     if (normalizeTokenName(branchName) === "obusmerkez") {
       const partnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
-      if (partnerId && branchId && !map.has(partnerId)) {
-        map.set(partnerId, branchId);
+      if (partnerId && branchId) {
+        rows.push({
+          partnerId,
+          name: "OBUSMERKEZ",
+          branchId
+        });
       }
     }
 
@@ -2254,6 +2258,17 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
   };
 
   walk(payload);
+  return rows;
+}
+
+function extractObusMerkezBranchMapFromRows(rows) {
+  const map = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const partnerId = String(row?.partnerId || "").trim();
+    const branchId = String(row?.branchId || "").trim();
+    if (!partnerId || !branchId) return;
+    if (!map.has(partnerId)) map.set(partnerId, branchId);
+  });
   return map;
 }
 
@@ -2269,7 +2284,7 @@ async function fetchObusMerkezBranchMapForTarget({
   const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
 
   if (!endpointUrl) {
-    return { cluster, map: new Map(), error: "GetBranches endpoint URL geçersiz." };
+    return { cluster, map: new Map(), rows: [], error: "GetBranches endpoint URL geçersiz." };
   }
 
   const loginResult = await fetchAuthorizedLinesLoginInfo({
@@ -2288,6 +2303,7 @@ async function fetchObusMerkezBranchMapForTarget({
     return {
       cluster,
       map: new Map(),
+      rows: [],
       error: `UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`
     };
   }
@@ -2303,6 +2319,7 @@ async function fetchObusMerkezBranchMapForTarget({
     return {
       cluster,
       map: new Map(),
+      rows: [],
       error: `UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`
     };
   }
@@ -2342,16 +2359,19 @@ async function fetchObusMerkezBranchMapForTarget({
       return {
         cluster,
         map: new Map(),
+        rows: [],
         error: `GetBranches HTTP ${response.status}: ${reason}`
       };
     }
 
-    const map = extractObusMerkezBranchMapFromPayload(parsed ?? raw, normalizedFallbackPartnerId);
-    return { cluster, map, error: null };
+    const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId);
+    const map = extractObusMerkezBranchMapFromRows(rows);
+    return { cluster, map, rows, error: null };
   } catch (err) {
     return {
       cluster,
       map: new Map(),
+      rows: [],
       error: err?.message || "GetBranches isteği başarısız."
     };
   }
@@ -2684,8 +2704,9 @@ function buildObusMerkezBranchServiceReport(overrides = {}) {
   };
 }
 
-function normalizeObusMerkezBranchRows(rows) {
+function normalizeObusMerkezBranchRows(rows, { dedupeByPartnerId = true } = {}) {
   const recordByPartnerId = new Map();
+  const normalizedRows = [];
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const partnerId = String(row?.partnerId || row?.["partner-id"] || "").trim();
     const branchId = String(row?.branchId || row?.id || "").trim();
@@ -2694,17 +2715,23 @@ function normalizeObusMerkezBranchRows(rows) {
 
     if (!partnerId || !branchId) return;
     if (normalizeTokenName(branchName) !== "obusmerkez") return;
-    if (recordByPartnerId.has(partnerId)) return;
-
-    recordByPartnerId.set(partnerId, {
+    const normalized = {
       partnerId,
       name: "OBUSMERKEZ",
       branchId,
       cluster
-    });
+    };
+
+    if (!dedupeByPartnerId) {
+      normalizedRows.push(normalized);
+      return;
+    }
+    if (recordByPartnerId.has(partnerId)) return;
+    recordByPartnerId.set(partnerId, normalized);
   });
 
-  return Array.from(recordByPartnerId.values()).sort((a, b) =>
+  const outputRows = dedupeByPartnerId ? Array.from(recordByPartnerId.values()) : normalizedRows;
+  return outputRows.sort((a, b) =>
     String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr", { numeric: true })
   );
 }
@@ -2764,7 +2791,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
     }
     clusterTargets.sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
 
-    const recordsByPartnerId = new Map();
+    const collectedRows = [];
     const errors = [];
 
     for (const target of clusterTargets) {
@@ -2797,23 +2824,23 @@ async function collectObusMerkezBranchRowsForAllCompanies(
         }
 
         resolved = true;
-        if (result.map instanceof Map) {
-          result.map.forEach((branchId, partnerId) => {
-            const normalizedPartnerId = String(partnerId || "").trim();
-            const normalizedBranchId = String(branchId || "").trim();
-            if (!normalizedPartnerId || !normalizedBranchId) return;
-            if (recordsByPartnerId.has(normalizedPartnerId)) return;
-            recordsByPartnerId.set(normalizedPartnerId, {
-              partnerId: normalizedPartnerId,
+        if (Array.isArray(result.rows) && result.rows.length > 0) {
+          result.rows.forEach((item) => {
+            const partnerId = String(item?.partnerId || "").trim();
+            const branchId = String(item?.branchId || "").trim();
+            const name = String(item?.name || "OBUSMERKEZ").trim();
+            if (!partnerId || !branchId || normalizeTokenName(name) !== "obusmerkez") return;
+            collectedRows.push({
+              partnerId,
               name: "OBUSMERKEZ",
-              branchId: normalizedBranchId,
+              branchId,
               cluster: target.clusterLabel
             });
           });
         }
 
-        const mapSize = result.map instanceof Map ? result.map.size : 0;
-        if (mapSize > 0) {
+        const rowSize = Array.isArray(result.rows) ? result.rows.length : 0;
+        if (rowSize > 0) {
           resolvedWithMatch = true;
           break;
         }
@@ -2837,7 +2864,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       );
     }
 
-    const rows = normalizeObusMerkezBranchRows(Array.from(recordsByPartnerId.values()));
+    const rows = normalizeObusMerkezBranchRows(collectedRows, { dedupeByPartnerId: false });
     const uniqueErrors = Array.from(new Set(errors.filter(Boolean)));
     const warningParts = [];
     if (String(baseError || "").trim()) warningParts.push(compactErrorText(baseError, 220));
@@ -2860,7 +2887,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
 }
 
 async function saveObusMerkezBranchRows(rows) {
-  const normalizedRows = normalizeObusMerkezBranchRows(rows);
+  const normalizedRows = normalizeObusMerkezBranchRows(rows, { dedupeByPartnerId: true });
   if (normalizedRows.length === 0) {
     return {
       savedCount: 0,
