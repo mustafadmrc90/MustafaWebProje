@@ -91,8 +91,6 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 );
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
-const INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER =
-  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "100", 10) || 100;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -2354,10 +2352,8 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
 
   const errors = [];
   const branchByPartnerId = new Map();
-  const clusterCodesByLabel = new Map();
+  const clusterLoginCodeByLabel = new Map();
   const clusterErrorByLabel = new Map();
-  const clusterErrorByCode = new Map();
-  const attemptedCodesByCluster = new Map();
   const compactErrorText = (value, maxLen = 180) => {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
@@ -2369,10 +2365,10 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     const cluster = extractClusterLabel(row?.source);
     const code = String(row?.code || "").trim();
     if (!cluster || !code) return;
-    if (!clusterCodesByLabel.has(cluster)) {
-      clusterCodesByLabel.set(cluster, new Set());
+    if (!clusterLoginCodeByLabel.has(cluster)) {
+      // Cluster için tek bir token alıp aynı response içinden tüm partnerleri eşleştir.
+      clusterLoginCodeByLabel.set(cluster, code);
     }
-    clusterCodesByLabel.get(cluster).add(code);
   });
 
   const mergeTargetResult = (result) => {
@@ -2387,75 +2383,35 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     });
   };
 
-  const maxCodesPerCluster = toBoundedInt(INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER, 100, 1, 500);
-  const clusterTargets = Array.from(clusterCodesByLabel.entries()).map(([clusterLabel, codesSet]) => ({
+  const clusterTargets = Array.from(clusterLoginCodeByLabel.entries()).map(([clusterLabel, partnerCode]) => ({
     clusterLabel,
-    partnerCodes: Array.from(codesSet.values()).slice(0, maxCodesPerCluster)
+    partnerCode: String(partnerCode || "").trim()
   }));
   await runWithConcurrency(
     clusterTargets,
     toBoundedInt(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY, 4, 1, 20),
     async (target) => {
-      const clusterAttemptErrors = [];
-      let hasMappedAnyPartner = false;
-      let hasSuccessfulLookup = false;
-      if (!attemptedCodesByCluster.has(target.clusterLabel)) {
-        attemptedCodesByCluster.set(target.clusterLabel, new Set());
-      }
-      const attemptedCodes = attemptedCodesByCluster.get(target.clusterLabel);
+      if (Boolean(signal?.aborted)) return;
 
-      for (const partnerCode of target.partnerCodes) {
-        if (Boolean(signal?.aborted)) break;
-        attemptedCodes.add(partnerCode);
-        const result = await fetchObusMerkezBranchMapForTarget({
-          clusterLabel: target.clusterLabel,
-          partnerCode,
-          signal
-        });
-        if (result.error) {
-          const normalizedError = compactErrorText(result.error);
-          const normalizedCodeError = `${partnerCode}: ${normalizedError}`;
-          clusterAttemptErrors.push(normalizedCodeError);
-          const codeErrorKey = `${target.clusterLabel}|||${partnerCode}`;
-          if (!clusterErrorByCode.has(codeErrorKey)) {
-            clusterErrorByCode.set(codeErrorKey, normalizedCodeError);
-          }
-          continue;
-        }
+      const result = await fetchObusMerkezBranchMapForTarget({
+        clusterLabel: target.clusterLabel,
+        partnerCode: target.partnerCode,
+        signal
+      });
 
-        hasSuccessfulLookup = true;
-        mergeTargetResult(result);
-        if (result.map instanceof Map && result.map.size > 0) {
-          hasMappedAnyPartner = true;
-          break;
-        }
-      }
-
-      if (clusterAttemptErrors.length > 0) {
-        const clusterErrorText = `${clusterAttemptErrors[0]}${
-          clusterAttemptErrors.length > 1 ? ` (+${clusterAttemptErrors.length - 1} hata)` : ""
-        }${hasMappedAnyPartner ? " (başarılı deneme sonrası)" : ""}`;
-        errors.push(
-          `${target.clusterLabel}: ${clusterErrorText}`
-        );
+      if (result.error) {
+        const clusterErrorText = `${target.partnerCode}: ${compactErrorText(result.error)}`;
+        errors.push(`${target.clusterLabel}: ${clusterErrorText}`);
         clusterErrorByLabel.set(target.clusterLabel, clusterErrorText);
-      }
-
-      if (hasMappedAnyPartner) {
         return;
       }
 
-      if (hasSuccessfulLookup) {
+      mergeTargetResult(result);
+      const mapSize = result.map instanceof Map ? result.map.size : 0;
+      if (mapSize === 0) {
         const noMatchMessage = "Eşleşen OBUSMERKEZ kaydı bulunamadı.";
         errors.push(`${target.clusterLabel}: ${noMatchMessage}`);
         clusterErrorByLabel.set(target.clusterLabel, noMatchMessage);
-        return;
-      }
-
-      if (clusterAttemptErrors.length === 0) {
-        const noResponseMessage = "UserLogin/GetBranches yanıtı alınamadı.";
-        errors.push(`${target.clusterLabel}: ${noResponseMessage}`);
-        clusterErrorByLabel.set(target.clusterLabel, noResponseMessage);
       }
     },
     () => Boolean(signal?.aborted)
@@ -2471,19 +2427,12 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     }
 
     const cluster = extractClusterLabel(row?.source);
-    const code = String(row?.code || "").trim();
-    const codeError =
-      code && cluster ? String(clusterErrorByCode.get(`${cluster}|||${code}`) || "").trim() : "";
     const clusterError = cluster ? String(clusterErrorByLabel.get(cluster) || "").trim() : "";
-    const attemptedCodes = cluster ? attemptedCodesByCluster.get(cluster) : null;
-    const isCodeAttempted = Boolean(code && attemptedCodes instanceof Set && attemptedCodes.has(code));
-    let rowError = codeError || clusterError;
+    let rowError = clusterError;
 
     if (!rowError) {
       if (!partnerId) {
         rowError = "partner-id boş.";
-      } else if (code && attemptedCodes instanceof Set && attemptedCodes.size > 0 && !isCodeAttempted) {
-        rowError = "partner-code denenmedi (limit).";
       } else {
         rowError = "ObusMerkezSubeID bulunamadı.";
       }
