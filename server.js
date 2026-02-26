@@ -92,7 +92,7 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER =
-  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "5", 10) || 5;
+  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "20", 10) || 20;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -2262,7 +2262,8 @@ async function fetchObusMerkezBranchMapForTarget({
     username: INVENTORY_BRANCHES_LOGIN_USERNAME,
     password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
     fallbackBranchId: normalizedFallbackPartnerId,
-    timeoutMs: 20000
+    timeoutMs: 20000,
+    authorization: INVENTORY_BRANCHES_API_AUTH
   });
 
   if (!loginResult.ok) {
@@ -2386,7 +2387,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     clusterTargets,
     toBoundedInt(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY, 4, 1, 20),
     async (target) => {
-      let lastError = "";
+      const clusterAttemptErrors = [];
       let hasMappedAnyPartner = false;
 
       for (const partnerCode of target.partnerCodes) {
@@ -2397,7 +2398,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           signal
         });
         if (result.error) {
-          lastError = `${partnerCode}: ${result.error}`;
+          clusterAttemptErrors.push(`${partnerCode}: ${result.error}`);
           continue;
         }
 
@@ -2408,8 +2409,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         }
       }
 
-      if (!hasMappedAnyPartner && lastError) {
-        errors.push(`${target.clusterLabel}: ${lastError}`);
+      if (clusterAttemptErrors.length > 0) {
+        errors.push(
+          `${target.clusterLabel}: ${clusterAttemptErrors[0]}${
+            clusterAttemptErrors.length > 1 ? ` (+${clusterAttemptErrors.length - 1} hata)` : ""
+          }`
+        );
+      } else if (!hasMappedAnyPartner) {
+        errors.push(`${target.clusterLabel}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`);
       }
     },
     () => Boolean(signal?.aborted)
@@ -5442,7 +5449,8 @@ async function fetchAuthorizedLinesLoginInfo({
   username,
   password,
   fallbackBranchId,
-  timeoutMs = 90000
+  timeoutMs = 90000,
+  authorization = PARTNERS_API_AUTH
 }) {
   const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
   if (loginBaseUrls.length === 0) {
@@ -5494,7 +5502,7 @@ async function fetchAuthorizedLinesLoginInfo({
       }
       lastLoginUrl = loginUrl;
 
-      const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, PARTNERS_API_AUTH);
+      const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
       if (sessionResult.error) {
         lastError = `${sessionResult.error} (URL: ${loginUrl})`;
         continue;
@@ -5523,7 +5531,7 @@ async function fetchAuthorizedLinesLoginInfo({
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Authorization: PARTNERS_API_AUTH
+          Authorization: authorization
         },
         body: JSON.stringify(payload),
         signal: controller.signal
@@ -5549,6 +5557,9 @@ async function fetchAuthorizedLinesLoginInfo({
       }
 
       const tokenValue =
+        String(parsed?.token?.data || "").trim() ||
+        String(parsed?.token?.token || "").trim() ||
+        String(parsed?.token || "").trim() ||
         String(parsed?.data?.token?.data || "").trim() ||
         extractMembershipTokenDataFromPayload(parsed) ||
         extractTokenFromHeaders(responseHeaders) ||
