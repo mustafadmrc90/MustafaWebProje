@@ -2741,6 +2741,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
   allCompanyRows,
   { clusterCount = PARTNER_CLUSTER_TOTAL, baseError = null } = {}
 ) {
+  const targetClusterLabel = "cluster0";
   const sourceRows = Array.isArray(allCompanyRows) ? allCompanyRows : [];
   const compactErrorText = (value, maxLen = 180) => {
     const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -2759,7 +2760,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
     return {
       rows: [],
       sourceRowCount: 0,
-      clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
+      clusterCount: 1,
       error: String(baseError || "").trim() || "GetBranches için firma listesi boş.",
       failures: []
     };
@@ -2780,18 +2781,17 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       if (!codeList.includes(code)) codeList.push(code);
     });
 
-    const clusterTargets = [];
-    for (let cluster = PARTNER_CLUSTER_MIN; cluster <= PARTNER_CLUSTER_MAX; cluster += 1) {
-      const clusterLabel = `cluster${cluster}`;
-      const partnerCodes = clusterLoginCodesByLabel.get(clusterLabel);
-      clusterTargets.push({
-        clusterLabel,
-        partnerCodes: Array.isArray(partnerCodes)
-          ? partnerCodes.map((code) => String(code || "").trim()).filter(Boolean)
+    const clusterTargets = [
+      {
+        clusterLabel: targetClusterLabel,
+        partnerCodes: Array.isArray(clusterLoginCodesByLabel.get(targetClusterLabel))
+          ? clusterLoginCodesByLabel
+              .get(targetClusterLabel)
+              .map((code) => String(code || "").trim())
+              .filter(Boolean)
           : []
-      });
-    }
-    clusterTargets.sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
+      }
+    ].sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
 
     const collectedRows = [];
     const errors = [];
@@ -2878,7 +2878,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
     return {
       rows,
       sourceRowCount: sourceRows.length,
-      clusterCount: Number.isFinite(Number(clusterCount)) ? Number(clusterCount) : PARTNER_CLUSTER_TOTAL,
+      clusterCount: 1,
       error: warningParts.length > 0 ? warningParts.join(" | ") : null,
       failures: uniqueErrors
     };
