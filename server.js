@@ -2200,11 +2200,38 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
     "partnerid",
     "partnerId",
     "partnerID",
+    "company-id",
+    "company_id",
+    "companyid",
+    "companyId",
+    "companyID",
+    "firm-id",
+    "firm_id",
+    "firmid",
+    "firmId",
+    "firmID",
     "provider-id",
     "provider_id",
     "providerid",
     "providerId",
-    "providerID"
+    "providerID",
+    "bus-ticket-provider-id",
+    "bus_ticket_provider_id",
+    "busticketproviderid",
+    "busTicketProviderId",
+    "busTicketProviderID"
+  ];
+  const partnerCodeAliases = [
+    "partner-code",
+    "partner_code",
+    "partnercode",
+    "partnerCode",
+    "partnerID",
+    "code",
+    "company-code",
+    "company_code",
+    "companycode",
+    "companyCode"
   ];
   const branchIdAliases = ["id", "branch-id", "branch_id", "branchid", "branchId"];
   const branchNameAliases = [
@@ -2217,6 +2244,27 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
     "displayname",
     "title"
   ];
+  const inferPartnerIdFromNode = (node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return "";
+
+    const explicitPartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+    if (explicitPartnerId) return explicitPartnerId;
+
+    const idValue = formatPartnerCellValue(readPartnerRawValueByAliases(node, ["id"]));
+    if (!idValue) return "";
+
+    const hasPartnerCode = Boolean(formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerCodeAliases)));
+    const hasBranchCollection = Object.entries(node).some(([key, value]) => {
+      const keyText = String(key || "").toLowerCase();
+      if (!/branch|sube/i.test(keyText)) return false;
+      return Array.isArray(value) || (value && typeof value === "object");
+    });
+    const hasProviderMarker = Object.keys(node).some((key) => /partner|provider|company|firma/i.test(String(key || "")));
+
+    // Branch satırındaki "id" ile firma "id"yi karıştırmamak için yalnızca firma benzeri nodelarda infer et.
+    if (hasPartnerCode || hasBranchCollection || hasProviderMarker) return idValue;
+    return "";
+  };
 
   const walk = (node, inheritedPartnerId = "") => {
     if (node === null || node === undefined) return;
@@ -2235,7 +2283,7 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
     }
     if (typeof node !== "object") return;
 
-    const nodePartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+    const nodePartnerId = inferPartnerIdFromNode(node);
     const activePartnerId = String(nodePartnerId || inheritedPartnerId || normalizedFallbackPartnerId).trim();
 
     const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
@@ -2267,9 +2315,6 @@ async function fetchObusMerkezBranchMapForTarget({
   if (!endpointUrl) {
     return { cluster, map: new Map(), error: "GetBranches endpoint URL geçersiz." };
   }
-  if (!normalizedPartnerCode) {
-    return { cluster, map: new Map(), error: "partner-code bulunamadı." };
-  }
 
   const loginResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl,
@@ -2279,7 +2324,8 @@ async function fetchObusMerkezBranchMapForTarget({
     password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
     fallbackBranchId: normalizedFallbackPartnerId,
     timeoutMs: 20000,
-    authorization: INVENTORY_BRANCHES_API_AUTH
+    authorization: INVENTORY_BRANCHES_API_AUTH,
+    allowEmptyPartnerCode: true
   });
 
   if (!loginResult.ok) {
@@ -2427,7 +2473,9 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   // İstenen akış: cluster0 tamamlanır, sonra cluster1'e geçilir.
   for (const target of clusterTargets) {
     if (Boolean(signal?.aborted)) break;
-    const attemptCodes = Array.isArray(target.partnerCodes) ? target.partnerCodes : [];
+    const attemptCodes = Array.from(
+      new Set(["", ...(Array.isArray(target.partnerCodes) ? target.partnerCodes : [])].map((code) => String(code || "")))
+    );
     if (attemptCodes.length === 0) {
       const noCodeError = "Kullanılabilir partner-code bulunamadı.";
       errors.push(`${target.clusterLabel}: ${noCodeError}`);
@@ -2441,6 +2489,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
 
     for (const partnerCode of attemptCodes) {
       if (Boolean(signal?.aborted)) break;
+      const partnerCodeLabel = partnerCode ? partnerCode : "(boş)";
 
       const result = await fetchObusMerkezBranchMapForTarget({
         clusterLabel: target.clusterLabel,
@@ -2449,7 +2498,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       });
 
       if (result.error) {
-        attemptErrors.push(`${partnerCode}: ${compactErrorText(result.error)}`);
+        attemptErrors.push(`${partnerCodeLabel}: ${compactErrorText(result.error)}`);
         continue;
       }
 
@@ -5529,7 +5578,8 @@ async function fetchAuthorizedLinesLoginInfo({
   password,
   fallbackBranchId,
   timeoutMs = 90000,
-  authorization = PARTNERS_API_AUTH
+  authorization = PARTNERS_API_AUTH,
+  allowEmptyPartnerCode = false
 }) {
   const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
   if (loginBaseUrls.length === 0) {
@@ -5548,10 +5598,10 @@ async function fetchAuthorizedLinesLoginInfo({
   const normalizedUsername = String(username || "").trim();
   const normalizedPassword = String(password || "");
 
-  if (!normalizedPartnerCode || !normalizedUsername || !normalizedPassword) {
+  if ((!normalizedPartnerCode && !allowEmptyPartnerCode) || !normalizedUsername || !normalizedPassword) {
     return {
       ok: false,
-      error: "Firma, kullanıcı adı ve şifre zorunludur.",
+      error: "Firma (partner-code), kullanıcı adı ve şifre zorunludur.",
       sessionId: "",
       deviceId: "",
       branchId: "",
