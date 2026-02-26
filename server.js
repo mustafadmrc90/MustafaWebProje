@@ -1780,6 +1780,142 @@ function extractBranchIdFromUserLoginPayload(payload) {
   return firstValid ? String(firstValid).trim() : "";
 }
 
+function extractObusMerkezBranchKeyFromBranchListNode(node) {
+  const normalizeText = (value) => String(value === undefined || value === null ? "" : value).trim();
+  const isObusMerkez = (value) => normalizeTokenName(value) === "obusmerkez";
+  const parseStructuredText = (value) => {
+    const text = normalizeText(value);
+    if (!text) return null;
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      return parseJsonSafe(text);
+    }
+    return null;
+  };
+
+  const walk = (current, entryKey = "") => {
+    if (current === null || current === undefined) return "";
+    if (typeof current === "string") {
+      const parsed = parseStructuredText(current);
+      return parsed === null ? "" : walk(parsed, entryKey);
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        const found = walk(item);
+        if (found) return found;
+      }
+      return "";
+    }
+    if (typeof current !== "object") return "";
+
+    const labelValue =
+      readPartnerRawValueByAliases(current, [
+        "value",
+        "name",
+        "label",
+        "title",
+        "text",
+        "branch-name",
+        "branch_name",
+        "branchName"
+      ]) || "";
+    if (isObusMerkez(labelValue)) {
+      const keyValue =
+        readPartnerRawValueByAliases(current, [
+          "key",
+          "id",
+          "branch-id",
+          "branch_id",
+          "branchid",
+          "branch-key",
+          "branch_key",
+          "branchkey"
+        ]) || entryKey;
+      const normalizedKey = normalizeText(keyValue);
+      if (normalizedKey) return normalizedKey;
+    }
+
+    for (const [key, value] of Object.entries(current)) {
+      const keyText = normalizeText(key);
+      if (isObusMerkez(value) && keyText) {
+        return keyText;
+      }
+      const found = walk(value, keyText);
+      if (found) return found;
+    }
+
+    return "";
+  };
+
+  return walk(node);
+}
+
+function extractObusMerkezBranchKeyFromUserLoginPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const queue = [{ node: payload, multipleBranchesContext: false }];
+  const visited = new Set();
+
+  while (queue.length > 0) {
+    const { node: current, multipleBranchesContext } = queue.shift() || {};
+    if (!current || typeof current !== "object") continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    if (Array.isArray(current)) {
+      current.forEach((item) => {
+        if (item && typeof item === "object") {
+          queue.push({ node: item, multipleBranchesContext });
+          return;
+        }
+        if (typeof item === "string") {
+          const parsed = parseJsonSafe(item);
+          if (parsed && typeof parsed === "object") {
+            queue.push({ node: parsed, multipleBranchesContext });
+          }
+        }
+      });
+      continue;
+    }
+
+    const stateValue =
+      String(readPartnerRawValueByAliases(current, ["state", "login-state", "login_state"]) || "").trim();
+    const hasMultipleBranchesState = normalizeTokenName(stateValue) === "multiplebranches";
+    const currentContext = Boolean(multipleBranchesContext || hasMultipleBranchesState);
+
+    if (currentContext) {
+      for (const [key, value] of Object.entries(current)) {
+        const normalizedKey = normalizeTokenName(key);
+        if (
+          normalizedKey === "branches" ||
+          normalizedKey === "brancheslist" ||
+          normalizedKey === "branchlist" ||
+          normalizedKey === "branchoptions" ||
+          normalizedKey === "branchoptionlist" ||
+          normalizedKey.includes("branches") ||
+          normalizedKey.includes("branch")
+        ) {
+          const key = extractObusMerkezBranchKeyFromBranchListNode(value);
+          if (key) return key;
+        }
+      }
+    }
+
+    Object.values(current).forEach((value) => {
+      if (value && typeof value === "object") {
+        queue.push({ node: value, multipleBranchesContext: currentContext });
+        return;
+      }
+      if (typeof value === "string") {
+        const parsed = parseJsonSafe(value);
+        if (parsed && typeof parsed === "object") {
+          queue.push({ node: parsed, multipleBranchesContext: currentContext });
+        }
+      }
+    });
+  }
+
+  return "";
+}
+
 function buildUserLoginBaseUrls(companyUrl, endpointUrl) {
   const values = [companyUrl, endpointUrl]
     .map((item) => normalizeTargetUrl(item))
@@ -2311,6 +2447,27 @@ async function fetchObusMerkezBranchMapForTarget({
   const sessionId = String(loginResult.sessionId || "").trim();
   const deviceId = String(loginResult.deviceId || "").trim();
   const token = String(loginResult.token || "").trim();
+  const loginObusMerkezBranchKey = String(loginResult.obusMerkezBranchKey || "").trim();
+  if (loginObusMerkezBranchKey) {
+    const map = new Map();
+    const rows = [];
+    if (normalizedFallbackPartnerId) {
+      map.set(normalizedFallbackPartnerId, loginObusMerkezBranchKey);
+      rows.push({
+        partnerId: normalizedFallbackPartnerId,
+        name: "OBUSMERKEZ",
+        branchId: loginObusMerkezBranchKey
+      });
+    } else {
+      rows.push({
+        partnerId: "",
+        name: "OBUSMERKEZ",
+        branchId: loginObusMerkezBranchKey
+      });
+    }
+    return { cluster, map, rows, error: null };
+  }
+
   const missingFields = [];
   if (!sessionId) missingFields.push("session-id");
   if (!deviceId) missingFields.push("device-id");
@@ -2536,7 +2693,7 @@ async function fetchPartnerCodes() {
   }
 }
 
-async function fetchAllPartnerRows() {
+async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(30000, ALL_COMPANIES_FETCH_TIMEOUT_MS));
 
@@ -2577,15 +2734,20 @@ async function fetchAllPartnerRows() {
 
     const normalizedReport = normalizeAllCompaniesReportRows(mergedRows);
     const columns = normalizedReport.columns;
-    const obusEnriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedReport.rows, controller.signal);
-    const rows = obusEnriched.rows;
+    let rows = normalizedReport.rows;
+    let obusNotice = null;
+    if (includeObusMerkezSubeId) {
+      const obusEnriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedReport.rows, controller.signal);
+      rows = obusEnriched.rows;
+      obusNotice = obusEnriched.notice;
+    }
 
     const errorParts = [];
     if (errors.length > 0) {
       errorParts.push(`${errors.length}/${partnerUrls.length} cluster alınamadı.`);
     }
-    if (obusEnriched.notice) {
-      errorParts.push(obusEnriched.notice);
+    if (obusNotice) {
+      errorParts.push(obusNotice);
     }
     if (errorParts.length === 0 && rows.length === 0) {
       errorParts.push("Partner API sonucunda gösterilecek kayıt bulunamadı.");
@@ -5760,6 +5922,7 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: "",
       branchId: "",
       token: "",
+      obusMerkezBranchKey: "",
       rawLoginBody: ""
     };
   }
@@ -5776,6 +5939,7 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: "",
       branchId: "",
       token: "",
+      obusMerkezBranchKey: "",
       rawLoginBody: ""
     };
   }
@@ -5866,11 +6030,26 @@ async function fetchAuthorizedLinesLoginInfo({
         findNestedValue(parsed, new Set(["accesstoken"])) ||
         findNestedValue(parsed, new Set(["authorizationtoken"])) ||
         "";
+      const obusMerkezBranchKey = String(extractObusMerkezBranchKeyFromUserLoginPayload(parsed) || "").trim();
       if (!String(tokenValue || "").trim()) {
+        if (obusMerkezBranchKey) {
+          return {
+            ok: true,
+            error: null,
+            sessionId: sessionResult.sessionId,
+            deviceId: sessionResult.deviceId,
+            branchId: obusMerkezBranchKey,
+            token: "",
+            obusMerkezBranchKey,
+            loginUrl,
+            rawLoginBody: raw
+          };
+        }
         lastError = `Membership UserLogin token bulunamadı. (URL: ${loginUrl})`;
         continue;
       }
       const branchId =
+        obusMerkezBranchKey ||
         extractBranchIdFromUserLoginPayload(parsed) ||
         findNestedValue(parsed, new Set(["branchid", "branch"])) ||
         extractBranchIdFromToken(tokenValue) ||
@@ -5886,6 +6065,7 @@ async function fetchAuthorizedLinesLoginInfo({
         deviceId: sessionResult.deviceId,
         branchId: String(branchId || "").trim(),
         token: String(tokenValue || "").trim(),
+        obusMerkezBranchKey,
         loginUrl,
         rawLoginBody: raw
       };
@@ -5898,6 +6078,7 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: lastDeviceId,
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
+      obusMerkezBranchKey: "",
       loginUrl: lastLoginUrl,
       rawLoginBody: lastRawLoginBody
     };
@@ -5909,6 +6090,7 @@ async function fetchAuthorizedLinesLoginInfo({
       deviceId: "",
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
+      obusMerkezBranchKey: "",
       loginUrl: "",
       rawLoginBody: ""
     };

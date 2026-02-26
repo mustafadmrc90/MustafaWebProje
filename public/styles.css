@@ -2014,6 +2014,42 @@ button.ghost {
   white-space: nowrap;
 }
 
+.all-companies-refresh-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.all-companies-refresh-form.is-loading {
+  opacity: 0.9;
+}
+
+.all-companies-loading-message {
+  font-size: 12px;
+  color: #4f6176;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.all-companies-refresh-form.is-loading .all-companies-loading-message {
+  display: inline-flex;
+}
+
+.all-companies-loading-message[hidden] {
+  display: none !important;
+}
+
+.all-companies-loading-message::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid #b7c5d8;
+  border-top-color: #4f6176;
+  animation: salesSpin 0.8s linear infinite;
+}
+
 .inline-success {
   margin: 0 0 12px;
   background: #e4f4e9;

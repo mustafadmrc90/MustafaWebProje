@@ -42,7 +42,12 @@
             <span class="pill"><%= report.rows.length %> Kayıt</span>
             <span class="pill"><%= report.columns.length %> Kolon</span>
             <span class="pill"><%= report.clusterCount %> Cluster</span>
-            <a class="button-link ghost" href="/reports/all-companies">Yenile</a>
+            <form class="all-companies-refresh-form" method="get" action="/reports/all-companies">
+              <button class="button-link ghost" type="submit">Yenile</button>
+              <span class="all-companies-loading-message" hidden>
+                İstek gönderildi, veriler hazırlanıyor...
+              </span>
+            </form>
           </div>
         </div>
 

@@ -879,6 +879,33 @@
     });
   };
 
+  const initAllCompaniesLoading = () => {
+    const form = document.querySelector(".all-companies-refresh-form");
+    if (!form) return;
+    if (form.dataset.loadingBound === "1") return;
+    form.dataset.loadingBound = "1";
+
+    const submitBtn = form.querySelector("button[type='submit']");
+    const loadingMessage = form.querySelector(".all-companies-loading-message");
+    if (!submitBtn) return;
+
+    form.classList.remove("is-loading");
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Yenile";
+    if (loadingMessage) {
+      loadingMessage.hidden = true;
+    }
+
+    form.addEventListener("submit", () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Yükleniyor...";
+      form.classList.add("is-loading");
+      if (loadingMessage) {
+        loadingMessage.hidden = false;
+      }
+    });
+  };
+
   const initPermissionsBulkForm = () => {
     const form = document.querySelector("form[action^='/permissions/']");
     if (!form) return;
@@ -926,6 +953,7 @@
     initSalesReportLoading();
     initSlackReportLoading();
     initAllowedLinesLoading();
+    initAllCompaniesLoading();
     initPermissionsBulkForm();
 
     const modal = document.querySelector("#endpoint-modal");
