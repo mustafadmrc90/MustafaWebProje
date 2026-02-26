@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 5v14"></path>
+                <path d="M5 12h14"></path>
+                <circle cx="12" cy="12" r="9"></circle>
+              </svg>
+            </span>
+            <span>Obus Kullanıcı Oluştur</span>
+          </h1>
+          <p>Bu ekran hazırlandı. Servis detayına göre form alanları eklenecek.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <section class="table-card panel-card">
+        <div class="table-head">
+          <h2>Hazırlık</h2>
+        </div>
+        <p class="muted">Servis bilgisini paylaştığında kullanıcı oluşturma akışını bu ekrana ekleyeceğim.</p>
+      </section>
+    </section>
+
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

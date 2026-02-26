@@ -151,8 +151,18 @@ const SIDEBAR_MENU_REGISTRY = [
     parentKey: "general",
     route: "/general/authorized-lines-upload",
     routeKey: "authorized-lines-upload",
-    sortOrder: 12,
+    sortOrder: 13,
     iconKey: "authorized-lines-upload"
+  },
+  {
+    key: "obus-user-create",
+    type: "item",
+    label: "Obus Kullanıcı Oluştur",
+    parentKey: "general",
+    route: "/general/obus-user-create",
+    routeKey: "obus-user-create",
+    sortOrder: 12,
+    iconKey: "obus-user-create"
   },
   {
     key: "reports",
@@ -653,6 +663,47 @@ function buildSidebarFallbackModel() {
   return buildSidebarModelFromRows(rows);
 }
 
+function ensureCriticalSidebarRows(rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const normalizedRows = sourceRows.map((row) => ({ ...row }));
+  const rowByKey = new Map(
+    normalizedRows
+      .map((row) => [String(row?.key || "").trim(), row])
+      .filter(([key]) => key)
+  );
+
+  const upsertFromRegistry = (key, forceCanView = false) => {
+    const registryItem = SIDEBAR_MENU_REGISTRY.find((item) => String(item.key || "").trim() === key);
+    if (!registryItem) return;
+
+    if (!rowByKey.has(key)) {
+      const injected = {
+        key: registryItem.key,
+        label: registryItem.label,
+        type: registryItem.type,
+        parent_key: registryItem.parentKey || null,
+        route: registryItem.route || null,
+        route_key: registryItem.routeKey || null,
+        sort_order: Number.isFinite(Number(registryItem.sortOrder)) ? Number(registryItem.sortOrder) : 0,
+        icon_key: registryItem.iconKey || "folder",
+        can_view: forceCanView ? true : registryItem.type === "section"
+      };
+      normalizedRows.push(injected);
+      rowByKey.set(key, injected);
+      return;
+    }
+
+    if (forceCanView) {
+      rowByKey.get(key).can_view = true;
+    }
+  };
+
+  upsertFromRegistry("general", true);
+  upsertFromRegistry("obus-user-create", true);
+
+  return normalizedRows;
+}
+
 function buildSidebarEmptyModel() {
   return {
     sections: [],
@@ -735,6 +786,7 @@ async function syncSidebarMenusAndPermissions() {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
+          WHEN m.key = 'obus-user-create' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -742,6 +794,12 @@ async function syncSidebarMenusAndPermissions() {
       CROSS JOIN sidebar_menu_items m
       WHERE m.is_active = true
       ON CONFLICT (user_id, menu_key) DO NOTHING
+    `);
+
+    await client.query(`
+      UPDATE user_sidebar_permissions
+      SET can_view = true, updated_at = now()
+      WHERE menu_key = 'obus-user-create'
     `);
 
     await client.query("COMMIT");
@@ -764,6 +822,7 @@ async function ensureSidebarPermissionsForUser(userId) {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
+          WHEN m.key = 'obus-user-create' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -772,6 +831,16 @@ async function ensureSidebarPermissionsForUser(userId) {
       WHERE m.is_active = true
         AND u.id = $1
       ON CONFLICT (user_id, menu_key) DO NOTHING
+    `,
+    [userIdNum]
+  );
+
+  await pool.query(
+    `
+      UPDATE user_sidebar_permissions
+      SET can_view = true, updated_at = now()
+      WHERE user_id = $1
+        AND menu_key = 'obus-user-create'
     `,
     [userIdNum]
   );
@@ -809,7 +878,7 @@ async function loadSidebarForUser(userId, options = {}) {
     `,
     [userIdNum]
   );
-  return buildSidebarModelFromRows(result.rows);
+  return buildSidebarModelFromRows(ensureCriticalSidebarRows(result.rows));
 }
 
 function getFirstAccessibleRoute(sidebar) {
@@ -921,7 +990,7 @@ async function loadSidebarPermissionSectionsForUser(userId) {
     `,
     [userIdNum]
   );
-  return buildPermissionSections(result.rows);
+  return buildPermissionSections(ensureCriticalSidebarRows(result.rows));
 }
 
 function requireMenuAccess(menuKey) {
@@ -5441,6 +5510,13 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
     user: req.session.user,
     active: "dashboard",
     loginSuccess: req.query.login === "1"
+  });
+});
+
+app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), (req, res) => {
+  res.render("general-obus-user-create", {
+    user: req.session.user,
+    active: "obus-user-create"
   });
 });
 
