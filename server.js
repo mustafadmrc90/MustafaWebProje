@@ -2751,14 +2751,18 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       if (!codeList.includes(code)) codeList.push(code);
     });
 
-    const clusterTargets = Array.from(clusterLoginCodesByLabel.entries())
-      .map(([clusterLabel, partnerCodes]) => ({
+    const clusterTargets = [];
+    for (let cluster = PARTNER_CLUSTER_MIN; cluster <= PARTNER_CLUSTER_MAX; cluster += 1) {
+      const clusterLabel = `cluster${cluster}`;
+      const partnerCodes = clusterLoginCodesByLabel.get(clusterLabel);
+      clusterTargets.push({
         clusterLabel,
         partnerCodes: Array.isArray(partnerCodes)
           ? partnerCodes.map((code) => String(code || "").trim()).filter(Boolean)
           : []
-      }))
-      .sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
+      });
+    }
+    clusterTargets.sort((a, b) => clusterRank(a.clusterLabel) - clusterRank(b.clusterLabel));
 
     const recordsByPartnerId = new Map();
     const errors = [];
