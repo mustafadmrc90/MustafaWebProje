@@ -6601,122 +6601,19 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 });
 
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
-  const shouldFetchPartners = req.query.runPartners === "1";
-  const shouldFetchBranches = req.query.runBranches === "1";
-
-  let report = buildEmptyAllCompaniesReport();
-  let branchReport = buildObusMerkezBranchServiceReport();
-  let partnerResult = null;
-
-  if (shouldFetchPartners || shouldFetchBranches) {
-    partnerResult = await fetchAllPartnerRows();
-  }
-
-  if (shouldFetchPartners) {
-    report = {
-      columns: partnerResult?.columns || report.columns,
-      rows: partnerResult?.rows || [],
-      error: partnerResult?.error || null,
-      clusterCount:
-        Number.isFinite(Number(partnerResult?.clusterCount)) && Number(partnerResult?.clusterCount) > 0
-          ? Number(partnerResult.clusterCount)
-          : report.clusterCount,
-      requested: true
-    };
-  } else if (Number.isFinite(Number(partnerResult?.clusterCount)) && Number(partnerResult?.clusterCount) > 0) {
-    report.clusterCount = Number(partnerResult.clusterCount);
-  }
-
-  if (shouldFetchBranches) {
-    const branchResult = await collectObusMerkezBranchRowsForAllCompanies(partnerResult?.rows || [], {
-      clusterCount: partnerResult?.clusterCount || report.clusterCount,
-      baseError: partnerResult?.error || null
-    });
-    branchReport = buildObusMerkezBranchServiceReport({
-      requested: true,
-      rows: branchResult.rows || [],
-      count: Array.isArray(branchResult.rows) ? branchResult.rows.length : 0,
-      sourceRowCount: Number.isFinite(Number(branchResult.sourceRowCount)) ? Number(branchResult.sourceRowCount) : 0,
-      clusterCount:
-        Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
-          ? Number(branchResult.clusterCount)
-          : report.clusterCount,
-      error: branchResult.error || null,
-      failures: Array.isArray(branchResult.failures) ? branchResult.failures : []
-    });
-    if (!branchReport.error && branchReport.count > 0) {
-      branchReport.notice = `${branchReport.count} OBUSMERKEZ kaydı bulundu.`;
-    }
-  }
-
+  const result = await fetchAllPartnerRows();
   res.render("reports-all-companies", {
     user: req.session.user,
     active: "all-companies",
-    report,
-    branchReport
+    report: {
+      columns: result.columns || [],
+      rows: result.rows || [],
+      error: result.error || null,
+      clusterCount: result.clusterCount || 0,
+      requested: true
+    }
   });
 });
-
-app.post(
-  "/reports/all-companies/branches/save",
-  requireAuth,
-  requireMenuAccess("all-companies"),
-  async (req, res) => {
-    const report = buildEmptyAllCompaniesReport();
-    let branchReport = buildObusMerkezBranchServiceReport({ requested: true });
-
-    const partnerResult = await fetchAllPartnerRows();
-    const branchResult = await collectObusMerkezBranchRowsForAllCompanies(partnerResult?.rows || [], {
-      clusterCount: partnerResult?.clusterCount || report.clusterCount,
-      baseError: partnerResult?.error || null
-    });
-
-    const branchRows = Array.isArray(branchResult.rows) ? branchResult.rows : [];
-    branchReport = buildObusMerkezBranchServiceReport({
-      requested: true,
-      rows: branchRows,
-      count: branchRows.length,
-      sourceRowCount: Number.isFinite(Number(branchResult.sourceRowCount)) ? Number(branchResult.sourceRowCount) : 0,
-      clusterCount:
-        Number.isFinite(Number(branchResult.clusterCount)) && Number(branchResult.clusterCount) > 0
-          ? Number(branchResult.clusterCount)
-          : report.clusterCount,
-      error: branchResult.error || null,
-      failures: Array.isArray(branchResult.failures) ? branchResult.failures : []
-    });
-
-    if (branchRows.length === 0) {
-      if (!branchReport.error) {
-        branchReport.error = "Kaydedilecek OBUSMERKEZ kaydı bulunamadı.";
-      }
-      return res.render("reports-all-companies", {
-        user: req.session.user,
-        active: "all-companies",
-        report,
-        branchReport
-      });
-    }
-
-    const saveResult = await saveObusMerkezBranchRows(branchRows);
-    if (saveResult.error) {
-      branchReport.error = branchReport.error ? `${branchReport.error} | ${saveResult.error}` : saveResult.error;
-    } else {
-      branchReport.saved = {
-        total: saveResult.savedCount,
-        inserted: saveResult.insertedCount,
-        updated: saveResult.updatedCount
-      };
-      branchReport.notice = `GetBranches sonuçları SQL'e kaydedildi. Toplam ${saveResult.savedCount}, yeni ${saveResult.insertedCount}, güncellenen ${saveResult.updatedCount}.`;
-    }
-
-    res.render("reports-all-companies", {
-      user: req.session.user,
-      active: "all-companies",
-      report,
-      branchReport
-    });
-  }
-);
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
   const shouldFetchReport = req.query.run === "1";

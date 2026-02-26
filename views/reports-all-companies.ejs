@@ -9,7 +9,6 @@
   </head>
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
-    <% const branch = branchReport || { requested: false, rows: [], count: 0, clusterCount: 0, error: null, notice: null, saved: null, sourceRowCount: 0, failures: [] }; %>
 
     <section class="content">
       <header class="page-header">
@@ -25,7 +24,7 @@
             </span>
             <span>Tüm Firmalar</span>
           </h1>
-          <p>İlk açılışta servis çağrılmaz. Butonlarla firma/getbranches servislerini tetikleyin.</p>
+          <p>Status=1 kayıtlar sabit kolon yapısıyla listelenir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -36,42 +35,6 @@
         <div class="alert inline-alert"><%= report.error %></div>
       <% } %>
 
-      <% if (branch.notice) { %>
-        <div class="inline-success"><%= branch.notice %></div>
-      <% } %>
-
-      <% if (branch.error) { %>
-        <div class="alert inline-alert"><%= branch.error %></div>
-      <% } %>
-      <% if (branch.failures && branch.failures.length > 0) { %>
-        <section class="table-card panel-card">
-          <div class="table-head">
-            <h2>GetBranches Başarısız İstekler</h2>
-            <div class="table-actions">
-              <span class="pill muted"><%= branch.failures.length %> Hata</span>
-            </div>
-          </div>
-          <div class="table-scroll">
-            <table class="partners-raw-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Detay</th>
-                </tr>
-              </thead>
-              <tbody>
-                <% branch.failures.forEach((failure, index) => { %>
-                  <tr>
-                    <td><%= index + 1 %></td>
-                    <td><%= failure %></td>
-                  </tr>
-                <% }) %>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      <% } %>
-
       <section class="table-card panel-card">
         <div class="table-head">
           <h2>Partner Sonuçları</h2>
@@ -79,28 +42,15 @@
             <span class="pill"><%= report.rows.length %> Kayıt</span>
             <span class="pill"><%= report.columns.length %> Kolon</span>
             <span class="pill"><%= report.clusterCount %> Cluster</span>
-            <form class="slack-save-form" method="get" action="/reports/all-companies">
-              <input type="hidden" name="runPartners" value="1" />
-              <button type="submit" class="button-link ghost">Firma Servisini Çalıştır</button>
-            </form>
-            <form class="slack-save-form" method="get" action="/reports/all-companies">
-              <input type="hidden" name="runBranches" value="1" />
-              <button type="submit" class="button-link ghost">GetBranches Çalıştır</button>
-            </form>
-            <form class="slack-save-form" method="post" action="/reports/all-companies/branches/save">
-              <button type="submit" class="button-link">GetBranches + SQL Kaydet</button>
-            </form>
-            <a class="button-link ghost" href="/reports/all-companies">Temizle</a>
+            <a class="button-link ghost" href="/reports/all-companies">Yenile</a>
           </div>
         </div>
 
-        <% if (!report.requested) { %>
-          <p class="muted">Liste şu an boş. Firma servisini çalıştırınca kayıtlar dolacaktır.</p>
-        <% } else if (report.rows.length === 0) { %>
+        <% if (report.columns.length === 0 || report.rows.length === 0) { %>
           <p class="muted">Gösterilecek partner kaydı bulunamadı.</p>
         <% } %>
 
-        <% if (report.columns.length > 0) { %>
+        <% if (report.columns.length > 0 && report.rows.length > 0) { %>
           <div class="table-scroll">
             <table class="partners-raw-table">
               <thead>
@@ -111,67 +61,12 @@
                 </tr>
               </thead>
               <tbody>
-                <% if (report.rows.length === 0) { %>
+                <% report.rows.forEach((row) => { %>
                   <tr>
-                    <td colspan="<%= report.columns.length %>" class="muted">Kayıt yok.</td>
-                  </tr>
-                <% } %>
-                <% if (report.rows.length > 0) { %>
-                  <% report.rows.forEach((row) => { %>
-                    <tr>
-                      <% report.columns.forEach((column) => { %>
-                        <% const value = row[column]; %>
-                        <td title="<%= value ?? '' %>"><%= value === undefined || value === null ? "-" : value %></td>
-                      <% }) %>
-                    </tr>
-                  <% }) %>
-                <% } %>
-              </tbody>
-            </table>
-          </div>
-        <% } %>
-      </section>
-
-      <section class="table-card panel-card">
-        <div class="table-head">
-          <h2>GetBranches (OBUSMERKEZ)</h2>
-          <div class="table-actions">
-            <span class="pill"><%= branch.count || 0 %> Kayıt</span>
-            <span class="pill"><%= branch.clusterCount || 0 %> Cluster</span>
-            <span class="pill muted"><%= branch.sourceRowCount || 0 %> Firma Kaydı</span>
-            <% if (branch.saved) { %>
-              <span class="pill success">Yeni: <%= branch.saved.inserted %></span>
-              <span class="pill success">Güncellenen: <%= branch.saved.updated %></span>
-            <% } %>
-          </div>
-        </div>
-
-        <% if (!branch.requested) { %>
-          <p class="muted">GetBranches servisi henüz çalıştırılmadı.</p>
-        <% } %>
-
-        <% if (branch.requested && branch.rows.length === 0 && !branch.error) { %>
-          <p class="muted">GetBranches sonucunda kayıt bulunamadı.</p>
-        <% } %>
-
-        <% if (branch.requested && branch.rows.length > 0) { %>
-          <div class="table-scroll">
-            <table class="partners-raw-table">
-              <thead>
-                <tr>
-                  <th>partner-id</th>
-                  <th>name</th>
-                  <th>id</th>
-                  <th>cluster</th>
-                </tr>
-              </thead>
-              <tbody>
-                <% branch.rows.forEach((row) => { %>
-                  <tr>
-                    <td><%= row.partnerId %></td>
-                    <td><%= row.name %></td>
-                    <td><%= row.branchId %></td>
-                    <td><%= row.cluster || "-" %></td>
+                    <% report.columns.forEach((column) => { %>
+                      <% const value = row[column]; %>
+                      <td title="<%= value ?? '' %>"><%= value === undefined || value === null ? "-" : value %></td>
+                    <% }) %>
                   </tr>
                 <% }) %>
               </tbody>
