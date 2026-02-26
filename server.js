@@ -2191,47 +2191,38 @@ function extractObusMerkezBranchMapFromPayload(payload, fallbackPartnerId = "") 
     "title"
   ];
 
-  const addCandidate = (node) => {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return;
-
-    const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
-    if (normalizeTokenName(branchName) !== "obusmerkez") return;
-
-    const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
-    if (!branchId) return;
-
-    const partnerId = formatPartnerCellValue(
-      readPartnerRawValueByAliases(node, partnerIdAliases) || normalizedFallbackPartnerId
-    );
-    if (!partnerId) return;
-
-    if (!map.has(partnerId)) {
-      map.set(partnerId, branchId);
-    }
-  };
-
-  const walk = (node) => {
+  const walk = (node, inheritedPartnerId = "") => {
     if (node === null || node === undefined) return;
     if (typeof node === "string") {
       const trimmed = node.trim();
       if (!trimmed) return;
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         const parsed = parseJsonSafe(trimmed);
-        if (parsed !== null) walk(parsed);
+        if (parsed !== null) walk(parsed, inheritedPartnerId);
       }
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((item) => walk(item));
+      node.forEach((item) => walk(item, inheritedPartnerId));
       return;
     }
     if (typeof node !== "object") return;
 
-    addCandidate(node);
-    Object.values(node).forEach((value) => walk(value));
+    const nodePartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+    const activePartnerId = String(nodePartnerId || inheritedPartnerId || normalizedFallbackPartnerId).trim();
+
+    const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
+    if (normalizeTokenName(branchName) === "obusmerkez") {
+      const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
+      if (branchId && activePartnerId && !map.has(activePartnerId)) {
+        map.set(activePartnerId, branchId);
+      }
+    }
+
+    Object.values(node).forEach((value) => walk(value, activePartnerId));
   };
 
-  walk(payload);
+  walk(payload, normalizedFallbackPartnerId);
   return map;
 }
 
@@ -2352,7 +2343,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
 
   const errors = [];
   const branchByPartnerId = new Map();
-  const clusterLoginCodeByLabel = new Map();
+  const clusterLoginCodesByLabel = new Map();
   const clusterErrorByLabel = new Map();
   const compactErrorText = (value, maxLen = 180) => {
     const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -2365,10 +2356,12 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     const cluster = extractClusterLabel(row?.source);
     const code = String(row?.code || "").trim();
     if (!cluster || !code) return;
-    if (!clusterLoginCodeByLabel.has(cluster)) {
-      // Cluster için tek bir token alıp aynı response içinden tüm partnerleri eşleştir.
-      clusterLoginCodeByLabel.set(cluster, code);
+    if (!clusterLoginCodesByLabel.has(cluster)) {
+      clusterLoginCodesByLabel.set(cluster, []);
     }
+    const codeList = clusterLoginCodesByLabel.get(cluster);
+    if (!Array.isArray(codeList)) return;
+    if (!codeList.includes(code)) codeList.push(code);
   });
 
   const mergeTargetResult = (result) => {
@@ -2383,36 +2376,69 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     });
   };
 
-  const clusterTargets = Array.from(clusterLoginCodeByLabel.entries()).map(([clusterLabel, partnerCode]) => ({
+  const clusterTargets = Array.from(clusterLoginCodesByLabel.entries()).map(([clusterLabel, partnerCodes]) => ({
     clusterLabel,
-    partnerCode: String(partnerCode || "").trim()
+    partnerCodes: Array.isArray(partnerCodes)
+      ? partnerCodes.map((code) => String(code || "").trim()).filter(Boolean)
+      : []
   }));
   await runWithConcurrency(
     clusterTargets,
     toBoundedInt(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY, 4, 1, 20),
     async (target) => {
       if (Boolean(signal?.aborted)) return;
-
-      const result = await fetchObusMerkezBranchMapForTarget({
-        clusterLabel: target.clusterLabel,
-        partnerCode: target.partnerCode,
-        signal
-      });
-
-      if (result.error) {
-        const clusterErrorText = `${target.partnerCode}: ${compactErrorText(result.error)}`;
-        errors.push(`${target.clusterLabel}: ${clusterErrorText}`);
-        clusterErrorByLabel.set(target.clusterLabel, clusterErrorText);
+      const attemptCodes = Array.isArray(target.partnerCodes) ? target.partnerCodes : [];
+      if (attemptCodes.length === 0) {
+        const noCodeError = "Kullanılabilir partner-code bulunamadı.";
+        errors.push(`${target.clusterLabel}: ${noCodeError}`);
+        clusterErrorByLabel.set(target.clusterLabel, noCodeError);
         return;
       }
 
-      mergeTargetResult(result);
-      const mapSize = result.map instanceof Map ? result.map.size : 0;
-      if (mapSize === 0) {
+      const attemptErrors = [];
+      let resolved = false;
+      let resolvedWithMatch = false;
+
+      for (const partnerCode of attemptCodes) {
+        if (Boolean(signal?.aborted)) return;
+
+        const result = await fetchObusMerkezBranchMapForTarget({
+          clusterLabel: target.clusterLabel,
+          partnerCode,
+          signal
+        });
+
+        if (result.error) {
+          attemptErrors.push(`${partnerCode}: ${compactErrorText(result.error)}`);
+          continue;
+        }
+
+        resolved = true;
+        mergeTargetResult(result);
+        const mapSize = result.map instanceof Map ? result.map.size : 0;
+        if (mapSize > 0) {
+          resolvedWithMatch = true;
+          break;
+        }
+      }
+
+      if (resolvedWithMatch) return;
+      if (resolved) {
         const noMatchMessage = "Eşleşen OBUSMERKEZ kaydı bulunamadı.";
         errors.push(`${target.clusterLabel}: ${noMatchMessage}`);
         clusterErrorByLabel.set(target.clusterLabel, noMatchMessage);
+        return;
       }
+
+      const uniqueAttemptErrors = Array.from(new Set(attemptErrors.filter(Boolean)));
+      const clusterErrorText =
+        uniqueAttemptErrors.length > 0
+          ? `${uniqueAttemptErrors.slice(0, 2).join(" | ")}${
+              uniqueAttemptErrors.length > 2 ? ` (+${uniqueAttemptErrors.length - 2} hata)` : ""
+            }`
+          : "UserLogin/GetBranches başarısız.";
+      errors.push(`${target.clusterLabel}: ${clusterErrorText}`);
+      clusterErrorByLabel.set(target.clusterLabel, clusterErrorText);
     },
     () => Boolean(signal?.aborted)
   );
