@@ -2608,15 +2608,11 @@ async function fetchAllPartnerRows() {
 
     const normalizedReport = normalizeAllCompaniesReportRows(mergedRows);
     const columns = normalizedReport.columns;
-    const obusEnriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedReport.rows, controller.signal);
-    const rows = obusEnriched.rows;
+    const rows = normalizedReport.rows;
 
     const errorParts = [];
     if (errors.length > 0) {
       errorParts.push(`${errors.length}/${partnerUrls.length} cluster alınamadı.`);
-    }
-    if (obusEnriched.notice) {
-      errorParts.push(obusEnriched.notice);
     }
     if (errorParts.length === 0 && rows.length === 0) {
       errorParts.push("Partner API sonucunda gösterilecek kayıt bulunamadı.");
