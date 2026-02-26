@@ -6715,7 +6715,7 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 });
 
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
-  const result = await fetchAllPartnerRows();
+  const result = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
   res.render("reports-all-companies", {
     user: req.session.user,
     active: "all-companies",
