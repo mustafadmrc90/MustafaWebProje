@@ -92,7 +92,7 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER =
-  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "20", 10) || 20;
+  Number.parseInt(process.env.INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER || "100", 10) || 100;
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CODES_CACHE_FILE = path.join(__dirname, "data", "partner-codes-cache.json");
@@ -2378,7 +2378,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     });
   };
 
-  const maxCodesPerCluster = toBoundedInt(INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER, 5, 1, 20);
+  const maxCodesPerCluster = toBoundedInt(INVENTORY_BRANCHES_MAX_CODES_PER_CLUSTER, 100, 1, 500);
   const clusterTargets = Array.from(clusterCodesByLabel.entries()).map(([clusterLabel, codesSet]) => ({
     clusterLabel,
     partnerCodes: Array.from(codesSet.values()).slice(0, maxCodesPerCluster)
@@ -2389,6 +2389,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     async (target) => {
       const clusterAttemptErrors = [];
       let hasMappedAnyPartner = false;
+      let hasSuccessfulLookup = false;
 
       for (const partnerCode of target.partnerCodes) {
         if (Boolean(signal?.aborted)) break;
@@ -2402,11 +2403,21 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           continue;
         }
 
+        hasSuccessfulLookup = true;
         mergeTargetResult(result);
         if (result.map instanceof Map && result.map.size > 0) {
           hasMappedAnyPartner = true;
           break;
         }
+      }
+
+      if (hasMappedAnyPartner) {
+        return;
+      }
+
+      if (hasSuccessfulLookup) {
+        errors.push(`${target.clusterLabel}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`);
+        return;
       }
 
       if (clusterAttemptErrors.length > 0) {
@@ -2415,8 +2426,6 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
             clusterAttemptErrors.length > 1 ? ` (+${clusterAttemptErrors.length - 1} hata)` : ""
           }`
         );
-      } else if (!hasMappedAnyPartner) {
-        errors.push(`${target.clusterLabel}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`);
       }
     },
     () => Boolean(signal?.aborted)
