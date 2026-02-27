@@ -6927,6 +6927,7 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
   const shouldSync = String(req.query.sync || "").trim() === "1";
+  const shouldViewCache = String(req.query.cache || "").trim() === "1";
   let syncResult = null;
   if (shouldSync) {
     syncResult = await syncAllCompaniesCacheFromService();
@@ -6939,6 +6940,9 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
 
   const syncMessage = shouldSync
     ? `Servis taraması tamamlandı. ${syncResult?.fetchedCount || 0} kayıt kontrol edildi, ${syncResult?.savedCount || 0} yeni firma eklendi.`
+    : "";
+  const cacheMessage = shouldViewCache
+    ? `SQL önbelleğinden gösteriliyor. Toplam ${result.rows?.length || 0} kayıt.`
     : "";
 
   const emptyCacheMessage =
@@ -6958,6 +6962,10 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
       sync: {
         requested: shouldSync,
         message: syncMessage
+      },
+      cache: {
+        requested: shouldViewCache,
+        message: cacheMessage
       },
       notice: emptyCacheMessage
     }

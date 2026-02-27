@@ -37,6 +37,9 @@
       <% if (report.sync && report.sync.message) { %>
         <div class="inline-success"><%= report.sync.message %></div>
       <% } %>
+      <% if (report.cache && report.cache.message) { %>
+        <div class="inline-success"><%= report.cache.message %></div>
+      <% } %>
       <% if (report.notice) { %>
         <p class="muted"><%= report.notice %></p>
       <% } %>
@@ -63,6 +66,15 @@
               </button>
               <span class="all-companies-loading-message" hidden>
                 Servis taranıyor, yeni firmalar ekleniyor...
+              </span>
+            </form>
+            <form class="all-companies-loading-form all-companies-cache-form" method="get" action="/reports/all-companies">
+              <input type="hidden" name="cache" value="1" />
+              <button class="button-link ghost" type="submit" data-default-label="SQL'den Göster" data-loading-label="Yükleniyor...">
+                SQL'den Göster
+              </button>
+              <span class="all-companies-loading-message" hidden>
+                SQL kayıtları yükleniyor...
               </span>
             </form>
           </div>
