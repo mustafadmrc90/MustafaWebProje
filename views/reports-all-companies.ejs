@@ -34,6 +34,12 @@
       <% if (report.error) { %>
         <div class="alert inline-alert"><%= report.error %></div>
       <% } %>
+      <% if (report.sync && report.sync.message) { %>
+        <div class="inline-success"><%= report.sync.message %></div>
+      <% } %>
+      <% if (report.notice) { %>
+        <p class="muted"><%= report.notice %></p>
+      <% } %>
 
       <section class="table-card panel-card">
         <div class="table-head">
@@ -42,10 +48,21 @@
             <span class="pill"><%= report.rows.length %> Kayıt</span>
             <span class="pill"><%= report.columns.length %> Kolon</span>
             <span class="pill"><%= report.clusterCount %> Cluster</span>
-            <form class="all-companies-refresh-form" method="get" action="/reports/all-companies">
-              <button class="button-link ghost" type="submit">Yenile</button>
+            <form class="all-companies-loading-form all-companies-refresh-form" method="get" action="/reports/all-companies">
+              <button class="button-link ghost" type="submit" data-default-label="Yenile" data-loading-label="Yükleniyor...">
+                Yenile
+              </button>
               <span class="all-companies-loading-message" hidden>
-                İstek gönderildi, veriler hazırlanıyor...
+                Liste açılıyor...
+              </span>
+            </form>
+            <form class="all-companies-loading-form all-companies-sync-form" method="get" action="/reports/all-companies">
+              <input type="hidden" name="sync" value="1" />
+              <button class="button-link" type="submit" data-default-label="Servisten Güncelle" data-loading-label="Çalışıyor...">
+                Servisten Güncelle
+              </button>
+              <span class="all-companies-loading-message" hidden>
+                Servis taranıyor, yeni firmalar ekleniyor...
               </span>
             </form>
           </div>

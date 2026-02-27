@@ -544,6 +544,36 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS all_companies_cache (
+      id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      source TEXT NOT NULL,
+      obilet_partner_id TEXT,
+      biletall_partner_id TEXT,
+      url TEXT,
+      obus_merkez_sube_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (id, source, code)
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE all_companies_cache
+      ADD COLUMN IF NOT EXISTS obilet_partner_id TEXT,
+      ADD COLUMN IF NOT EXISTS biletall_partner_id TEXT,
+      ADD COLUMN IF NOT EXISTS url TEXT,
+      ADD COLUMN IF NOT EXISTS obus_merkez_sube_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_all_companies_cache_source_code
+    ON all_companies_cache (source, code, id)
+  `);
+
   const userCount = await pool.query("SELECT COUNT(*)::int AS count FROM users");
   if (userCount.rows[0].count === 0) {
     const passwordHash = await bcrypt.hash("admin123", 10);
@@ -1429,6 +1459,44 @@ function normalizeAllCompaniesReportRows(rows) {
     columns: reportColumns,
     rows: normalizedRows
   };
+}
+
+function buildAllCompaniesCacheRowKey(row) {
+  const source = extractClusterLabel(String(row?.source || "").trim());
+  const id = String(row?.id || "").trim();
+  const code = String(row?.code || "").trim();
+  return `${source}|||${id}|||${code}`;
+}
+
+function normalizeAllCompaniesCacheRow(row) {
+  const id = formatPartnerCellValue(row?.id);
+  const code = formatPartnerCellValue(row?.code);
+  const source = extractClusterLabel(formatPartnerCellValue(row?.source));
+  return {
+    id,
+    code,
+    source,
+    "obilet-partner-id": formatPartnerCellValue(row?.["obilet-partner-id"] ?? row?.obilet_partner_id),
+    "biletall-partner-id": formatPartnerCellValue(row?.["biletall-partner-id"] ?? row?.biletall_partner_id),
+    url: formatPartnerCellValue(row?.url),
+    ObusMerkezSubeID: formatPartnerCellValue(row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id)
+  };
+}
+
+function normalizeAllCompaniesCacheRows(rows) {
+  const deduped = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const normalized = normalizeAllCompaniesCacheRow(row);
+    const key = buildAllCompaniesCacheRowKey(normalized);
+    deduped.set(key, normalized);
+  });
+  return Array.from(deduped.values()).sort((a, b) => {
+    const byCluster = String(a.source || "").localeCompare(String(b.source || ""), "tr");
+    if (byCluster !== 0) return byCluster;
+    const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+    if (byCode !== 0) return byCode;
+    return String(a.id || "").localeCompare(String(b.id || ""), "tr");
+  });
 }
 
 function normalizeTokenName(value) {
@@ -2772,6 +2840,147 @@ async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchAllCompaniesRowsFromCache() {
+  try {
+    const query = `
+      SELECT
+        id,
+        code,
+        source,
+        obilet_partner_id,
+        biletall_partner_id,
+        url,
+        obus_merkez_sube_id,
+        updated_at
+      FROM all_companies_cache
+      ORDER BY source ASC, code ASC, id ASC
+    `;
+    const result = await pool.query(query);
+    const rows = normalizeAllCompaniesCacheRows(result.rows || []);
+    const columns = normalizeAllCompaniesReportRows([]).columns;
+    const clusterCount = new Set(rows.map((row) => extractClusterLabel(row?.source)).filter(Boolean)).size;
+    return {
+      columns,
+      rows,
+      clusterCount,
+      error: null
+    };
+  } catch (err) {
+    const columns = normalizeAllCompaniesReportRows([]).columns;
+    return {
+      columns,
+      rows: [],
+      clusterCount: 0,
+      error: `Tüm firmalar önbelleği okunamadı: ${err?.message || "Bilinmeyen hata"}`
+    };
+  }
+}
+
+async function upsertAllCompaniesCacheRows(rows) {
+  const normalizedRows = normalizeAllCompaniesCacheRows(rows).filter((row) => {
+    const code = String(row?.code || "").trim();
+    const source = String(row?.source || "").trim();
+    return Boolean(code && source);
+  });
+
+  if (normalizedRows.length === 0) {
+    return {
+      savedCount: 0,
+      error: null
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const upsertSql = `
+      INSERT INTO all_companies_cache (
+        id,
+        code,
+        source,
+        obilet_partner_id,
+        biletall_partner_id,
+        url,
+        obus_merkez_sube_id,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+      ON CONFLICT (id, source, code)
+      DO UPDATE SET
+        obilet_partner_id = EXCLUDED.obilet_partner_id,
+        biletall_partner_id = EXCLUDED.biletall_partner_id,
+        url = EXCLUDED.url,
+        obus_merkez_sube_id = COALESCE(NULLIF(EXCLUDED.obus_merkez_sube_id, ''), all_companies_cache.obus_merkez_sube_id),
+        updated_at = now()
+    `;
+
+    for (const row of normalizedRows) {
+      const id = String(row?.id || "").trim();
+      const code = String(row?.code || "").trim();
+      const source = extractClusterLabel(row?.source);
+      const obiletPartnerId = String(row?.["obilet-partner-id"] || "").trim() || null;
+      const biletallPartnerId = String(row?.["biletall-partner-id"] || "").trim() || null;
+      const url = String(row?.url || "").trim() || null;
+      const obusMerkezSubeId = String(row?.ObusMerkezSubeID || "").trim() || null;
+      await client.query(upsertSql, [
+        id,
+        code,
+        source,
+        obiletPartnerId,
+        biletallPartnerId,
+        url,
+        obusMerkezSubeId
+      ]);
+    }
+
+    await client.query("COMMIT");
+    return {
+      savedCount: normalizedRows.length,
+      error: null
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    return {
+      savedCount: 0,
+      error: `Tüm firmalar önbelleği yazılamadı: ${err?.message || "Bilinmeyen hata"}`
+    };
+  } finally {
+    client.release();
+  }
+}
+
+async function syncAllCompaniesCacheFromService() {
+  const cachedReport = await fetchAllCompaniesRowsFromCache();
+  const cachedRows = Array.isArray(cachedReport.rows) ? cachedReport.rows : [];
+  const existingKeySet = new Set(cachedRows.map((row) => buildAllCompaniesCacheRowKey(row)));
+
+  const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: false });
+  const liveRows = normalizeAllCompaniesCacheRows(liveResult.rows || []);
+  const newRows = liveRows.filter((row) => !existingKeySet.has(buildAllCompaniesCacheRowKey(row)));
+
+  let rowsToSave = newRows;
+  let obusNotice = null;
+  if (newRows.length > 0) {
+    const enriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(newRows);
+    rowsToSave = normalizeAllCompaniesCacheRows(enriched.rows || []);
+    obusNotice = enriched.notice || null;
+  }
+
+  const saveResult = await upsertAllCompaniesCacheRows(rowsToSave);
+  const errorParts = [];
+  if (liveResult.error) errorParts.push(liveResult.error);
+  if (obusNotice) errorParts.push(obusNotice);
+  if (saveResult.error) errorParts.push(saveResult.error);
+
+  return {
+    fetchedCount: liveRows.length,
+    newCount: newRows.length,
+    savedCount: saveResult.savedCount,
+    clusterCount: liveResult.clusterCount || 0,
+    error: errorParts.length > 0 ? errorParts.join(" | ") : null
+  };
 }
 
 function buildEmptyAllCompaniesReport(clusterCount = PARTNER_CLUSTER_TOTAL) {
@@ -6717,16 +6926,40 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 });
 
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
-  const result = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
+  const shouldSync = String(req.query.sync || "").trim() === "1";
+  let syncResult = null;
+  if (shouldSync) {
+    syncResult = await syncAllCompaniesCacheFromService();
+  }
+
+  const result = await fetchAllCompaniesRowsFromCache();
+  const errorParts = [];
+  if (result.error) errorParts.push(result.error);
+  if (syncResult?.error) errorParts.push(syncResult.error);
+
+  const syncMessage = shouldSync
+    ? `Servis taraması tamamlandı. ${syncResult?.fetchedCount || 0} kayıt kontrol edildi, ${syncResult?.savedCount || 0} yeni firma eklendi.`
+    : "";
+
+  const emptyCacheMessage =
+    !shouldSync && (result.rows || []).length === 0
+      ? "Önbellek boş. 'Servisten Güncelle' butonuna basarak firmaları yükleyin."
+      : "";
+
   res.render("reports-all-companies", {
     user: req.session.user,
     active: "all-companies",
     report: {
       columns: result.columns || [],
       rows: result.rows || [],
-      error: result.error || null,
+      error: errorParts.length > 0 ? errorParts.join(" | ") : null,
       clusterCount: result.clusterCount || 0,
-      requested: true
+      requested: true,
+      sync: {
+        requested: shouldSync,
+        message: syncMessage
+      },
+      notice: emptyCacheMessage
     }
   });
 });

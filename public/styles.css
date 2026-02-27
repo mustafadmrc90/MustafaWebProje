@@ -2014,13 +2014,13 @@ button.ghost {
   white-space: nowrap;
 }
 
-.all-companies-refresh-form {
+.all-companies-loading-form {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
-.all-companies-refresh-form.is-loading {
+.all-companies-loading-form.is-loading {
   opacity: 0.9;
 }
 
@@ -2032,7 +2032,7 @@ button.ghost {
   gap: 8px;
 }
 
-.all-companies-refresh-form.is-loading .all-companies-loading-message {
+.all-companies-loading-form.is-loading .all-companies-loading-message {
   display: inline-flex;
 }
 
