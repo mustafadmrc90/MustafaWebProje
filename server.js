@@ -73,6 +73,8 @@ const REPORTING_API_AUTH =
 const SALES_REPORT_TIMEOUT_MS = Number.parseInt(process.env.SALES_REPORT_TIMEOUT_MS || "180000", 10) || 180000;
 const ALL_COMPANIES_FETCH_TIMEOUT_MS =
   Number.parseInt(process.env.ALL_COMPANIES_FETCH_TIMEOUT_MS || "180000", 10) || 180000;
+const ALL_COMPANIES_SERVICE_PREVIEW_TTL_MS =
+  Number.parseInt(process.env.ALL_COMPANIES_SERVICE_PREVIEW_TTL_MS || "1800000", 10) || 1800000;
 const SALES_REPORT_RANGE_CONCURRENCY =
   Number.parseInt(process.env.SALES_REPORT_RANGE_CONCURRENCY || "4", 10) || 4;
 const SALES_REPORT_TARGET_CONCURRENCY =
@@ -262,6 +264,7 @@ const SIDEBAR_MENU_REGISTRY = [
   }
 ];
 const slackReplyReportCache = new Map();
+const allCompaniesServicePreviewCache = new Map();
 const slackAutoSaveState = {
   timerId: null,
   isRunning: false
@@ -3141,6 +3144,43 @@ function buildEmptyAllCompaniesReport(clusterCount = PARTNER_CLUSTER_TOTAL) {
     clusterCount: Math.max(0, resolvedClusterCount),
     requested: false
   };
+}
+
+function normalizeAllCompaniesPreviewUserId(userId) {
+  const parsed = Number(userId);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function setAllCompaniesServicePreviewForUser(userId, report = {}) {
+  const userIdNum = normalizeAllCompaniesPreviewUserId(userId);
+  if (!userIdNum) return;
+
+  const normalizedRows = normalizeAllCompaniesCacheRows(report.rows || []);
+  const normalizedColumns = Array.isArray(report.columns) && report.columns.length > 0
+    ? report.columns
+    : normalizeAllCompaniesReportRows([]).columns;
+
+  allCompaniesServicePreviewCache.set(userIdNum, {
+    rows: normalizedRows,
+    columns: normalizedColumns,
+    clusterCount: Number.isFinite(Number(report.clusterCount)) ? Number(report.clusterCount) : 0,
+    createdAt: Date.now()
+  });
+}
+
+function getAllCompaniesServicePreviewForUser(userId) {
+  const userIdNum = normalizeAllCompaniesPreviewUserId(userId);
+  if (!userIdNum) return null;
+
+  const snapshot = allCompaniesServicePreviewCache.get(userIdNum);
+  if (!snapshot) return null;
+
+  if (Date.now() - Number(snapshot.createdAt || 0) > ALL_COMPANIES_SERVICE_PREVIEW_TTL_MS) {
+    allCompaniesServicePreviewCache.delete(userIdNum);
+    return null;
+  }
+
+  return snapshot;
 }
 
 function buildObusMerkezBranchServiceReport(overrides = {}) {
@@ -7127,26 +7167,56 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
 app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
   const shouldSync = String(req.query.sync || "").trim() === "1";
   const shouldViewCache = String(req.query.cache || "").trim() === "1";
-  let syncResult = null;
+  const saveSucceeded = String(req.query.saved || "").trim() === "1";
+  const saveErrorCode = String(req.query.saveErr || "").trim();
+  const savedCountRaw = Number.parseInt(String(req.query.savedCount || "0"), 10);
+  const savedCount = Number.isFinite(savedCountRaw) ? Math.max(0, savedCountRaw) : 0;
+  const currentUserId = Number(req.session?.user?.id);
+
+  let result = buildEmptyAllCompaniesReport(0);
+  const errorParts = [];
   if (shouldSync) {
-    syncResult = await syncAllCompaniesCacheFromService();
+    const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
+    result = {
+      columns: liveResult.columns || [],
+      rows: liveResult.rows || [],
+      error: liveResult.error || null,
+      clusterCount: liveResult.clusterCount || 0
+    };
+    if (liveResult.error) {
+      errorParts.push(liveResult.error);
+    }
+    setAllCompaniesServicePreviewForUser(currentUserId, liveResult);
+  } else {
+    result = await fetchAllCompaniesRowsFromCache();
+    if (result.error) {
+      errorParts.push(result.error);
+    }
   }
 
-  const result = await fetchAllCompaniesRowsFromCache();
-  const errorParts = [];
-  if (result.error) errorParts.push(result.error);
-  if (syncResult?.error) errorParts.push(syncResult.error);
-
+  const previewSnapshot = getAllCompaniesServicePreviewForUser(currentUserId);
+  const hasServicePreview = Array.isArray(previewSnapshot?.rows) && previewSnapshot.rows.length > 0;
   const syncMessage = shouldSync
-    ? `Servis taraması tamamlandı. ${syncResult?.fetchedCount || 0} kayıt kontrol edildi, ${syncResult?.savedCount || 0} yeni firma eklendi.`
-    : "";
+    ? `Servisten ${result.rows?.length || 0} kayıt getirildi. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`
+    : hasServicePreview
+      ? `Servisten alınan son veri hazır (${previewSnapshot.rows.length} kayıt).`
+      : "";
   const cacheMessage = shouldViewCache
-    ? `SQL önbelleğinden gösteriliyor. Toplam ${result.rows?.length || 0} kayıt.`
+    ? `SQL'den gösteriliyor. Toplam ${result.rows?.length || 0} kayıt.`
     : "";
+  const saveMessage = saveSucceeded ? `SQL kayıt tamamlandı. ${savedCount} kayıt işlendi.` : "";
+
+  if (saveErrorCode === "no_service_data") {
+    errorParts.push("Önce 'Servisten Güncelle' butonuyla servis verisini alın.");
+  } else if (saveErrorCode === "save_failed") {
+    errorParts.push("SQL kayıt işlemi başarısız oldu.");
+  }
 
   const emptyCacheMessage =
-    !shouldSync && (result.rows || []).length === 0
-      ? "Önbellek boş. 'Servisten Güncelle' butonuna basarak firmaları yükleyin."
+    (result.rows || []).length === 0
+      ? shouldSync
+        ? "Servisten gösterilecek kayıt bulunamadı."
+        : "Önbellek boş. 'Servisten Güncelle' butonuna basarak firmaları yükleyin."
       : "";
 
   res.render("reports-all-companies", {
@@ -7160,15 +7230,38 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
       requested: true,
       sync: {
         requested: shouldSync,
-        message: syncMessage
+        message: syncMessage,
+        hasPreview: hasServicePreview
       },
       cache: {
         requested: shouldViewCache,
         message: cacheMessage
       },
+      save: {
+        requested: saveSucceeded,
+        message: saveMessage
+      },
       notice: emptyCacheMessage
     }
   });
+});
+
+app.post("/reports/all-companies/save-sql", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
+  const currentUserId = Number(req.session?.user?.id);
+  const previewSnapshot = getAllCompaniesServicePreviewForUser(currentUserId);
+  const previewRows = Array.isArray(previewSnapshot?.rows) ? previewSnapshot.rows : [];
+
+  if (previewRows.length === 0) {
+    return res.redirect("/reports/all-companies?saveErr=no_service_data");
+  }
+
+  const saveResult = await upsertAllCompaniesCacheRows(previewRows);
+  if (saveResult.error) {
+    console.error("All companies SQL save error:", saveResult.error);
+    return res.redirect("/reports/all-companies?saveErr=save_failed");
+  }
+
+  return res.redirect(`/reports/all-companies?cache=1&saved=1&savedCount=${saveResult.savedCount}`);
 });
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {

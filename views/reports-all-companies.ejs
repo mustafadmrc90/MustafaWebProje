@@ -37,6 +37,9 @@
       <% if (report.sync && report.sync.message) { %>
         <div class="inline-success"><%= report.sync.message %></div>
       <% } %>
+      <% if (report.save && report.save.message) { %>
+        <div class="inline-success"><%= report.save.message %></div>
+      <% } %>
       <% if (report.cache && report.cache.message) { %>
         <div class="inline-success"><%= report.cache.message %></div>
       <% } %>
@@ -65,7 +68,21 @@
                 Servisten Güncelle
               </button>
               <span class="all-companies-loading-message" hidden>
-                Servis taranıyor, yeni firmalar ekleniyor...
+                Servis verisi çekiliyor...
+              </span>
+            </form>
+            <form class="all-companies-loading-form all-companies-save-form" method="post" action="/reports/all-companies/save-sql">
+              <button
+                class="button-link"
+                type="submit"
+                data-default-label="SQL'e Kaydet"
+                data-loading-label="Kaydediliyor..."
+                <%= report.sync?.hasPreview ? "" : "disabled" %>
+              >
+                SQL'e Kaydet
+              </button>
+              <span class="all-companies-loading-message" hidden>
+                Servis verisi SQL'e yazılıyor...
               </span>
             </form>
             <form class="all-companies-loading-form all-companies-cache-form" method="get" action="/reports/all-companies">
