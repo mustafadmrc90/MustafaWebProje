@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "connect-pg-simple": "^9.0.1",
     "ejs": "^3.1.10",
     "express": "^4.19.2",
     "express-session": "^1.17.3",
+    "mssql": "^11.0.1",
     "pg": "^8.11.5"
   }
 }

@@ -4,8 +4,7 @@ const fs = require("fs/promises");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
-const { Pool } = require("pg");
-const pgSession = require("connect-pg-simple")(session);
+const { createDatabasePool } = require("./db");
 
 function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
   try {
@@ -55,6 +54,9 @@ loadLocalEnvFile();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
+const initDbOnly = String(process.env.INIT_DB_ONLY || "")
+  .trim()
+  .toLowerCase() === "true";
 const PARTNERS_API_URL =
   process.env.PARTNERS_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
@@ -274,16 +276,96 @@ if (isProd) {
   app.set("trust proxy", 1);
 }
 
-const shouldUseSsl =
-  isProd ||
-  process.env.DATABASE_SSL === "true" ||
-  /render\.com/i.test(process.env.DATABASE_URL || "") ||
-  /sslmode=require/i.test(process.env.DATABASE_URL || "");
+const rawDatabaseUrl = String(process.env.DATABASE_URL || "").trim();
+const databaseSslEnabled = String(process.env.DATABASE_SSL || "")
+  .trim()
+  .toLowerCase() === "true";
+const databaseSslRejectUnauthorized =
+  String(process.env.DATABASE_SSL_REJECT_UNAUTHORIZED || "")
+    .trim()
+    .toLowerCase() === "true";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined
-});
+let databaseHost = "";
+if (rawDatabaseUrl) {
+  if (/^[a-z0-9 _-]+=/i.test(rawDatabaseUrl) && rawDatabaseUrl.includes(";")) {
+    const serverMatch = rawDatabaseUrl.match(/(?:^|;)server\s*=\s*([^;]+)/i);
+    if (serverMatch?.[1]) {
+      databaseHost = String(serverMatch[1]).split(",")[0].trim().toLowerCase();
+    }
+  } else {
+    try {
+      databaseHost = new URL(rawDatabaseUrl).hostname.toLowerCase();
+    } catch (err) {
+      console.warn(`DATABASE_URL parse edilemedi: ${err?.message || "Bilinmeyen hata"}`);
+    }
+  }
+}
+
+const isManagedDatabaseHost =
+  /render\.com$/i.test(databaseHost) ||
+  /supabase\.(co|com)$/i.test(databaseHost) ||
+  /pooler\.supabase\.com$/i.test(databaseHost);
+
+if (databaseSslEnabled && !isManagedDatabaseHost) {
+  console.warn("DATABASE_SSL=true ayarlı. SQL Server tarafında Encrypt/TrustServerCertificate ayarlarını kontrol edin.");
+}
+if (databaseSslRejectUnauthorized && isManagedDatabaseHost) {
+  console.warn("DATABASE_SSL_REJECT_UNAUTHORIZED=true ayarlı. Yönetilen SQL sağlayıcılarında bağlantı sorununa neden olabilir.");
+}
+
+const pool = createDatabasePool(process.env.DATABASE_URL);
+const dbRuntimeState = {
+  initStartedAt: new Date().toISOString(),
+  initCompletedAt: null,
+  initOk: false,
+  initError: null
+};
+
+function summarizeErrorMessage(err) {
+  if (!err) return "Bilinmeyen hata";
+  if (typeof err === "string") return err.trim() || "Bilinmeyen hata";
+  if (typeof err.message === "string" && err.message.trim()) return err.message.trim();
+  try {
+    return JSON.stringify(err);
+  } catch (_serializeErr) {
+    return String(err);
+  }
+}
+
+function classifyDbErrorForUser(err) {
+  const summary = summarizeErrorMessage(err);
+  const normalized = summary.toLowerCase();
+  if (!normalized) return "Bilinmeyen veritabani hatasi.";
+
+  if (normalized.includes("login failed for user")) {
+    return "Veritabani kullanici adi veya sifresi hatali.";
+  }
+  if (
+    normalized.includes("failed to connect") ||
+    normalized.includes("could not connect") ||
+    normalized.includes("enotfound") ||
+    normalized.includes("econnrefused") ||
+    normalized.includes("etimedout") ||
+    normalized.includes("timeout")
+  ) {
+    return "Veritabanina baglanti kurulamiyor.";
+  }
+  if (normalized.includes("invalid object name")) {
+    return "Gerekli DB tablolari bulunamadi. scripts/init-db-only.sh komutunu calistirin.";
+  }
+  if (normalized.includes("illegal arguments: string, undefined")) {
+    return "Kullanici sifre kaydi eksik veya bozuk. scripts/reset-user-password.js komutunu calistirin.";
+  }
+  if (
+    normalized.includes("permission denied") ||
+    normalized.includes("not authorized") ||
+    normalized.includes("access denied")
+  ) {
+    return "Veritabani kullanicisinin tablo olusturma/guncelleme yetkisi yok.";
+  }
+
+  return summary;
+}
 
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
@@ -292,11 +374,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
-    store: new pgSession({
-      pool,
-      tableName: "user_sessions",
-      createTableIfMissing: true
-    }),
     secret: process.env.SESSION_SECRET || "dev-secret-change-me",
     resave: false,
     saveUninitialized: false,
@@ -369,26 +446,35 @@ async function initDb() {
   `);
 
   // Fill sort order for legacy rows where this value is missing/default.
-  await pool.query(`
-    WITH ranked AS (
-      SELECT id, row_number() OVER (ORDER BY id DESC) AS ord
-      FROM api_endpoints
-    )
-    UPDATE api_endpoints AS target
-    SET sort_order = ranked.ord
-    FROM ranked
-    WHERE target.id = ranked.id
-      AND (target.sort_order IS NULL OR target.sort_order = 0)
-  `);
+  try {
+    await pool.query(`
+      WITH ranked AS (
+        SELECT id, row_number() OVER (ORDER BY id DESC) AS ord
+        FROM api_endpoints
+      )
+      UPDATE api_endpoints AS target
+      SET sort_order = ranked.ord
+      FROM ranked
+      WHERE target.id = ranked.id
+        AND (target.sort_order IS NULL OR target.sort_order = 0)
+    `);
+  } catch (err) {
+    // Legacy migration; if this fails, startup can continue safely.
+    console.warn("api_endpoints sort_order migration skipped:", summarizeErrorMessage(err));
+  }
 
   // Migrate legacy endpoint target_url values into shared target list.
   await pool.query(`
     INSERT INTO api_targets (url)
-    SELECT DISTINCT trim(target_url)
-    FROM api_endpoints
-    WHERE target_url IS NOT NULL
-      AND trim(target_url) <> ''
-    ON CONFLICT (url) DO NOTHING
+    SELECT DISTINCT trim(ep.target_url)
+    FROM api_endpoints ep
+    WHERE ep.target_url IS NOT NULL
+      AND trim(ep.target_url) <> ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM api_targets t
+        WHERE t.url = trim(ep.target_url)
+      )
   `);
 
   await pool.query(`
@@ -574,7 +660,7 @@ async function initDb() {
     ON all_companies_cache (source, code, id)
   `);
 
-  const userCount = await pool.query("SELECT COUNT(*)::int AS count FROM users");
+  const userCount = await pool.query("SELECT CAST(COUNT(*) AS INT) AS count FROM users");
   if (userCount.rows[0].count === 0) {
     const passwordHash = await bcrypt.hash("admin123", 10);
     await pool.query(
@@ -584,7 +670,7 @@ async function initDb() {
     console.log("Seed user created: admin / admin123");
   }
 
-  const screenCount = await pool.query("SELECT COUNT(*)::int AS count FROM screens");
+  const screenCount = await pool.query("SELECT CAST(COUNT(*) AS INT) AS count FROM screens");
   if (screenCount.rows[0].count === 0) {
     const defaults = [
       ["overview", "Genel Özet"],
@@ -600,11 +686,32 @@ async function initDb() {
 }
 
 initDb()
-  .then(() => {
+  .then(async () => {
+    dbRuntimeState.initOk = true;
+    dbRuntimeState.initError = null;
+    dbRuntimeState.initCompletedAt = new Date().toISOString();
+    if (initDbOnly) {
+      console.log("DB init tamamlandi (INIT_DB_ONLY=true).");
+      await pool.end();
+      process.exit(0);
+      return;
+    }
     startSlackAutoSaveScheduler();
   })
-  .catch((err) => {
+  .catch(async (err) => {
+    dbRuntimeState.initOk = false;
+    dbRuntimeState.initError = classifyDbErrorForUser(err);
+    dbRuntimeState.initCompletedAt = new Date().toISOString();
     console.error("DB init error:", err);
+    console.error("DB init error summary:", dbRuntimeState.initError);
+    if (initDbOnly) {
+      try {
+        await pool.end();
+      } catch (closeErr) {
+        console.error("DB pool kapatma hatasi:", closeErr);
+      }
+      process.exit(1);
+    }
   });
 
 function toSidebarBool(value, fallback = true) {
@@ -776,6 +883,11 @@ function buildSidebarEmptyModel() {
   };
 }
 
+function buildInClausePlaceholders(values, startIndex = 1) {
+  const list = Array.isArray(values) ? values : [];
+  return list.map((_, idx) => `$${startIndex + idx}`).join(", ");
+}
+
 async function syncSidebarMenusAndPermissions() {
   const menuItems = SIDEBAR_MENU_REGISTRY.map((item) => ({
     ...item,
@@ -790,6 +902,7 @@ async function syncSidebarMenusAndPermissions() {
   const sections = menuItems.filter((item) => item.type === "section").sort(compareSidebarEntries);
   const entries = menuItems.filter((item) => item.type !== "section").sort(compareSidebarEntries);
   const orderedRows = sections.concat(entries);
+  const registryKeyPlaceholders = buildInClausePlaceholders(registryKeys, 1);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -797,38 +910,25 @@ async function syncSidebarMenusAndPermissions() {
       `
         UPDATE sidebar_menu_items
         SET is_active = false, updated_at = now()
-        WHERE NOT (key = ANY($1::text[]))
+        WHERE key NOT IN (${registryKeyPlaceholders})
       `,
-      [registryKeys]
+      registryKeys
     );
 
     for (const item of orderedRows) {
-      await client.query(
+      const updateResult = await client.query(
         `
-          INSERT INTO sidebar_menu_items (
-            key,
-            label,
-            type,
-            parent_key,
-            route,
-            route_key,
-            sort_order,
-            icon_key,
-            is_active,
-            updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, now())
-          ON CONFLICT (key)
-          DO UPDATE SET
-            label = EXCLUDED.label,
-            type = EXCLUDED.type,
-            parent_key = EXCLUDED.parent_key,
-            route = EXCLUDED.route,
-            route_key = EXCLUDED.route_key,
-            sort_order = EXCLUDED.sort_order,
-            icon_key = EXCLUDED.icon_key,
-            is_active = true,
-            updated_at = now()
+          UPDATE sidebar_menu_items
+          SET label = $2,
+              type = $3,
+              parent_key = $4,
+              route = $5,
+              route_key = $6,
+              sort_order = $7,
+              icon_key = $8,
+              is_active = true,
+              updated_at = now()
+          WHERE key = $1
         `,
         [
           item.key,
@@ -841,6 +941,35 @@ async function syncSidebarMenusAndPermissions() {
           item.iconKey || "folder"
         ]
       );
+      if (!updateResult.rowCount) {
+        await client.query(
+          `
+            INSERT INTO sidebar_menu_items (
+              key,
+              label,
+              type,
+              parent_key,
+              route,
+              route_key,
+              sort_order,
+              icon_key,
+              is_active,
+              updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, now())
+          `,
+          [
+            item.key,
+            item.label,
+            item.type,
+            item.parentKey || null,
+            item.route || null,
+            item.routeKey || null,
+            Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : 0,
+            item.iconKey || "folder"
+          ]
+        );
+      }
     }
 
     await client.query(`
@@ -857,7 +986,12 @@ async function syncSidebarMenusAndPermissions() {
       FROM users u
       CROSS JOIN sidebar_menu_items m
       WHERE m.is_active = true
-      ON CONFLICT (user_id, menu_key) DO NOTHING
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_sidebar_permissions usp
+          WHERE usp.user_id = u.id
+            AND usp.menu_key = m.key
+        )
     `);
 
     await client.query(`
@@ -894,7 +1028,12 @@ async function ensureSidebarPermissionsForUser(userId) {
       CROSS JOIN sidebar_menu_items m
       WHERE m.is_active = true
         AND u.id = $1
-      ON CONFLICT (user_id, menu_key) DO NOTHING
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_sidebar_permissions usp
+          WHERE usp.user_id = u.id
+            AND usp.menu_key = m.key
+        )
     `,
     [userIdNum]
   );
@@ -2895,26 +3034,6 @@ async function upsertAllCompaniesCacheRows(rows) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const upsertSql = `
-      INSERT INTO all_companies_cache (
-        id,
-        code,
-        source,
-        obilet_partner_id,
-        biletall_partner_id,
-        url,
-        obus_merkez_sube_id,
-        updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-      ON CONFLICT (id, source, code)
-      DO UPDATE SET
-        obilet_partner_id = EXCLUDED.obilet_partner_id,
-        biletall_partner_id = EXCLUDED.biletall_partner_id,
-        url = EXCLUDED.url,
-        obus_merkez_sube_id = COALESCE(NULLIF(EXCLUDED.obus_merkez_sube_id, ''), all_companies_cache.obus_merkez_sube_id),
-        updated_at = now()
-    `;
 
     for (const row of normalizedRows) {
       const id = String(row?.id || "").trim();
@@ -2924,15 +3043,54 @@ async function upsertAllCompaniesCacheRows(rows) {
       const biletallPartnerId = String(row?.["biletall-partner-id"] || "").trim() || null;
       const url = String(row?.url || "").trim() || null;
       const obusMerkezSubeId = String(row?.ObusMerkezSubeID || "").trim() || null;
-      await client.query(upsertSql, [
-        id,
-        code,
-        source,
-        obiletPartnerId,
-        biletallPartnerId,
-        url,
-        obusMerkezSubeId
-      ]);
+      const updateResult = await client.query(
+        `
+          UPDATE all_companies_cache
+          SET obilet_partner_id = $4,
+              biletall_partner_id = $5,
+              url = $6,
+              obus_merkez_sube_id = COALESCE(NULLIF($7, ''), obus_merkez_sube_id),
+              updated_at = now()
+          WHERE id = $1
+            AND source = $2
+            AND code = $3
+        `,
+        [
+          id,
+          source,
+          code,
+          obiletPartnerId,
+          biletallPartnerId,
+          url,
+          obusMerkezSubeId
+        ]
+      );
+      if (updateResult.rowCount) continue;
+
+      await client.query(
+        `
+          INSERT INTO all_companies_cache (
+            id,
+            code,
+            source,
+            obilet_partner_id,
+            biletall_partner_id,
+            url,
+            obus_merkez_sube_id,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        `,
+        [
+          id,
+          code,
+          source,
+          obiletPartnerId,
+          biletallPartnerId,
+          url,
+          obusMerkezSubeId
+        ]
+      );
     }
 
     await client.query("COMMIT");
@@ -3207,30 +3365,41 @@ async function saveObusMerkezBranchRows(rows) {
   try {
     await client.query("BEGIN");
     const partnerIds = normalizedRows.map((item) => item.partnerId);
+    const partnerIdPlaceholders = buildInClausePlaceholders(partnerIds, 1);
     const existingResult = await client.query(
-      "SELECT partner_id FROM obus_merkez_branches WHERE partner_id = ANY($1::text[])",
-      [partnerIds]
+      `SELECT partner_id FROM obus_merkez_branches WHERE partner_id IN (${partnerIdPlaceholders})`,
+      partnerIds
     );
     const existingSet = new Set(
       (existingResult.rows || []).map((row) => String(row?.partner_id || "").trim()).filter(Boolean)
     );
 
-    const upsertSql = `
-      INSERT INTO obus_merkez_branches (partner_id, branch_id, name, source_cluster, updated_at)
-      VALUES ($1, $2, $3, $4, now())
-      ON CONFLICT (partner_id)
-      DO UPDATE SET
-        branch_id = EXCLUDED.branch_id,
-        name = EXCLUDED.name,
-        source_cluster = EXCLUDED.source_cluster,
-        updated_at = now()
-    `;
-
     let insertedCount = 0;
     let updatedCount = 0;
 
     for (const row of normalizedRows) {
-      await client.query(upsertSql, [row.partnerId, row.branchId, row.name, row.cluster || null]);
+      const updateResult = await client.query(
+        `
+          UPDATE obus_merkez_branches
+          SET branch_id = $2,
+              name = $3,
+              source_cluster = $4,
+              updated_at = now()
+          WHERE partner_id = $1
+        `,
+        [row.partnerId, row.branchId, row.name, row.cluster || null]
+      );
+      if (updateResult.rowCount) {
+        updatedCount += 1;
+        continue;
+      }
+      await client.query(
+        `
+          INSERT INTO obus_merkez_branches (partner_id, branch_id, name, source_cluster, updated_at)
+          VALUES ($1, $2, $3, $4, now())
+        `,
+        [row.partnerId, row.branchId, row.name, row.cluster || null]
+      );
       if (existingSet.has(row.partnerId)) updatedCount += 1;
       else insertedCount += 1;
     }
@@ -4665,6 +4834,7 @@ async function fetchSlackSavedReports({ startDate, endDate, limit = 25 }) {
     }
 
     const runIds = runs.map((run) => Number(run.id)).filter((id) => Number.isInteger(id));
+    const runIdPlaceholders = runIds.length > 0 ? buildInClausePlaceholders(runIds, 1) : "";
     const itemResult = await pool.query(
       `
         SELECT
@@ -4674,10 +4844,10 @@ async function fetchSlackSavedReports({ startDate, endDate, limit = 25 }) {
           request_count,
           reply_count
         FROM slack_reply_analysis_items
-        WHERE run_id = ANY($1::int[])
+        WHERE run_id IN (${runIdPlaceholders || "NULL"})
         ORDER BY run_id DESC, reply_count DESC, request_count DESC, user_name ASC
       `,
-      [runIds]
+      runIds
     );
 
     const itemsByRunId = new Map();
@@ -4755,18 +4925,32 @@ async function saveSlackReplyReportToDb({
   try {
     await client.query("BEGIN");
 
-    const existingRunResult = await client.query(
-      `
-        SELECT id, COALESCE(save_count, 1) AS save_count
-        FROM slack_reply_analysis_runs
-        WHERE start_date = $1
-          AND end_date = $2
-          AND created_by IS NOT DISTINCT FROM $3
-        ORDER BY id DESC
-        LIMIT 1
-      `,
-      [startDate, endDate, ownerId]
-    );
+    const existingRunResult =
+      ownerId === null
+        ? await client.query(
+            `
+              SELECT id, COALESCE(save_count, 1) AS save_count
+              FROM slack_reply_analysis_runs
+              WHERE start_date = $1
+                AND end_date = $2
+                AND created_by IS NULL
+              ORDER BY id DESC
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            `,
+            [startDate, endDate]
+          )
+        : await client.query(
+            `
+              SELECT id, COALESCE(save_count, 1) AS save_count
+              FROM slack_reply_analysis_runs
+              WHERE start_date = $1
+                AND end_date = $2
+                AND created_by = $3
+              ORDER BY id DESC
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            `,
+            [startDate, endDate, ownerId]
+          );
 
     let runId = null;
     let saveCount = 1;
@@ -4800,7 +4984,7 @@ async function saveSlackReplyReportToDb({
         [runId]
       );
     } else {
-      const runResult = await client.query(
+      await client.query(
         `
           INSERT INTO slack_reply_analysis_runs (
             start_date,
@@ -4813,7 +4997,6 @@ async function saveSlackReplyReportToDb({
             created_by
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          RETURNING id, COALESCE(save_count, 1) AS save_count
         `,
         [
           startDate,
@@ -4826,8 +5009,24 @@ async function saveSlackReplyReportToDb({
           ownerId
         ]
       );
-      runId = Number(runResult.rows[0]?.id);
-      saveCount = toCountInteger(runResult.rows[0]?.save_count) || 1;
+      const insertedRunResult = await client.query(
+        `
+          SELECT id, COALESCE(save_count, 1) AS save_count
+          FROM slack_reply_analysis_runs
+          WHERE start_date = $1
+            AND end_date = $2
+            AND source = $3
+            AND (
+              (created_by = $4)
+              OR ($4 IS NULL AND created_by IS NULL)
+            )
+          ORDER BY id DESC
+          OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+        `,
+        [startDate, endDate, source, ownerId]
+      );
+      runId = Number(insertedRunResult.rows[0]?.id);
+      saveCount = toCountInteger(insertedRunResult.rows[0]?.save_count) || 1;
     }
 
     for (const row of normalizedRows) {
@@ -6510,13 +6709,23 @@ app.post("/login", async (req, res) => {
   }
 
   try {
-    const result = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
+    const result = await pool.query(
+      "SELECT id, username, password_hash, display_name FROM users WHERE username = $1",
+      [username]
+    );
     const user = result.rows[0];
     if (!user) {
       return res.status(401).render("login", { error: "Hatalı giriş." });
     }
 
-    const ok = await bcrypt.compare(password, user.password_hash);
+    const storedHash = typeof user.password_hash === "string" ? user.password_hash.trim() : "";
+    if (!storedHash) {
+      return res.status(500).render("login", {
+        error: "Kullanici sifre kaydi eksik. scripts/reset-user-password.js komutunu calistirin."
+      });
+    }
+
+    const ok = await bcrypt.compare(password, storedHash);
     if (!ok) {
       return res.status(401).render("login", { error: "Hatalı giriş." });
     }
@@ -6529,8 +6738,8 @@ app.post("/login", async (req, res) => {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
     res.redirect(targetRoute);
   } catch (err) {
-    console.error(err);
-    res.status(500).render("login", { error: "Sunucu hatası." });
+    console.error("Login error:", err);
+    res.status(500).render("login", { error: `Sunucu hatasi: ${classifyDbErrorForUser(err)}` });
   }
 });
 
@@ -7338,18 +7547,30 @@ app.post("/users", requireAuth, requireMenuAccess("users"), async (req, res) => 
   }
   try {
     const passwordHash = await bcrypt.hash(password, 10);
-    const insertResult = await pool.query(
-      "INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id",
-      [username.trim(), passwordHash, displayName.trim()]
+    const normalizedUsername = username.trim();
+    await pool.query("INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3)", [
+      normalizedUsername,
+      passwordHash,
+      displayName.trim()
+    ]);
+    const createdUserResult = await pool.query(
+      `
+        SELECT id
+        FROM users
+        WHERE username = $1
+        ORDER BY id DESC
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
+      [normalizedUsername]
     );
-    const newUserId = Number(insertResult.rows?.[0]?.id);
+    const newUserId = Number(createdUserResult.rows?.[0]?.id);
     if (Number.isInteger(newUserId)) {
       await ensureSidebarPermissionsForUser(newUserId);
     }
     res.redirect("/users?ok=1");
   } catch (err) {
     console.error(err);
-    if (err?.code === "23505") {
+    if (String(err?.code || "") === "23505" || Number(err?.number) === 2627 || Number(err?.number) === 2601) {
       return res.redirect("/users?err=username_exists");
     }
     res.redirect("/users?err=create_failed");
@@ -7398,7 +7619,7 @@ app.post("/users/:userId/update", requireAuth, requireMenuAccess("users"), async
     return res.redirect("/users?ok=2");
   } catch (err) {
     console.error(err);
-    if (err?.code === "23505") {
+    if (String(err?.code || "") === "23505" || Number(err?.number) === 2627 || Number(err?.number) === 2601) {
       return res.redirect(`/users?edit=${userId}&err=username_exists`);
     }
     return res.redirect(`/users?edit=${userId}&err=update_failed`);
@@ -7617,14 +7838,15 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       );
 
       if (finalItemKeys.length > 0) {
+        const finalItemPlaceholders = buildInClausePlaceholders(finalItemKeys, 2);
         await client.query(
           `
             UPDATE user_sidebar_permissions
             SET can_view = true, updated_at = now()
             WHERE user_id = $1
-              AND menu_key = ANY($2::text[])
+              AND menu_key IN (${finalItemPlaceholders})
           `,
-          [userId, finalItemKeys]
+          [userId].concat(finalItemKeys)
         );
       }
 
@@ -7642,14 +7864,15 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       );
 
       if (effectiveSectionKeys.length > 0) {
+        const effectiveSectionPlaceholders = buildInClausePlaceholders(effectiveSectionKeys, 2);
         await client.query(
           `
             UPDATE user_sidebar_permissions
             SET can_view = true, updated_at = now()
             WHERE user_id = $1
-              AND menu_key = ANY($2::text[])
+              AND menu_key IN (${effectiveSectionPlaceholders})
           `,
-          [userId, effectiveSectionKeys]
+          [userId].concat(effectiveSectionKeys)
         );
       }
 
@@ -7671,9 +7894,19 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
 app.get("/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      dbInitOk: dbRuntimeState.initOk,
+      dbInitCompletedAt: dbRuntimeState.initCompletedAt
+    });
   } catch (err) {
-    res.status(500).json({ ok: false });
+    res.status(500).json({
+      ok: false,
+      error: classifyDbErrorForUser(err),
+      dbInitOk: dbRuntimeState.initOk,
+      dbInitError: dbRuntimeState.initError,
+      dbInitCompletedAt: dbRuntimeState.initCompletedAt
+    });
   }
 });
 
@@ -7713,15 +7946,21 @@ app.post("/api/targets", requireAuth, async (req, res) => {
   }
   try {
     await ensureTargetsTable();
+    const updateResult = await pool.query("UPDATE api_targets SET updated_at = now() WHERE url = $1", [normalized]);
+    if (!updateResult.rowCount) {
+      await pool.query("INSERT INTO api_targets (url) VALUES ($1)", [normalized]);
+    }
     const result = await pool.query(
-      `INSERT INTO api_targets (url)
-       VALUES ($1)
-       ON CONFLICT (url)
-       DO UPDATE SET updated_at = now()
-       RETURNING id, url, created_at, updated_at`,
+      `
+        SELECT id, url, created_at, updated_at
+        FROM api_targets
+        WHERE url = $1
+        ORDER BY id DESC
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
       [normalized]
     );
-    res.json({ ok: true, item: result.rows[0] });
+    res.json({ ok: true, item: result.rows[0] || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: "Hedef URL kaydedilemedi." });
@@ -7734,25 +7973,47 @@ app.post("/api/endpoints", requireAuth, async (req, res) => {
     return res.status(400).json({ ok: false, error: "Eksik alan" });
   }
   try {
-    const result = await pool.query(
+    const normalizedTitle = title.trim();
+    const normalizedMethod = method.trim().toUpperCase();
+    const normalizedPath = path.trim();
+    const normalizedTargetUrl = targetUrl ? targetUrl.trim() : null;
+    const normalizedDescription = description ? description.trim() : null;
+    const normalizedBody = body || "{}";
+    const normalizedHeaders = headers || "{\n  \"Content-Type\": \"application/json\"\n}";
+    const normalizedParams = params || "{}";
+
+    await pool.query(
       `INSERT INTO api_endpoints (title, method, path, target_url, description, body, headers, params, sort_order)
        VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8,
          COALESCE((SELECT MIN(sort_order) - 1 FROM api_endpoints), 1)
-       )
-       RETURNING id, title, method, path, target_url, description, body, headers, params, sort_order`,
+       )`,
       [
-        title.trim(),
-        method.trim().toUpperCase(),
-        path.trim(),
-        targetUrl ? targetUrl.trim() : null,
-        description ? description.trim() : null,
-        body || "{}",
-        headers || "{\n  \"Content-Type\": \"application/json\"\n}",
-        params || "{}"
+        normalizedTitle,
+        normalizedMethod,
+        normalizedPath,
+        normalizedTargetUrl,
+        normalizedDescription,
+        normalizedBody,
+        normalizedHeaders,
+        normalizedParams
       ]
     );
-    res.json({ ok: true, item: result.rows[0] });
+    const result = await pool.query(
+      `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
+       FROM api_endpoints
+       WHERE title = $1
+         AND method = $2
+         AND path = $3
+         AND (
+           (target_url = $4)
+           OR (target_url IS NULL AND $4 IS NULL)
+         )
+       ORDER BY id DESC
+       OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY`,
+      [normalizedTitle, normalizedMethod, normalizedPath, normalizedTargetUrl]
+    );
+    res.json({ ok: true, item: result.rows[0] || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: "Endpoint kaydedilemedi." });
@@ -7775,31 +8036,42 @@ app.post("/api/endpoints/reorder", requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: "Endpoint listesinde tekrar eden id var." });
     }
 
-    const totalResult = await pool.query("SELECT COUNT(*)::int AS count FROM api_endpoints");
+    const totalResult = await pool.query("SELECT CAST(COUNT(*) AS INT) AS count FROM api_endpoints");
     const total = totalResult.rows[0]?.count || 0;
     if (uniqueIds.length !== total) {
       return res.status(400).json({ ok: false, error: "Tüm endpointler sıralama listesinde olmalı." });
     }
 
+    const checkPlaceholders = buildInClausePlaceholders(uniqueIds, 1);
     const checkResult = await pool.query(
-      "SELECT COUNT(*)::int AS count FROM api_endpoints WHERE id = ANY($1::int[])",
-      [uniqueIds]
+      `SELECT CAST(COUNT(*) AS INT) AS count FROM api_endpoints WHERE id IN (${checkPlaceholders})`,
+      uniqueIds
     );
     if (checkResult.rows[0]?.count !== total) {
       return res.status(400).json({ ok: false, error: "Geçersiz endpoint id listesi." });
     }
 
-    await pool.query(
-      `UPDATE api_endpoints AS target
-       SET sort_order = ordered.ord::int,
-           updated_at = now()
-       FROM (
-         SELECT id, ord
-         FROM unnest($1::int[]) WITH ORDINALITY AS list(id, ord)
-       ) AS ordered
-       WHERE target.id = ordered.id`,
-      [uniqueIds]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let i = 0; i < uniqueIds.length; i += 1) {
+        await client.query(
+          `
+            UPDATE api_endpoints
+            SET sort_order = $2,
+                updated_at = now()
+            WHERE id = $1
+          `,
+          [uniqueIds[i], i + 1]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
 
     const result = await pool.query(
       `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
@@ -7854,7 +8126,7 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
         ? existing.sort_order
         : Number(sortOrder);
 
-    const result = await pool.query(
+    await pool.query(
       `UPDATE api_endpoints
        SET title = $1,
            method = $2,
@@ -7866,8 +8138,7 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
             target_url = $8,
            sort_order = $9,
            updated_at = now()
-       WHERE id = $10
-       RETURNING id, title, method, path, target_url, description, body, headers, params, sort_order`,
+       WHERE id = $10`,
       [
         nextTitle,
         nextMethod,
@@ -7881,7 +8152,13 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
         id
       ]
     );
-    res.json({ ok: true, item: result.rows[0] });
+    const result = await pool.query(
+      `SELECT id, title, method, path, target_url, description, body, headers, params, sort_order
+       FROM api_endpoints
+       WHERE id = $1`,
+      [id]
+    );
+    res.json({ ok: true, item: result.rows[0] || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: "Endpoint güncellenemedi." });
@@ -8083,6 +8360,8 @@ app.delete("/api/requests/:endpointId", requireAuth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+if (!initDbOnly) {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
