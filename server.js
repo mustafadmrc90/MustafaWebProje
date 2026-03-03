@@ -318,7 +318,9 @@ const dbRuntimeState = {
   initStartedAt: new Date().toISOString(),
   initCompletedAt: null,
   initOk: false,
-  initError: null
+  initError: null,
+  initErrorRaw: null,
+  initErrorCode: null
 };
 
 function summarizeErrorMessage(err) {
@@ -689,6 +691,8 @@ initDb()
   .then(async () => {
     dbRuntimeState.initOk = true;
     dbRuntimeState.initError = null;
+    dbRuntimeState.initErrorRaw = null;
+    dbRuntimeState.initErrorCode = null;
     dbRuntimeState.initCompletedAt = new Date().toISOString();
     if (initDbOnly) {
       console.log("DB init tamamlandi (INIT_DB_ONLY=true).");
@@ -701,6 +705,8 @@ initDb()
   .catch(async (err) => {
     dbRuntimeState.initOk = false;
     dbRuntimeState.initError = classifyDbErrorForUser(err);
+    dbRuntimeState.initErrorRaw = summarizeErrorMessage(err);
+    dbRuntimeState.initErrorCode = String(err?.code || err?.originalError?.code || "");
     dbRuntimeState.initCompletedAt = new Date().toISOString();
     console.error("DB init error:", err);
     console.error("DB init error summary:", dbRuntimeState.initError);
@@ -7897,14 +7903,21 @@ app.get("/health", async (req, res) => {
     res.json({
       ok: true,
       dbInitOk: dbRuntimeState.initOk,
-      dbInitCompletedAt: dbRuntimeState.initCompletedAt
+      dbInitCompletedAt: dbRuntimeState.initCompletedAt,
+      dbInitError: dbRuntimeState.initError,
+      dbInitErrorCode: dbRuntimeState.initErrorCode,
+      dbInitErrorRaw: dbRuntimeState.initErrorRaw
     });
   } catch (err) {
     res.status(500).json({
       ok: false,
       error: classifyDbErrorForUser(err),
+      errorCode: String(err?.code || err?.originalError?.code || ""),
+      errorRaw: summarizeErrorMessage(err),
       dbInitOk: dbRuntimeState.initOk,
       dbInitError: dbRuntimeState.initError,
+      dbInitErrorCode: dbRuntimeState.initErrorCode,
+      dbInitErrorRaw: dbRuntimeState.initErrorRaw,
       dbInitCompletedAt: dbRuntimeState.initCompletedAt
     });
   }
