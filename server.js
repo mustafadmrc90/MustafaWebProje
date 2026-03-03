@@ -877,7 +877,7 @@ function ensureCriticalSidebarRows(rows) {
   };
 
   upsertFromRegistry("general", true);
-  upsertFromRegistry("obus-user-create", true);
+  upsertFromRegistry("obus-user-create");
 
   return normalizedRows;
 }
@@ -986,7 +986,6 @@ async function syncSidebarMenusAndPermissions() {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key = 'obus-user-create' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -999,12 +998,6 @@ async function syncSidebarMenusAndPermissions() {
           WHERE usp.user_id = u.id
             AND usp.menu_key = m.key
         )
-    `);
-
-    await client.query(`
-      UPDATE user_sidebar_permissions
-      SET can_view = true, updated_at = now()
-      WHERE menu_key = 'obus-user-create'
     `);
 
     await client.query("COMMIT");
@@ -1027,7 +1020,6 @@ async function ensureSidebarPermissionsForUser(userId) {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key = 'obus-user-create' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1045,15 +1037,6 @@ async function ensureSidebarPermissionsForUser(userId) {
     [userIdNum]
   );
 
-  await pool.query(
-    `
-      UPDATE user_sidebar_permissions
-      SET can_view = true, updated_at = now()
-      WHERE user_id = $1
-        AND menu_key = 'obus-user-create'
-    `,
-    [userIdNum]
-  );
 }
 
 async function loadSidebarForUser(userId, options = {}) {
