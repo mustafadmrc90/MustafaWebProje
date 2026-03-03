@@ -83,16 +83,13 @@ async function main() {
   const pool = createDatabasePool(databaseUrl);
   try {
     await pool.query(`
-      IF OBJECT_ID(N'users', N'U') IS NULL
-      BEGIN
-        CREATE TABLE users (
-          id INT IDENTITY(1,1) PRIMARY KEY,
-          username NVARCHAR(255) UNIQUE NOT NULL,
-          password_hash NVARCHAR(255) NOT NULL,
-          display_name NVARCHAR(255) NOT NULL,
-          created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
-        )
-      END
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
     `);
 
     const hash = await bcrypt.hash(password, 10);

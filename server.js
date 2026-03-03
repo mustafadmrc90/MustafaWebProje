@@ -303,6 +303,7 @@ if (rawDatabaseUrl) {
 
 const isManagedDatabaseHost =
   /render\.com$/i.test(databaseHost) ||
+  /neon\.tech$/i.test(databaseHost) ||
   /supabase\.(co|com)$/i.test(databaseHost) ||
   /pooler\.supabase\.com$/i.test(databaseHost);
 

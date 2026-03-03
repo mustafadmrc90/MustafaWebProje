@@ -2,7 +2,13 @@
 
 Basit kullanıcı adı/şifre ile giriş ve dashboard sayfası.
 
-## Kurulum (Postgres)
+## Veritabani Desteği
+
+- PostgreSQL (onerilen, Render ile uyumlu, ucretsiz planla Neon/Supabase kullanabilirsiniz)
+- MSSQL (mevcut kurulumlarla geriye uyumlu)
+- Uygulama `DATABASE_URL` formatina bakarak DB turunu otomatik secer.
+
+## Kurulum (Yerel)
 
 ```bash
 npm install
@@ -19,7 +25,11 @@ cp .env.example .env
 
 ### Gerekli Ortam Değişkenleri
 
-- `DATABASE_URL` (örnek: `postgres://user:pass@localhost:5432/dashboard`)
+- `DATABASE_URL`
+  - PostgreSQL örnek: `postgresql://neondb_owner:***@ep-your-db-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require`
+  - MSSQL örnek: `Server=18.159.75.68,1433;Database=obilet-b2b-preprod;User Id=corp_mdemirci;Password=***;Encrypt=True;TrustServerCertificate=True;`
+- `DATABASE_SSL` (opsiyonel; URL formatinda etkili)
+- `DATABASE_SSL_REJECT_UNAUTHORIZED` (opsiyonel; URL formatinda etkili)
 - `SESSION_SECRET`
 - `SLACK_BOT_TOKEN` (Slack analiz için gerekli)
 - `SLACK_ANALYSIS_AUTO_SAVE_TIME` (opsiyonel, varsayılan: `23:59`, format: `HH:MM`)
@@ -59,16 +69,27 @@ cp .env.example .env
 
 > İlk çalıştırmada veritabanı otomatik oluşur ve örnek kullanıcı eklenir.
 
-## Render Deploy (Free + Postgres)
+## Render Deploy (Web Service + Ucretsiz PostgreSQL)
 
-1) Projeyi GitHub'a push edin.  
-2) Render'da **PostgreSQL** oluşturun.  
-3) Render'da **Web Service** oluşturun (repo seçin).  
-   - Build: `npm install`  
-   - Start: `npm start`  
-4) Environment variables ekleyin:
-   - `DATABASE_URL` (Render Postgres bağlantı adresi)
-   - `SESSION_SECRET` (rastgele güçlü bir değer)
+1. Neon'da ucretsiz bir PostgreSQL proje olusturun ve `Connection string` (pooled) bilgisini alin.
+2. Projeyi GitHub'a push edin.
+3. Render'da **Web Service** olusturun (repo secin).
+   - Build: `npm install`
+   - Start: `npm start`
+4. Render environment variables ekleyin:
+   - `DATABASE_URL=postgresql://...?...sslmode=require`
+   - `SESSION_SECRET` (rastgele guclu bir deger)
    - `NODE_ENV=production`
+   - `DATABASE_SSL=true` (opsiyonel)
+   - `DATABASE_SSL_REJECT_UNAUTHORIZED=false` (opsiyonel)
+5. Deploy edin. Ilk acilista schema ve admin kullanicisi otomatik olusur.
 
 Deploy sonrası Render size public URL verir.
+
+## Veritabani Ilklendirme (Opsiyonel)
+
+Sadece DB init calistirmak isterseniz:
+
+```bash
+./scripts/init-db-only.sh
+```

@@ -1,5 +1,6 @@
 const sql = require("mssql");
 const net = require("net");
+const { Pool: PgDriverPool } = require("pg");
 
 function parseBooleanFlag(value, fallback = false) {
   if (value === undefined || value === null) return fallback;
@@ -7,6 +8,44 @@ function parseBooleanFlag(value, fallback = false) {
   if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
   if (normalized === "false" || normalized === "0" || normalized === "no") return false;
   return fallback;
+}
+
+function parseOptionalInt(value, fallback) {
+  if (value === undefined || value === null || String(value).trim() === "") return fallback;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isMssqlStyleConnectionString(raw) {
+  return /^[a-z0-9 _-]+=/i.test(raw) && raw.includes(";");
+}
+
+function detectDatabaseEngine(connectionString) {
+  const raw = String(connectionString || "").trim();
+  if (!raw) {
+    throw new Error("DATABASE_URL is required");
+  }
+
+  if (isMssqlStyleConnectionString(raw)) {
+    return "mssql";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (err) {
+    throw new Error(`DATABASE_URL parse failed: ${err?.message || "unknown error"}`);
+  }
+
+  const protocol = String(parsed.protocol || "").toLowerCase();
+  if (protocol === "postgres:" || protocol === "postgresql:") {
+    return "postgres";
+  }
+  if (protocol === "mssql:" || protocol === "sqlserver:") {
+    return "mssql";
+  }
+
+  throw new Error(`DATABASE_URL parse failed: Unsupported protocol '${protocol || "unknown"}'`);
 }
 
 function buildTlsOptionsForServer(serverName) {
@@ -24,14 +63,14 @@ function buildTlsOptionsForServer(serverName) {
   return {};
 }
 
-function parseConnectionString(connectionString) {
+function parseMssqlConnectionString(connectionString) {
   const raw = String(connectionString || "").trim();
   if (!raw) {
     throw new Error("DATABASE_URL is required");
   }
 
   // SQL Server style: Server=...;Database=...;User Id=...;Password=...;
-  if (/^[a-z0-9 _-]+=/i.test(raw) && raw.includes(";")) {
+  if (isMssqlStyleConnectionString(raw)) {
     const kv = {};
     String(raw)
       .split(";")
@@ -358,8 +397,81 @@ class MssqlPool {
   }
 }
 
+function normalizePgResult(result) {
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
+  const rowCount = Number.isFinite(Number(result?.rowCount)) ? Number(result.rowCount) : rows.length;
+  return { rows, rowCount };
+}
+
+function buildPgPoolConfig(connectionString) {
+  const config = {
+    connectionString: String(connectionString || "").trim(),
+    max: parseOptionalInt(process.env.DATABASE_POOL_MAX, 10),
+    idleTimeoutMillis: parseOptionalInt(process.env.DATABASE_POOL_IDLE_TIMEOUT_MS, 30000)
+  };
+
+  const hasDatabaseSslFlag = process.env.DATABASE_SSL !== undefined;
+  const hasRejectUnauthorizedFlag = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== undefined;
+  if (!hasDatabaseSslFlag && !hasRejectUnauthorizedFlag) {
+    return config;
+  }
+
+  const sslEnabled = parseBooleanFlag(process.env.DATABASE_SSL, true);
+  if (!sslEnabled) {
+    config.ssl = false;
+    return config;
+  }
+
+  config.ssl = {
+    rejectUnauthorized: parseBooleanFlag(process.env.DATABASE_SSL_REJECT_UNAUTHORIZED, false)
+  };
+  return config;
+}
+
+class PostgresClient {
+  constructor(client) {
+    this.client = client;
+  }
+
+  async query(text, params = []) {
+    const result = await this.client.query(String(text || ""), Array.isArray(params) ? params : []);
+    return normalizePgResult(result);
+  }
+
+  release() {
+    if (this.client) {
+      this.client.release();
+    }
+  }
+}
+
+class PostgresPool {
+  constructor(connectionString) {
+    this.pool = new PgDriverPool(buildPgPoolConfig(connectionString));
+  }
+
+  async query(text, params = []) {
+    const result = await this.pool.query(String(text || ""), Array.isArray(params) ? params : []);
+    return normalizePgResult(result);
+  }
+
+  async connect() {
+    const client = await this.pool.connect();
+    return new PostgresClient(client);
+  }
+
+  async end() {
+    await this.pool.end();
+  }
+}
+
 function createDatabasePool(connectionString) {
-  const config = parseConnectionString(connectionString);
+  const engine = detectDatabaseEngine(connectionString);
+  if (engine === "postgres") {
+    return new PostgresPool(connectionString);
+  }
+
+  const config = parseMssqlConnectionString(connectionString);
   return new MssqlPool(config);
 }
 
