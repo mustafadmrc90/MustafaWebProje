@@ -59,7 +59,12 @@ function parseConnectionString(connectionString) {
     } else {
       server = serverRaw;
     }
-    const host = String(server || "").trim();
+    const host = String(server || "")
+      .trim()
+      .replace(/^tcp:/i, "");
+    if (!host) {
+      throw new Error("DATABASE_URL parse failed: Server/host is empty");
+    }
     const requestedEncrypt = parseBooleanFlag(kv.encrypt, true);
     const encrypt = host && net.isIP(host) ? false : requestedEncrypt;
     return {
@@ -101,7 +106,10 @@ function parseConnectionString(connectionString) {
 
   const rejectUnauthorized = parseBooleanFlag(process.env.DATABASE_SSL_REJECT_UNAUTHORIZED, false);
 
-  const host = parsed.hostname;
+  const host = String(parsed.hostname || "").trim();
+  if (!host) {
+    throw new Error("DATABASE_URL parse failed: Host is empty");
+  }
   const encrypt = host && net.isIP(host) ? false : useSsl;
   return {
     user: decodeURIComponent(parsed.username || ""),
