@@ -75,6 +75,8 @@ const ALL_COMPANIES_FETCH_TIMEOUT_MS =
   Number.parseInt(process.env.ALL_COMPANIES_FETCH_TIMEOUT_MS || "180000", 10) || 180000;
 const ALL_COMPANIES_SERVICE_PREVIEW_TTL_MS =
   Number.parseInt(process.env.ALL_COMPANIES_SERVICE_PREVIEW_TTL_MS || "1800000", 10) || 1800000;
+const ALL_COMPANIES_CLUSTER_CONCURRENCY =
+  Number.parseInt(process.env.ALL_COMPANIES_CLUSTER_CONCURRENCY || "6", 10) || 6;
 const SALES_REPORT_RANGE_CONCURRENCY =
   Number.parseInt(process.env.SALES_REPORT_RANGE_CONCURRENCY || "4", 10) || 4;
 const SALES_REPORT_TARGET_CONCURRENCY =
@@ -95,6 +97,11 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 );
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY =
+  Number.parseInt(
+    process.env.ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY || String(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || 4),
+    10
+  ) || Math.max(1, Number(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || 4));
 const PARTNER_CLUSTER_MIN = 0;
 const PARTNER_CLUSTER_MAX = 15;
 const PARTNER_CLUSTER_TOTAL = PARTNER_CLUSTER_MAX - PARTNER_CLUSTER_MIN + 1;
@@ -2761,64 +2768,119 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     ObusMerkezSubeID: String(row?.ObusMerkezSubeID || "").trim()
   }));
 
-  for (const row of enrichedRows) {
-    if (Boolean(signal?.aborted)) break;
+  const enrichResults = await runWithConcurrency(
+    enrichedRows,
+    ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY,
+    async (row) => {
+      if (Boolean(signal?.aborted)) {
+        return {
+          branchId: "",
+          errorMessage: "zaman aşımı nedeniyle kısmi sonuç üretildi"
+        };
+      }
 
-    const partnerId = String(row?.id || "").trim();
-    const partnerCode = String(row?.code || "").trim();
-    const clusterLabel = extractClusterLabel(row?.source);
-    const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
+      const existingBranchId = String(row?.ObusMerkezSubeID || "").trim();
+      if (existingBranchId) {
+        return { branchId: existingBranchId, errorMessage: null };
+      }
 
-    if (!partnerId) {
-      errors.push(`${rowRef}: partner-id boş.`);
-      continue;
+      const partnerId = String(row?.id || "").trim();
+      const partnerCode = String(row?.code || "").trim();
+      const clusterLabel = extractClusterLabel(row?.source);
+      const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
+
+      if (!partnerId) {
+        return {
+          branchId: "",
+          errorMessage: `${rowRef}: partner-id boş.`
+        };
+      }
+      if (!partnerCode) {
+        return {
+          branchId: "",
+          errorMessage: `${rowRef}: partner-code boş.`
+        };
+      }
+      if (!clusterLabel) {
+        return {
+          branchId: "",
+          errorMessage: `${rowRef}: cluster bilgisi boş.`
+        };
+      }
+
+      const result = await fetchObusMerkezBranchMapForTarget({
+        clusterLabel,
+        partnerCode,
+        fallbackPartnerId: partnerId,
+        signal
+      });
+
+      if (result.error) {
+        return {
+          branchId: "",
+          errorMessage: `${rowRef}: ${compactErrorText(result.error)}`
+        };
+      }
+
+      const mapBranchId =
+        result.map instanceof Map ? String(result.map.get(partnerId) || "").trim() : "";
+      if (mapBranchId) {
+        return {
+          branchId: mapBranchId,
+          errorMessage: null
+        };
+      }
+
+      const rowBranchId = Array.isArray(result.rows)
+        ? String(
+            (result.rows.find((item) => String(item?.partnerId || "").trim() === partnerId) || {}).branchId || ""
+          ).trim()
+        : "";
+      if (rowBranchId) {
+        return {
+          branchId: rowBranchId,
+          errorMessage: null
+        };
+      }
+
+      return {
+        branchId: "",
+        errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`
+      };
+    },
+    () => Boolean(signal?.aborted)
+  );
+
+  enrichResults.forEach((result, index) => {
+    const row = enrichedRows[index];
+    if (!row) return;
+
+    const resolvedBranchId = String(result?.branchId || "").trim();
+    if (resolvedBranchId) {
+      row.ObusMerkezSubeID = resolvedBranchId;
+      return;
     }
-    if (!partnerCode) {
-      errors.push(`${rowRef}: partner-code boş.`);
-      continue;
-    }
-    if (!clusterLabel) {
-      errors.push(`${rowRef}: cluster bilgisi boş.`);
-      continue;
+
+    if (typeof result?.errorMessage === "string" && result.errorMessage.trim()) {
+      errors.push(result.errorMessage.trim());
+      return;
     }
 
-    const result = await fetchObusMerkezBranchMapForTarget({
-      clusterLabel,
-      partnerCode,
-      fallbackPartnerId: partnerId,
-      signal
-    });
-
-    if (result.error) {
-      errors.push(`${rowRef}: ${compactErrorText(result.error)}`);
-      continue;
+    const runtimeError = result?.error;
+    if (runtimeError) {
+      const partnerId = String(row?.id || "").trim();
+      const partnerCode = String(row?.code || "").trim();
+      const clusterLabel = extractClusterLabel(row?.source);
+      const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
+      errors.push(`${rowRef}: ${compactErrorText(runtimeError?.message || runtimeError)}`);
     }
+  });
 
-    const mapBranchId =
-      result.map instanceof Map ? String(result.map.get(partnerId) || "").trim() : "";
-    if (mapBranchId) {
-      row.ObusMerkezSubeID = mapBranchId;
-      continue;
-    }
-
-    const rowBranchId = Array.isArray(result.rows)
-      ? String(
-          (result.rows.find((item) => String(item?.partnerId || "").trim() === partnerId) || {}).branchId || ""
-        ).trim()
-      : "";
-    if (rowBranchId) {
-      row.ObusMerkezSubeID = rowBranchId;
-      continue;
-    }
-
-    errors.push(`${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`);
+  if (Boolean(signal?.aborted)) {
+    errors.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
   }
 
   const uniqueErrors = Array.from(new Set(errors.filter(Boolean)));
-  if (Boolean(signal?.aborted)) {
-    uniqueErrors.unshift("zaman aşımı nedeniyle kısmi sonuç üretildi");
-  }
-
   const notice =
     uniqueErrors.length > 0
       ? `ObusMerkezSubeID: ${uniqueErrors.slice(0, 2).join(" | ")}${uniqueErrors.length > 2 ? ` (+${uniqueErrors.length - 2} hata)` : ""}`
@@ -2896,22 +2958,41 @@ async function fetchPartnerCodes() {
 }
 
 async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
+  const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(30000, ALL_COMPANIES_FETCH_TIMEOUT_MS));
+  let lastKnownClusterCount = 0;
 
   try {
     const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
+    lastKnownClusterCount = partnerUrls.length;
     if (partnerUrls.length === 0) {
-      return { columns: [], rows: [], error: "Partner URL yapılandırması boş.", clusterCount: 0 };
+      return {
+        columns: [],
+        rows: [],
+        error: "Partner URL yapılandırması boş.",
+        clusterCount: 0,
+        metrics: {
+          totalMs: Date.now() - startedAt,
+          clusterFetchMs: 0,
+          normalizeMs: 0,
+          enrichMs: 0,
+          rawRowCount: 0,
+          rowCount: 0
+        }
+      };
     }
 
-    const results = [];
-    for (const partnerUrl of partnerUrls) {
-      // Must iterate cluster0..cluster15 in order as requested.
-      const result = await fetchPartnerRawRowsFromCluster(partnerUrl, controller.signal);
-      results.push(result);
-    }
+    const clusterFetchStartedAt = Date.now();
+    const results = await runWithConcurrency(
+      partnerUrls,
+      ALL_COMPANIES_CLUSTER_CONCURRENCY,
+      async (partnerUrl) => fetchPartnerRawRowsFromCluster(partnerUrl, controller.signal),
+      () => Boolean(controller.signal.aborted)
+    );
+    const clusterFetchMs = Date.now() - clusterFetchStartedAt;
 
+    const normalizeStartedAt = Date.now();
     const mergedRows = [];
     const errors = [];
     results.forEach((result) => {
@@ -2935,13 +3016,17 @@ async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
     });
 
     const normalizedReport = normalizeAllCompaniesReportRows(mergedRows);
+    const normalizeMs = Date.now() - normalizeStartedAt;
     const columns = normalizedReport.columns;
     let rows = normalizedReport.rows;
     let obusNotice = null;
+    let enrichMs = 0;
     if (includeObusMerkezSubeId) {
+      const enrichStartedAt = Date.now();
       const obusEnriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedReport.rows, controller.signal);
       rows = obusEnriched.rows;
       obusNotice = obusEnriched.notice;
+      enrichMs = Date.now() - enrichStartedAt;
     }
 
     const errorParts = [];
@@ -2960,14 +3045,31 @@ async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
       columns,
       rows,
       error,
-      clusterCount: partnerUrls.length
+      clusterCount: partnerUrls.length,
+      metrics: {
+        totalMs: Date.now() - startedAt,
+        clusterFetchMs,
+        normalizeMs,
+        enrichMs,
+        rawRowCount: mergedRows.length,
+        rowCount: rows.length
+      }
     };
   } catch (err) {
     return {
       columns: [],
       rows: [],
       error: `Partner verileri alınamadı: ${err?.message || "Bilinmeyen hata"}`,
-      clusterCount: 0
+      clusterCount: 0,
+      metrics: {
+        totalMs: Date.now() - startedAt,
+        clusterFetchMs: 0,
+        normalizeMs: 0,
+        enrichMs: 0,
+        rawRowCount: 0,
+        rowCount: 0,
+        clusterCount: lastKnownClusterCount
+      }
     };
   } finally {
     clearTimeout(timeout);
@@ -7176,6 +7278,11 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   let result = buildEmptyAllCompaniesReport(0);
   const errorParts = [];
   if (shouldSync) {
+    const syncStartedAt = Date.now();
+    console.log(
+      `[AllCompanies] Service refresh started user=${Number.isInteger(currentUserId) ? currentUserId : "unknown"}`
+    );
+
     const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
     result = {
       columns: liveResult.columns || [],
@@ -7183,6 +7290,19 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
       error: liveResult.error || null,
       clusterCount: liveResult.clusterCount || 0
     };
+
+    const syncDurationMs = Date.now() - syncStartedAt;
+    const metrics = liveResult.metrics || {};
+    console.log(
+      `[AllCompanies] Service refresh completed in ${syncDurationMs}ms | clusters=${
+        liveResult.clusterCount || 0
+      } | rawRows=${metrics.rawRowCount || 0} | rows=${(liveResult.rows || []).length} | clusterFetch=${
+        metrics.clusterFetchMs || 0
+      }ms | normalize=${metrics.normalizeMs || 0}ms | enrich=${metrics.enrichMs || 0}ms${
+        liveResult.error ? " | status=partial" : " | status=ok"
+      }`
+    );
+
     if (liveResult.error) {
       errorParts.push(liveResult.error);
     }
