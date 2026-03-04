@@ -3112,7 +3112,8 @@ async function fetchAllCompaniesRowsFromCache() {
   }
 }
 
-async function upsertAllCompaniesCacheRows(rows) {
+async function upsertAllCompaniesCacheRows(rows, options = {}) {
+  const pruneMissing = options?.pruneMissing === true;
   const normalizedRows = normalizeAllCompaniesCacheRows(rows).filter((row) => {
     const code = String(row?.code || "").trim();
     const source = String(row?.source || "").trim();
@@ -3122,6 +3123,7 @@ async function upsertAllCompaniesCacheRows(rows) {
   if (normalizedRows.length === 0) {
     return {
       savedCount: 0,
+      deletedCount: 0,
       error: null
     };
   }
@@ -3188,15 +3190,62 @@ async function upsertAllCompaniesCacheRows(rows) {
       );
     }
 
+    let deletedCount = 0;
+    if (pruneMissing) {
+      const keepKeySet = new Set(normalizedRows.map((row) => buildAllCompaniesCacheRowKey(row)));
+      const existingKeysResult = await client.query(
+        `
+          SELECT id, source, code
+          FROM all_companies_cache
+        `
+      );
+
+      const rowsToDelete = (existingKeysResult.rows || [])
+        .map((row) => ({
+          id: String(row?.id || "").trim(),
+          source: extractClusterLabel(row?.source),
+          code: String(row?.code || "").trim()
+        }))
+        .filter((row) => row.id && row.source && row.code)
+        .filter((row) => !keepKeySet.has(buildAllCompaniesCacheRowKey(row)));
+
+      const deleteChunkSize = 200;
+      for (let i = 0; i < rowsToDelete.length; i += deleteChunkSize) {
+        const chunk = rowsToDelete.slice(i, i + deleteChunkSize);
+        const params = [];
+        const whereParts = [];
+
+        chunk.forEach((row, index) => {
+          const base = index * 3;
+          whereParts.push(`(id = $${base + 1} AND source = $${base + 2} AND code = $${base + 3})`);
+          params.push(row.id, row.source, row.code);
+        });
+
+        if (whereParts.length > 0) {
+          await client.query(
+            `
+              DELETE FROM all_companies_cache
+              WHERE ${whereParts.join(" OR ")}
+            `,
+            params
+          );
+        }
+      }
+
+      deletedCount = rowsToDelete.length;
+    }
+
     await client.query("COMMIT");
     return {
       savedCount: normalizedRows.length,
+      deletedCount,
       error: null
     };
   } catch (err) {
     await client.query("ROLLBACK");
     return {
       savedCount: 0,
+      deletedCount: 0,
       error: `Tüm firmalar önbelleği yazılamadı: ${err?.message || "Bilinmeyen hata"}`
     };
   } finally {
@@ -7273,6 +7322,8 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   const saveErrorCode = String(req.query.saveErr || "").trim();
   const savedCountRaw = Number.parseInt(String(req.query.savedCount || "0"), 10);
   const savedCount = Number.isFinite(savedCountRaw) ? Math.max(0, savedCountRaw) : 0;
+  const deletedCountRaw = Number.parseInt(String(req.query.deletedCount || "0"), 10);
+  const deletedCount = Number.isFinite(deletedCountRaw) ? Math.max(0, deletedCountRaw) : 0;
   const currentUserId = Number(req.session?.user?.id);
 
   let result = buildEmptyAllCompaniesReport(0);
@@ -7324,7 +7375,9 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   const cacheMessage = shouldViewCache
     ? `SQL'den gösteriliyor. Toplam ${result.rows?.length || 0} kayıt.`
     : "";
-  const saveMessage = saveSucceeded ? `SQL kayıt tamamlandı. ${savedCount} kayıt işlendi.` : "";
+  const saveMessage = saveSucceeded
+    ? `SQL kayıt tamamlandı. ${savedCount} kayıt işlendi, serviste olmayan ${deletedCount} kayıt silindi.`
+    : "";
 
   if (saveErrorCode === "no_service_data") {
     errorParts.push("Önce 'Servisten Güncelle' butonuyla servis verisini alın.");
@@ -7375,13 +7428,17 @@ app.post("/reports/all-companies/save-sql", requireAuth, requireMenuAccess("all-
     return res.redirect("/reports/all-companies?saveErr=no_service_data");
   }
 
-  const saveResult = await upsertAllCompaniesCacheRows(previewRows);
+  const saveResult = await upsertAllCompaniesCacheRows(previewRows, { pruneMissing: true });
   if (saveResult.error) {
     console.error("All companies SQL save error:", saveResult.error);
     return res.redirect("/reports/all-companies?saveErr=save_failed");
   }
 
-  return res.redirect(`/reports/all-companies?cache=1&saved=1&savedCount=${saveResult.savedCount}`);
+  return res.redirect(
+    `/reports/all-companies?cache=1&saved=1&savedCount=${saveResult.savedCount}&deletedCount=${
+      saveResult.deletedCount || 0
+    }`
+  );
 });
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
