@@ -60,6 +60,9 @@ const initDbOnly = String(process.env.INIT_DB_ONLY || "")
 const PARTNERS_API_URL =
   process.env.PARTNERS_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
+const PARTNERS_EXTRA_API_URLS_RAW = String(
+  process.env.PARTNERS_EXTRA_API_URLS || "https://api-preprod.obus.com.tr/api"
+).trim();
 const PARTNERS_SESSION_API_URL =
   process.env.PARTNERS_SESSION_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession";
@@ -2174,13 +2177,60 @@ function buildClusterPartnerUrls(baseUrl) {
   return urls;
 }
 
+function normalizePartnerGetPartnersUrl(baseUrl) {
+  const raw = String(baseUrl || "").trim();
+  if (!raw) return "";
+  const normalized = normalizeTargetUrl(raw);
+  if (!normalized) return "";
+
+  try {
+    const parsed = new URL(normalized);
+    const pathname = String(parsed.pathname || "/");
+
+    if (/\/api\/partner\/getpartners\/?$/i.test(pathname)) {
+      parsed.pathname = "/api/partner/getpartners";
+    } else if (pathname === "/" || /\/api\/?$/i.test(pathname)) {
+      parsed.pathname = "/api/partner/getpartners";
+    }
+
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildPartnerFetchUrls() {
+  const extraBaseUrls = String(PARTNERS_EXTRA_API_URLS_RAW || "")
+    .split(",")
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  const sourceBaseUrls = [PARTNERS_API_URL, ...extraBaseUrls];
+  const expandedUrls = [];
+  sourceBaseUrls.forEach((sourceUrl) => {
+    buildClusterPartnerUrls(sourceUrl).forEach((expandedUrl) => {
+      expandedUrls.push(expandedUrl);
+    });
+  });
+
+  const deduped = [];
+  expandedUrls.forEach((url) => {
+    const normalized = normalizePartnerGetPartnersUrl(url);
+    if (!normalized) return;
+    if (!deduped.includes(normalized)) deduped.push(normalized);
+  });
+  return deduped;
+}
+
 function buildUrlForCluster(baseUrl, clusterLabel) {
   const raw = String(baseUrl || "").trim();
   const cluster = String(clusterLabel || "").trim().toLowerCase();
   if (!raw) return "";
   if (!cluster) return raw;
 
-  if (/cluster\d+/i.test(raw)) {
+  if (/cluster\d+/i.test(raw) && /^cluster\d+$/i.test(cluster)) {
     return raw.replace(/cluster\d+/i, cluster);
   }
   return raw;
@@ -2948,7 +2998,7 @@ async function fetchPartnerCodes() {
   const timeout = setTimeout(() => controller.abort(), 25000);
 
   try {
-    const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
+    const partnerUrls = buildPartnerFetchUrls();
     if (partnerUrls.length === 0) {
       return { partners: [], error: "Partner URL yapılandırması boş." };
     }
@@ -3015,7 +3065,7 @@ async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
   let lastKnownClusterCount = 0;
 
   try {
-    const partnerUrls = buildClusterPartnerUrls(PARTNERS_API_URL);
+    const partnerUrls = buildPartnerFetchUrls();
     lastKnownClusterCount = partnerUrls.length;
     if (partnerUrls.length === 0) {
       return {
