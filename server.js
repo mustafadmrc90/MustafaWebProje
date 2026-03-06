@@ -60,8 +60,9 @@ const initDbOnly = String(process.env.INIT_DB_ONLY || "")
 const PARTNERS_API_URL =
   process.env.PARTNERS_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
+const PARTNERS_REQUIRED_EXTRA_API_URL = "https://api-preprod.obus.com.tr/api";
 const PARTNERS_EXTRA_API_URLS_RAW = String(
-  process.env.PARTNERS_EXTRA_API_URLS || "https://api-preprod.obus.com.tr/api"
+  process.env.PARTNERS_EXTRA_API_URLS || PARTNERS_REQUIRED_EXTRA_API_URL
 ).trim();
 const PARTNERS_SESSION_API_URL =
   process.env.PARTNERS_SESSION_API_URL ||
@@ -2207,7 +2208,7 @@ function buildPartnerFetchUrls() {
     .map((item) => String(item || "").trim())
     .filter(Boolean);
 
-  const sourceBaseUrls = [PARTNERS_API_URL, ...extraBaseUrls];
+  const sourceBaseUrls = [PARTNERS_API_URL, PARTNERS_REQUIRED_EXTRA_API_URL, ...extraBaseUrls];
   const expandedUrls = [];
   sourceBaseUrls.forEach((sourceUrl) => {
     buildClusterPartnerUrls(sourceUrl).forEach((expandedUrl) => {
