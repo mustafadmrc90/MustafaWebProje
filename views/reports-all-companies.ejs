@@ -92,6 +92,7 @@
               </span>
             </form>
             <form class="all-companies-loading-form all-companies-save-form" method="post" action="/reports/all-companies/save-sql">
+              <input type="hidden" name="saveSource" value="<%= report.sync?.requested ? 'service' : 'cache' %>" />
               <button
                 class="button-link"
                 type="submit"

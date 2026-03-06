@@ -7442,17 +7442,24 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
 
 app.post("/reports/all-companies/save-sql", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
   const currentUserId = Number(req.session?.user?.id);
+  const saveSource = String(req.body?.saveSource || "").trim().toLowerCase();
   const previewSnapshot = getAllCompaniesServicePreviewForUser(currentUserId);
   const previewRows = normalizeAllCompaniesCacheRows(Array.isArray(previewSnapshot?.rows) ? previewSnapshot.rows : []);
-  let rowsToSave = previewRows;
+  let rowsToSave = [];
 
-  if (rowsToSave.length === 0) {
+  if (saveSource === "service") {
+    rowsToSave = previewRows;
+  } else {
     const cacheResult = await fetchAllCompaniesRowsFromCache();
     if (cacheResult.error) {
       console.error("All companies SQL save cache read error:", cacheResult.error);
       return res.redirect("/reports/all-companies?saveErr=save_failed");
     }
     rowsToSave = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
+  }
+
+  if (rowsToSave.length === 0 && previewRows.length > 0) {
+    rowsToSave = previewRows;
   }
 
   if (rowsToSave.length === 0) {
