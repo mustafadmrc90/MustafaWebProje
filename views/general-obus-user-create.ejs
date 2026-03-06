@@ -23,16 +23,23 @@
             </span>
             <span>Obus Kullanıcı Oluştur</span>
           </h1>
-          <p>Bu ekran hazırlandı. Servis detayına göre form alanları eklenecek.</p>
+          <p>Firma seçimi ve body alanları buradan hazırlanır.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
 
-      <section class="table-card panel-card">
+      <% if (bulkMode) { %>
+        <div class="inline-success">Toplu kullanıcı oluşturma modu seçildi.</div>
+      <% } %>
+      <% if (partnerError) { %>
+        <div class="alert inline-alert"><%= partnerError %></div>
+      <% } %>
+
+      <section class="table-card panel-card obus-user-create-section">
         <div class="table-head">
-          <h2>Hazırlık</h2>
+          <h2>Kullanıcı Oluşturma Hazırlığı</h2>
           <div class="table-actions">
             <form method="get" action="/general/obus-user-create">
               <input type="hidden" name="bulk" value="1" />
@@ -40,10 +47,76 @@
             </form>
           </div>
         </div>
-        <% if (bulkMode) { %>
-          <div class="inline-success">Toplu kullanıcı oluşturma modu seçildi.</div>
-        <% } %>
-        <p class="muted">Servis bilgisini paylaştığında kullanıcı oluşturma akışını bu ekrana ekleyeceğim.</p>
+
+        <form class="obus-user-create-form" method="get" action="/general/obus-user-create">
+          <input type="hidden" name="bulk" value="<%= bulkMode ? '1' : '0' %>" />
+          <input
+            type="hidden"
+            name="selectedCompanies"
+            id="obus-user-create-selected-companies"
+            value="<%= selectedCompaniesJson || '[]' %>"
+          />
+          <input type="hidden" id="obus-user-create-edit-values" value="{}" />
+
+          <div class="obus-user-create-grid">
+            <label class="obus-user-create-field obus-user-create-field-company">
+              <span>Firmalar</span>
+              <div class="obus-company-multiselect">
+                <button
+                  type="button"
+                  class="obus-company-trigger"
+                  id="obus-company-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  Hepsi
+                </button>
+                <div class="obus-company-dropdown" id="obus-company-dropdown" role="listbox" hidden>
+                  <label class="obus-company-option obus-company-option-all">
+                    <input type="checkbox" data-select-all="1" />
+                    <span>Hepsi</span>
+                  </label>
+
+                  <% companies.forEach((company) => { %>
+                    <label class="obus-company-option">
+                      <input
+                        type="checkbox"
+                        data-company-checkbox="1"
+                        value="<%= company.value %>"
+                        <%= selectedCompanyValues.includes(company.value) ? "checked" : "" %>
+                      />
+                      <span><%= company.label %></span>
+                    </label>
+                  <% }) %>
+                </div>
+              </div>
+              <small class="muted">Varsayılan olarak Hepsi seçili gelir. Sadece işaretli firmalara istek atılacak.</small>
+            </label>
+
+            <label class="obus-user-create-field obus-user-create-field-template">
+              <span>Body Template</span>
+              <textarea id="obus-user-create-body-template" name="bodyTemplate" rows="12"><%= bodyTemplate %></textarea>
+              <small class="muted">`{{edit:alan_adi}}` veya `{{edit}}` taglerini kullanabilirsin.</small>
+            </label>
+          </div>
+
+          <div class="obus-user-create-actions">
+            <button class="button-link ghost" type="submit">Seçimi Koruyarak Yenile</button>
+          </div>
+
+          <div class="obus-user-create-loading-message" hidden>Hazırlanıyor...</div>
+        </form>
+      </section>
+
+      <section class="table-card panel-card obus-user-create-editor-section">
+        <div class="table-head">
+          <h2>Body Alanları</h2>
+        </div>
+        <div id="obus-user-create-edit-fields" class="obus-edit-fields"></div>
+        <label class="obus-user-create-field obus-user-create-preview">
+          <span>Doldurulmuş Body Önizleme</span>
+          <textarea id="obus-user-create-body-preview" rows="12" readonly></textarea>
+        </label>
       </section>
     </section>
 

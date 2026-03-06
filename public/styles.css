@@ -2349,6 +2349,233 @@ button.ghost {
   margin-bottom: 6px;
 }
 
+.obus-user-create-section {
+  margin-bottom: 12px;
+}
+
+.obus-user-create-form {
+  display: grid;
+  gap: 12px;
+}
+
+.obus-user-create-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) minmax(360px, 1fr);
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.obus-user-create-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.obus-user-create-field span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #4f6176;
+}
+
+.obus-user-create-field textarea {
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #f7f9fc;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #1f2735;
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+  font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+}
+
+.obus-user-create-field textarea:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.obus-user-create-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.obus-user-create-loading-message {
+  font-size: 12px;
+  color: #4f6176;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.obus-user-create-loading-message::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid #b7c5d8;
+  border-top-color: #4f6176;
+  animation: salesSpin 0.8s linear infinite;
+}
+
+.obus-user-create-form.is-loading .obus-user-create-loading-message {
+  display: inline-flex;
+}
+
+.obus-company-multiselect {
+  position: relative;
+}
+
+.obus-company-trigger {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #f7f9fc;
+  color: #1f2735;
+  padding: 8px 34px 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.obus-company-trigger::after {
+  content: "▾";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #4f6176;
+}
+
+.obus-company-trigger[aria-expanded="true"]::after {
+  content: "▴";
+}
+
+.obus-company-trigger:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.obus-company-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid #cfd8e5;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 26px rgba(26, 38, 56, 0.14);
+  padding: 6px;
+}
+
+.obus-company-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 7px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1f2735;
+}
+
+.obus-company-option:hover {
+  background: #f2f6fb;
+}
+
+.obus-company-option input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.obus-company-option span {
+  font-weight: 500;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: 0;
+  color: inherit;
+}
+
+.obus-company-option-all {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  background: #fff;
+  border-bottom: 1px solid #e4eaf3;
+  margin-bottom: 4px;
+  border-radius: 8px 8px 0 0;
+}
+
+.obus-user-create-editor-section {
+  margin-bottom: 12px;
+}
+
+.obus-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.obus-edit-fields label {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #d7e0ec;
+  background: #f6f9fd;
+}
+
+.obus-edit-fields label span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #4f6176;
+}
+
+.obus-edit-fields input {
+  border-radius: 8px;
+  border: 1px solid #b9c6d7;
+  background: #fff;
+  padding: 8px 9px;
+  font-size: 13px;
+  min-height: 34px;
+  color: #1f2735;
+}
+
+.obus-edit-fields input:focus {
+  outline: none;
+  border-color: #8ca4c0;
+}
+
+.obus-edit-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #4f6176;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed #cdd8e8;
+  background: #f7f9fc;
+}
+
+.obus-user-create-preview textarea {
+  min-height: 230px;
+}
+
 .slack-analysis-summary-table {
   min-width: 620px;
 }
@@ -2891,6 +3118,14 @@ button.ghost {
 
   .allowed-lines-grid {
     grid-template-columns: 1fr;
+  }
+
+  .obus-user-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .obus-user-create-actions {
+    justify-content: flex-start;
   }
 
   .allowed-lines-actions {

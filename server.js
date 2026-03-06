@@ -86,12 +86,6 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
-const OBUS_USER_CREATE_API_URL =
-  process.env.OBUS_USER_CREATE_API_URL ||
-  "https://api-coreprod-cluster0.obus.com.tr/api/membership/createagencyuser";
-const OBUS_USER_CREATE_API_AUTH = process.env.OBUS_USER_CREATE_API_AUTH || PARTNERS_API_AUTH;
-const OBUS_USER_CREATE_TIMEOUT_MS =
-  Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const INVENTORY_BRANCHES_API_URL =
   process.env.INVENTORY_BRANCHES_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
@@ -145,6 +139,19 @@ const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
 const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
 const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
+const OBUS_USER_CREATE_BODY_TEMPLATE = String(
+  process.env.OBUS_USER_CREATE_BODY_TEMPLATE ||
+    `{
+  "data": {
+    "username": "{{edit:username}}",
+    "name": "{{edit:name}}",
+    "surname": "{{edit:surname}}",
+    "email": "{{edit:email}}",
+    "phone": "{{edit:phone}}",
+    "password": "{{edit:password}}"
+  }
+}`
+);
 const SLACK_SELECTED_USERS = [
   { id: "U03M921BDCJ", name: "Onur Uğur - Corp" },
   { id: "U03MBE47P1A", name: "Çağatay Atalay - Corp" },
@@ -2278,6 +2285,21 @@ function parseCompanyOptionValue(value) {
   }
 
   return null;
+}
+
+function parseSelectedCompanyValuesFromInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  const parsed = parseJsonSafe(raw);
+  if (Array.isArray(parsed)) {
+    return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  return raw
+    .split(",")
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
 }
 
 function extractPartnerIdFromCompanyLabel(label) {
@@ -7000,12 +7022,44 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
   });
 });
 
-app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), (req, res) => {
+app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
   const bulkMode = String(req.query.bulk || "").trim() === "1";
+  const requestedSelectedCompanies = parseSelectedCompanyValuesFromInput(req.query.selectedCompanies);
+  const requestedBodyTemplate = typeof req.query.bodyTemplate === "string" ? req.query.bodyTemplate : "";
+  const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+  const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
+
+  const companies = partnerItems.map((item) => {
+    const idText = item.id || "N/A";
+    const clusterText = item.cluster || "cluster";
+    const value = buildCompanyOptionValue(item);
+    const obusMerkezSubeId = String(obusMerkezSubeIdByCompany.get(value) || "").trim();
+    const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
+    return {
+      value,
+      label,
+      meta: item
+    };
+  });
+
+  const companyValueSet = new Set(companies.map((item) => item.value));
+  const selectedCompanyValues = requestedSelectedCompanies.filter((value) => companyValueSet.has(value));
+  const defaultSelectedCompanyValues =
+    selectedCompanyValues.length > 0 ? selectedCompanyValues : companies.map((item) => item.value);
+
+  if (obusCacheError) {
+    console.error("Obus user create ObusMerkezSubeID cache read error:", obusCacheError);
+  }
+
   res.render("general-obus-user-create", {
     user: req.session.user,
     active: "obus-user-create",
-    bulkMode
+    bulkMode,
+    companies,
+    partnerError,
+    selectedCompanyValues: defaultSelectedCompanyValues,
+    selectedCompaniesJson: JSON.stringify(defaultSelectedCompanyValues),
+    bodyTemplate: requestedBodyTemplate || OBUS_USER_CREATE_BODY_TEMPLATE
   });
 });
 
