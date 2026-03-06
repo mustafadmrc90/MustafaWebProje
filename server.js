@@ -190,6 +190,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "obus-user-create"
   },
   {
+    key: "obus-user-deactivate",
+    type: "item",
+    label: "Obus Kullanıcı Pasife Al",
+    parentKey: "general",
+    route: "/general/obus-user-deactivate",
+    routeKey: "obus-user-deactivate",
+    sortOrder: 14,
+    iconKey: "obus-user-deactivate"
+  },
+  {
     key: "reports",
     type: "section",
     label: "Raporlar",
@@ -888,6 +898,7 @@ function ensureCriticalSidebarRows(rows) {
 
   upsertFromRegistry("general", true);
   upsertFromRegistry("obus-user-create");
+  upsertFromRegistry("obus-user-deactivate");
 
   return normalizedRows;
 }
@@ -996,6 +1007,7 @@ async function syncSidebarMenusAndPermissions() {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
+          WHEN m.key = 'obus-user-deactivate' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1030,6 +1042,7 @@ async function ensureSidebarPermissionsForUser(userId) {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
+          WHEN m.key = 'obus-user-deactivate' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -6985,6 +6998,13 @@ app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-c
   res.render("general-obus-user-create", {
     user: req.session.user,
     active: "obus-user-create"
+  });
+});
+
+app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), (req, res) => {
+  res.render("general-obus-user-deactivate", {
+    user: req.session.user,
+    active: "obus-user-deactivate"
   });
 });
 
