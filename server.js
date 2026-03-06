@@ -7391,7 +7391,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
     : "";
 
   if (saveErrorCode === "no_service_data") {
-    errorParts.push("Önce 'Servisten Güncelle' butonuyla servis verisini alın.");
+    errorParts.push("Kaydedilecek kayıt bulunamadı.");
   } else if (saveErrorCode === "save_failed") {
     errorParts.push("SQL kayıt işlemi başarısız oldu.");
   } else if (saveErrorCode === "obus_update_failed") {
@@ -7443,13 +7443,23 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
 app.post("/reports/all-companies/save-sql", requireAuth, requireMenuAccess("all-companies"), async (req, res) => {
   const currentUserId = Number(req.session?.user?.id);
   const previewSnapshot = getAllCompaniesServicePreviewForUser(currentUserId);
-  const previewRows = Array.isArray(previewSnapshot?.rows) ? previewSnapshot.rows : [];
+  const previewRows = normalizeAllCompaniesCacheRows(Array.isArray(previewSnapshot?.rows) ? previewSnapshot.rows : []);
+  let rowsToSave = previewRows;
 
-  if (previewRows.length === 0) {
+  if (rowsToSave.length === 0) {
+    const cacheResult = await fetchAllCompaniesRowsFromCache();
+    if (cacheResult.error) {
+      console.error("All companies SQL save cache read error:", cacheResult.error);
+      return res.redirect("/reports/all-companies?saveErr=save_failed");
+    }
+    rowsToSave = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
+  }
+
+  if (rowsToSave.length === 0) {
     return res.redirect("/reports/all-companies?saveErr=no_service_data");
   }
 
-  const saveResult = await upsertAllCompaniesCacheRows(previewRows, { pruneMissing: true });
+  const saveResult = await upsertAllCompaniesCacheRows(rowsToSave, { pruneMissing: true });
   if (saveResult.error) {
     console.error("All companies SQL save error:", saveResult.error);
     return res.redirect("/reports/all-companies?saveErr=save_failed");

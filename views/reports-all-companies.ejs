@@ -97,12 +97,11 @@
                 type="submit"
                 data-default-label="SQL'e Kaydet"
                 data-loading-label="Kaydediliyor..."
-                <%= report.sync?.hasPreview ? "" : "disabled" %>
               >
                 SQL'e Kaydet
               </button>
               <span class="all-companies-loading-message" hidden>
-                Servis verisi SQL'e yazılıyor...
+                Listedeki kayıtlar SQL'e yazılıyor...
               </span>
             </form>
             <form class="all-companies-loading-form all-companies-cache-form" method="get" action="/reports/all-companies">
