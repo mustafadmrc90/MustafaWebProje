@@ -7084,6 +7084,13 @@ function normalizeObusBranchIdValue(rawValue) {
   return value;
 }
 
+function normalizeObusPartnerIdValue(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!/^-?\d+$/.test(value)) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function formatObusRequestDate(date = new Date()) {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -7131,6 +7138,7 @@ function buildObusCreateUserRequestBody({
   fullName,
   username,
   password,
+  partnerIdValue,
   branchIdValue,
   sessionId,
   deviceId,
@@ -7150,7 +7158,7 @@ function buildObusCreateUserRequestBody({
         {
           "module-id": "Obus",
           id: 0,
-          "partner-id": null,
+          "partner-id": partnerIdValue,
           "user-id": 0
         }
       ]
@@ -7207,8 +7215,17 @@ async function createObusUserForCompany({ company, formValues }) {
   const companyLabel = String(company?.label || "").trim() || String(company?.value || "").trim();
   const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
   const partnerCode = String(company?.meta?.code || "").trim();
+  const partnerIdRaw = String(company?.meta?.id || "").trim();
+  const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
   const branchRaw = String(company?.obusMerkezSubeId || "").trim();
   const branchIdValue = normalizeObusBranchIdValue(branchRaw);
+  if (!Number.isInteger(partnerIdValue)) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: "Partner ID bulunamadı."
+    };
+  }
   if (!branchIdValue && branchIdValue !== 0) {
     return {
       ok: false,
@@ -7261,6 +7278,7 @@ async function createObusUserForCompany({ company, formValues }) {
     fullName: formValues.fullName,
     username: formValues.username,
     password: formValues.password,
+    partnerIdValue,
     branchIdValue,
     sessionId: String(loginResult.sessionId || "").trim(),
     deviceId: String(loginResult.deviceId || "").trim(),
