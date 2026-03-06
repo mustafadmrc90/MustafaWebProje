@@ -23,7 +23,7 @@
             </span>
             <span>Obus Kullanıcı Oluştur</span>
           </h1>
-          <p>Firma seçimi ve body alanları buradan hazırlanır.</p>
+          <p>Firma seçimi ve kullanıcı alanları buradan hazırlanır.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -36,13 +36,16 @@
       <% if (partnerError) { %>
         <div class="alert inline-alert"><%= partnerError %></div>
       <% } %>
+      <% if (report && report.error) { %>
+        <div class="alert inline-alert"><%= report.error %></div>
+      <% } %>
 
       <section class="table-card panel-card obus-user-create-section">
         <div class="table-head">
           <h2>Kullanıcı Oluşturma Hazırlığı</h2>
         </div>
 
-        <form class="obus-user-create-form" method="get" action="/general/obus-user-create">
+        <form class="obus-user-create-form" method="post" action="/general/obus-user-create">
           <input type="hidden" name="bulk" value="<%= bulkMode ? '1' : '0' %>" />
           <input
             type="hidden"
@@ -65,13 +68,23 @@
                   Hepsi
                 </button>
                 <div class="obus-company-dropdown" id="obus-company-dropdown" role="listbox" hidden>
+                  <div class="obus-company-search-wrap">
+                    <input
+                      type="text"
+                      class="obus-company-search"
+                      id="obus-company-search"
+                      placeholder="Firma ara..."
+                      autocomplete="off"
+                    />
+                  </div>
+
                   <label class="obus-company-option obus-company-option-all">
                     <input type="checkbox" data-select-all="1" />
                     <span>Hepsi</span>
                   </label>
 
                   <% companies.forEach((company) => { %>
-                    <label class="obus-company-option">
+                    <label class="obus-company-option" data-company-option-row="1">
                       <input
                         type="checkbox"
                         data-company-checkbox="1"
@@ -109,6 +122,43 @@
           <div class="obus-user-create-loading-message" hidden>Kullanıcı oluşturma isteği hazırlanıyor...</div>
         </form>
       </section>
+
+      <% if (report && report.requested) { %>
+        <section class="table-card panel-card obus-user-create-results">
+          <div class="table-head">
+            <h2>İşlem Sonuçları</h2>
+            <div class="table-actions">
+              <span class="pill">Toplam: <%= report.totalCount %></span>
+              <span class="pill">Başarılı: <%= report.successCount %></span>
+              <span class="pill">Hatalı: <%= report.failureCount %></span>
+            </div>
+          </div>
+
+          <% if (report.successItems && report.successItems.length > 0) { %>
+            <h3>Başarılı Firmalar</h3>
+            <ul class="obus-user-create-result-list success">
+              <% report.successItems.forEach((item) => { %>
+                <li>
+                  <strong><%= item.label %></strong>
+                  <span><%= item.message %></span>
+                </li>
+              <% }) %>
+            </ul>
+          <% } %>
+
+          <% if (report.failureItems && report.failureItems.length > 0) { %>
+            <h3>Hatalı Firmalar</h3>
+            <ul class="obus-user-create-result-list failure">
+              <% report.failureItems.forEach((item) => { %>
+                <li>
+                  <strong><%= item.label %></strong>
+                  <span><%= item.error %></span>
+                </li>
+              <% }) %>
+            </ul>
+          <% } %>
+        </section>
+      <% } %>
     </section>
 
     <script src="/public/app.js" defer></script>

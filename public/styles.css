@@ -2527,6 +2527,42 @@ button.ghost {
   border-radius: 8px 8px 0 0;
 }
 
+.obus-user-create-results h3 {
+  margin: 10px 0 8px;
+  font-size: 14px;
+  color: #1f2735;
+}
+
+.obus-user-create-result-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.obus-user-create-result-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.obus-user-create-result-list li strong {
+  font-size: 13px;
+  color: #1f2735;
+}
+
+.obus-user-create-result-list li span {
+  font-size: 12px;
+  color: #4f6176;
+}
+
+.obus-user-create-result-list.success li span {
+  color: #246f45;
+}
+
+.obus-user-create-result-list.failure li span {
+  color: #a24a4a;
+}
+
 .slack-analysis-summary-table {
   min-width: 620px;
 }

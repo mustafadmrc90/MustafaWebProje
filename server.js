@@ -86,6 +86,16 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
+const OBUS_USER_CREATE_API_URL =
+  process.env.OBUS_USER_CREATE_API_URL || "https://api-preprod.obus.com.tr/api/membership/createuser";
+const OBUS_USER_CREATE_API_AUTH =
+  process.env.OBUS_USER_CREATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGIN_USERNAME || "admin").trim();
+const OBUS_USER_CREATE_LOGIN_PASSWORD = String(
+  process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
+);
+const OBUS_USER_CREATE_TIMEOUT_MS = Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
+const OBUS_USER_CREATE_CONCURRENCY = Number.parseInt(process.env.OBUS_USER_CREATE_CONCURRENCY || "4", 10) || 4;
 const INVENTORY_BRANCHES_API_URL =
   process.env.INVENTORY_BRANCHES_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
@@ -2216,6 +2226,19 @@ function buildMembershipUserLoginUrl(partnerUrl) {
     const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
     const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
     parsed.pathname = normalizeApiPath(`${apiPrefix}membership/userlogin`, "/api/membership/userlogin");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildMembershipCreateUserUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/membership/createuser";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -6930,6 +6953,276 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
   }
 }
 
+function buildObusUserCreateReportModel() {
+  return {
+    requested: false,
+    error: null,
+    totalCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    successItems: [],
+    failureItems: []
+  };
+}
+
+function normalizeObusUserCreateFormValues(source) {
+  const values = source && typeof source === "object" ? source : {};
+  return {
+    fullName: String(values.fullName || "").trim(),
+    username: String(values.username || "").trim(),
+    password: String(values.password || "")
+  };
+}
+
+function normalizeObusBranchIdValue(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+  if (/^-?\d+$/.test(value)) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return value;
+}
+
+function formatObusRequestDate(date = new Date()) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+}
+
+function buildObusCreateUserPermissions(branchIdValue) {
+  const template = [
+    { id: 163, group: "Other", type: "CanSeePassengerInformation", "group-name": "Diğer" },
+    { id: 183, group: "Other", type: "CanSeeAgentName", "group-name": "Diğer" },
+    { id: 188, group: "Other", type: "CanSearchTickets", "group-name": "Diğer" },
+    { id: 46, group: "Journey", type: "CanViewExpiredJourney", "group-name": "Sefer" },
+    { id: 52, group: "Journey", type: "CanViewJourneyActivity", "group-name": "Sefer" },
+    { id: 74, group: "Journey", type: "CanViewCancelledJourney", "group-name": "Sefer" },
+    { id: 54, group: "Sales", type: "CanRefundOpenTicket", "group-name": "Satış / Rezervasyon" },
+    { id: 76, group: "Sales", type: "CanMatchSidelinedTicketToJourney", "group-name": "Satış / Rezervasyon" },
+    { id: 126, group: "Sales", type: "IgnoreMaximumSalesParameters", "group-name": "Satış / Rezervasyon" },
+    { id: 79, group: "Sales", type: "CanTransferAtOtherBranch", "group-name": "Satış / Rezervasyon" },
+    { id: 90, group: "Sales", type: "CanEditOnlineTicket", "group-name": "Satış / Rezervasyon" },
+    { id: 80, group: "Sales", type: "CanRefundOnlineTicket", "group-name": "Satış / Rezervasyon" },
+    { id: 135, group: "Sales", type: "AllowRefundOptionExpiredTicketsForTransfer", "group-name": "Satış / Rezervasyon" },
+    { id: 130, group: "Sales", type: "AllowRefundOptionExpiredTickets", "group-name": "Satış / Rezervasyon" },
+    { id: 55, group: "Sales", type: "CanRefundOtherSalesAtOwnBranch", "group-name": "Satış / Rezervasyon" },
+    { id: 114, group: "Sales", type: "CanRefundOwnSalesAtOwnBranch", "group-name": "Satış / Rezervasyon" },
+    { id: 78, group: "Sales", type: "CanTransferAtOwnBranch", "group-name": "Satış / Rezervasyon" },
+    { id: 161, group: "Sales", type: "CanRefundObiletTicket", "group-name": "Satış / Rezervasyon" },
+    { id: 160, group: "Sales", type: "CanRefundWebTicket", "group-name": "Satış / Rezervasyon" }
+  ];
+
+  return template.map((item) => ({
+    id: item.id,
+    "user-id": 0,
+    "branch-id": branchIdValue,
+    group: item.group,
+    type: item.type,
+    "group-name": item["group-name"]
+  }));
+}
+
+function buildObusCreateUserRequestBody({
+  fullName,
+  username,
+  password,
+  branchIdValue,
+  sessionId,
+  deviceId,
+  token
+}) {
+  return {
+    data: {
+      id: 0,
+      "full-name": fullName,
+      username,
+      password,
+      "time-to-change-password": 0,
+      branches: [branchIdValue],
+      "is-active": true,
+      permissions: buildObusCreateUserPermissions(branchIdValue),
+      "user-modules": [
+        {
+          "module-id": "Obus",
+          id: 0,
+          "partner-id": null,
+          "user-id": 0
+        }
+      ]
+    },
+    date: formatObusRequestDate(new Date()),
+    "device-session": {
+      "session-id": sessionId,
+      "device-id": deviceId
+    },
+    language: "tr-TR",
+    token
+  };
+}
+
+async function loadObusUserCreatePageState({ selectedCompaniesInput, formSource }) {
+  const requestedSelectedCompanies = parseSelectedCompanyValuesFromInput(selectedCompaniesInput);
+  const formValues = normalizeObusUserCreateFormValues(formSource);
+  const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+  const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
+
+  const companies = partnerItems.map((item) => {
+    const idText = item.id || "N/A";
+    const clusterText = item.cluster || "cluster";
+    const value = buildCompanyOptionValue(item);
+    const obusMerkezSubeId = String(obusMerkezSubeIdByCompany.get(value) || "").trim();
+    const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
+    return {
+      value,
+      label,
+      meta: item,
+      obusMerkezSubeId
+    };
+  });
+
+  const companyValueSet = new Set(companies.map((item) => item.value));
+  const selectedCompanyValues = requestedSelectedCompanies.filter((value) => companyValueSet.has(value));
+  const defaultSelectedCompanyValues =
+    selectedCompanyValues.length > 0 ? selectedCompanyValues : companies.map((item) => item.value);
+
+  if (obusCacheError) {
+    console.error("Obus user create ObusMerkezSubeID cache read error:", obusCacheError);
+  }
+
+  return {
+    companies,
+    partnerError,
+    selectedCompanyValues: defaultSelectedCompanyValues,
+    selectedCompaniesJson: JSON.stringify(defaultSelectedCompanyValues),
+    formValues
+  };
+}
+
+async function createObusUserForCompany({ company, formValues }) {
+  const companyLabel = String(company?.label || "").trim() || String(company?.value || "").trim();
+  const companyUrl = String(company?.meta?.url || "").trim();
+  const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
+  const partnerCode = String(company?.meta?.code || "").trim();
+  const branchRaw = String(company?.obusMerkezSubeId || "").trim();
+  const branchIdValue = normalizeObusBranchIdValue(branchRaw);
+  if (!branchIdValue && branchIdValue !== 0) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: "ObusMerkezSubeID bulunamadı."
+    };
+  }
+
+  const createUserBaseUrl =
+    companyUrl || buildUrlForCluster(OBUS_USER_CREATE_API_URL, companyCluster) || OBUS_USER_CREATE_API_URL;
+  const createUserUrl = buildMembershipCreateUserUrl(createUserBaseUrl, companyCluster);
+  if (!createUserUrl) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: "CreateUser URL oluşturulamadı."
+    };
+  }
+
+  const loginResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl: createUserUrl,
+    companyUrl,
+    partnerCode,
+    username: OBUS_USER_CREATE_LOGIN_USERNAME,
+    password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+    fallbackBranchId: branchRaw,
+    timeoutMs: OBUS_USER_CREATE_TIMEOUT_MS,
+    authorization: OBUS_USER_CREATE_API_AUTH
+  });
+
+  if (!loginResult.ok) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: loginResult.error || "UserLogin başarısız."
+    };
+  }
+
+  const token = String(loginResult.token || "").trim();
+  if (!token) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: "UserLogin token bulunamadı."
+    };
+  }
+
+  const requestBodyObject = buildObusCreateUserRequestBody({
+    fullName: formValues.fullName,
+    username: formValues.username,
+    password: formValues.password,
+    branchIdValue,
+    sessionId: String(loginResult.sessionId || "").trim(),
+    deviceId: String(loginResult.deviceId || "").trim(),
+    token
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), toBoundedInt(OBUS_USER_CREATE_TIMEOUT_MS, 90000, 5000, 180000));
+
+  try {
+    const response = await fetch(createUserUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_USER_CREATE_API_AUTH
+      },
+      body: JSON.stringify(requestBodyObject),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const errorText =
+      (parsed &&
+        typeof parsed === "object" &&
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        label: companyLabel,
+        error: `HTTP ${response.status}: ${errorText}`
+      };
+    }
+
+    const successByPayload = parsed && typeof parsed === "object" ? isSuccessStatusPayload(parsed) : true;
+    if (!successByPayload) {
+      return {
+        ok: false,
+        label: companyLabel,
+        error: errorText || "İşlem başarısız döndü."
+      };
+    }
+
+    return {
+      ok: true,
+      label: companyLabel,
+      message: String(errorText || "Kullanıcı oluşturuldu.").trim()
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      label: companyLabel,
+      error: err?.message || "CreateUser isteği gönderilemedi."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.get("/", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -7011,48 +7304,88 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
 
 app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
   const bulkMode = String(req.query.bulk || "").trim() === "1";
-  const requestedSelectedCompanies = parseSelectedCompanyValuesFromInput(req.query.selectedCompanies);
-  const fullName = typeof req.query.fullName === "string" ? req.query.fullName.trim() : "";
-  const username = typeof req.query.username === "string" ? req.query.username.trim() : "";
-  const password = typeof req.query.password === "string" ? req.query.password : "";
-  const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
-  const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
-
-  const companies = partnerItems.map((item) => {
-    const idText = item.id || "N/A";
-    const clusterText = item.cluster || "cluster";
-    const value = buildCompanyOptionValue(item);
-    const obusMerkezSubeId = String(obusMerkezSubeIdByCompany.get(value) || "").trim();
-    const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
-    return {
-      value,
-      label,
-      meta: item
-    };
+  const pageState = await loadObusUserCreatePageState({
+    selectedCompaniesInput: req.query.selectedCompanies,
+    formSource: req.query
   });
 
-  const companyValueSet = new Set(companies.map((item) => item.value));
-  const selectedCompanyValues = requestedSelectedCompanies.filter((value) => companyValueSet.has(value));
-  const defaultSelectedCompanyValues =
-    selectedCompanyValues.length > 0 ? selectedCompanyValues : companies.map((item) => item.value);
+  res.render("general-obus-user-create", {
+    user: req.session.user,
+    active: "obus-user-create",
+    bulkMode,
+    companies: pageState.companies,
+    partnerError: pageState.partnerError,
+    selectedCompanyValues: pageState.selectedCompanyValues,
+    selectedCompaniesJson: pageState.selectedCompaniesJson,
+    formValues: pageState.formValues,
+    report: buildObusUserCreateReportModel()
+  });
+});
 
-  if (obusCacheError) {
-    console.error("Obus user create ObusMerkezSubeID cache read error:", obusCacheError);
+app.post("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
+  const bulkMode = String(req.body.bulk || "").trim() === "1";
+  const pageState = await loadObusUserCreatePageState({
+    selectedCompaniesInput: req.body.selectedCompanies,
+    formSource: req.body
+  });
+  const report = buildObusUserCreateReportModel();
+
+  const selectedSet = new Set(pageState.selectedCompanyValues);
+  const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
+  const hasRequiredFormValues =
+    Boolean(String(pageState.formValues.fullName || "").trim()) &&
+    Boolean(String(pageState.formValues.username || "").trim()) &&
+    Boolean(String(pageState.formValues.password || "").trim());
+
+  if (selectedCompanies.length === 0) {
+    report.error = "En az bir firma seçmelisiniz.";
+  } else if (!hasRequiredFormValues) {
+    report.error = "Ad Soyad, KullanıcıAdı ve Şifre zorunludur.";
+  } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+    report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
+  } else {
+    report.requested = true;
+    report.totalCount = selectedCompanies.length;
+
+    const workerResults = await runWithConcurrency(
+      selectedCompanies,
+      OBUS_USER_CREATE_CONCURRENCY,
+      async (company) => createObusUserForCompany({ company, formValues: pageState.formValues })
+    );
+
+    workerResults.forEach((result) => {
+      const normalized = result && typeof result === "object" ? result : {};
+      if (normalized.ok) {
+        report.successItems.push({
+          label: String(normalized.label || "").trim(),
+          message: String(normalized.message || "Kullanıcı oluşturuldu.").trim()
+        });
+        return;
+      }
+      report.failureItems.push({
+        label: String(normalized.label || "Firma").trim(),
+        error: String(normalized.error || "Bilinmeyen hata").trim()
+      });
+    });
+
+    report.successCount = report.successItems.length;
+    report.failureCount = report.failureItems.length;
+
+    if (report.successCount === 0 && report.failureCount > 0) {
+      report.error = "Seçili firmalar için kullanıcı oluşturma başarısız oldu.";
+    }
   }
 
   res.render("general-obus-user-create", {
     user: req.session.user,
     active: "obus-user-create",
     bulkMode,
-    companies,
-    partnerError,
-    selectedCompanyValues: defaultSelectedCompanyValues,
-    selectedCompaniesJson: JSON.stringify(defaultSelectedCompanyValues),
-    formValues: {
-      fullName,
-      username,
-      password
-    }
+    companies: pageState.companies,
+    partnerError: pageState.partnerError,
+    selectedCompanyValues: pageState.selectedCompanyValues,
+    selectedCompaniesJson: pageState.selectedCompaniesJson,
+    formValues: pageState.formValues,
+    report
   });
 });
 
