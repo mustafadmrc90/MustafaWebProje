@@ -888,6 +888,7 @@
     const multiselect = form.querySelector(".obus-company-multiselect");
     const trigger = form.querySelector("#obus-company-trigger");
     const dropdown = form.querySelector("#obus-company-dropdown");
+    const searchInput = form.querySelector("#obus-company-search");
     const selectAllCheckbox = form.querySelector("[data-select-all='1']");
     const companyCheckboxes = Array.from(form.querySelectorAll("[data-company-checkbox='1']"));
     const selectedCompaniesInput = form.querySelector("#obus-user-create-selected-companies");
@@ -909,6 +910,26 @@
         .filter((item) => item.checked)
         .map((item) => String(item.value || "").trim())
         .filter(Boolean);
+
+    const normalizeSearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
+
+    const filterCompanyOptions = (query) => {
+      const normalizedQuery = normalizeSearchText(query);
+      const optionRows = Array.from(form.querySelectorAll(".obus-company-option[data-company-option-row='1']"));
+      optionRows.forEach((row) => {
+        const labelText = String(row.querySelector("span")?.textContent || "");
+        const matched = !normalizedQuery || normalizeSearchText(labelText).includes(normalizedQuery);
+        row.hidden = !matched;
+      });
+    };
+
+    const resetCompanySearch = () => {
+      if (!searchInput) return;
+      if (searchInput.value) {
+        searchInput.value = "";
+      }
+      filterCompanyOptions("");
+    };
 
     const updateCompanyTriggerLabel = () => {
       if (!trigger) return;
@@ -968,12 +989,16 @@
       if (!dropdown || !trigger) return;
       dropdown.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
+      resetCompanySearch();
     };
 
     const openDropdown = () => {
       if (!dropdown || !trigger) return;
       dropdown.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
+      if (searchInput) {
+        searchInput.focus();
+      }
     };
 
     if (trigger && dropdown) {
@@ -986,6 +1011,18 @@
         }
       });
 
+      trigger.addEventListener("keydown", (event) => {
+        if (!searchInput) return;
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.key.length !== 1) return;
+        event.preventDefault();
+        if (dropdown.hidden) {
+          openDropdown();
+        }
+        searchInput.value = `${String(searchInput.value || "")}${event.key}`;
+        filterCompanyOptions(searchInput.value);
+      });
+
       document.addEventListener("click", (event) => {
         if (!multiselect) return;
         if (multiselect.contains(event.target)) return;
@@ -996,6 +1033,12 @@
         if (event.key === "Escape") {
           closeDropdown();
         }
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        filterCompanyOptions(searchInput.value);
       });
     }
 
