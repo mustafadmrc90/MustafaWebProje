@@ -176,7 +176,7 @@ const SIDEBAR_MENU_REGISTRY = [
     parentKey: "general",
     route: "/general/authorized-lines-upload",
     routeKey: "authorized-lines-upload",
-    sortOrder: 13,
+    sortOrder: 14,
     iconKey: "authorized-lines-upload"
   },
   {
@@ -196,7 +196,7 @@ const SIDEBAR_MENU_REGISTRY = [
     parentKey: "general",
     route: "/general/obus-user-deactivate",
     routeKey: "obus-user-deactivate",
-    sortOrder: 14,
+    sortOrder: 13,
     iconKey: "obus-user-deactivate"
   },
   {
