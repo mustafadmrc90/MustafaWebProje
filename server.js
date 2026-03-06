@@ -7121,17 +7121,38 @@ function buildObusCreateUserPermissions(branchIdValue) {
     { id: 114, group: "Sales", type: "CanRefundOwnSalesAtOwnBranch", "group-name": "Satış / Rezervasyon" },
     { id: 78, group: "Sales", type: "CanTransferAtOwnBranch", "group-name": "Satış / Rezervasyon" },
     { id: 161, group: "Sales", type: "CanRefundObiletTicket", "group-name": "Satış / Rezervasyon" },
-    { id: 160, group: "Sales", type: "CanRefundWebTicket", "group-name": "Satış / Rezervasyon" }
+    { id: 160, group: "Sales", type: "CanRefundWebTicket", "group-name": "Satış / Rezervasyon" },
+    {
+      id: 134,
+      group: "Station",
+      type: "PermittedAllBranchStations",
+      "group-name": "Duraklar",
+      "type-name": "Tüm duraklara yetkilidir",
+      "is-deleted": null,
+      "user-branch-profile-name": null
+    }
   ];
 
-  return template.map((item) => ({
-    id: item.id,
-    "user-id": 0,
-    "branch-id": branchIdValue,
-    group: item.group,
-    type: item.type,
-    "group-name": item["group-name"]
-  }));
+  return template.map((item) => {
+    const permission = {
+      id: item.id,
+      "user-id": 0,
+      "branch-id": branchIdValue,
+      group: item.group,
+      type: item.type,
+      "group-name": item["group-name"]
+    };
+    if (Object.prototype.hasOwnProperty.call(item, "type-name")) {
+      permission["type-name"] = item["type-name"];
+    }
+    if (Object.prototype.hasOwnProperty.call(item, "is-deleted")) {
+      permission["is-deleted"] = item["is-deleted"];
+    }
+    if (Object.prototype.hasOwnProperty.call(item, "user-branch-profile-name")) {
+      permission["user-branch-profile-name"] = item["user-branch-profile-name"];
+    }
+    return permission;
+  });
 }
 
 function buildObusCreateUserRequestBody({
