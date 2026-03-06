@@ -40,6 +40,9 @@
       <% if (report.save && report.save.message) { %>
         <div class="inline-success"><%= report.save.message %></div>
       <% } %>
+      <% if (report.obus && report.obus.message) { %>
+        <div class="inline-success"><%= report.obus.message %></div>
+      <% } %>
       <% if (report.cache && report.cache.message) { %>
         <div class="inline-success"><%= report.cache.message %></div>
       <% } %>
@@ -69,6 +72,23 @@
               </button>
               <span class="all-companies-loading-message" hidden>
                 Servis verisi çekiliyor...
+              </span>
+            </form>
+            <form
+              class="all-companies-loading-form all-companies-obus-sync-form"
+              method="post"
+              action="/reports/all-companies/update-obus-merkez-sube-id"
+            >
+              <button
+                class="button-link"
+                type="submit"
+                data-default-label="ObusMerkezSubeID Güncelle"
+                data-loading-label="Güncelleniyor..."
+              >
+                ObusMerkezSubeID Güncelle
+              </button>
+              <span class="all-companies-loading-message" hidden>
+                Sadece boş ObusMerkezSubeID kayıtları güncelleniyor...
               </span>
             </form>
             <form class="all-companies-loading-form all-companies-save-form" method="post" action="/reports/all-companies/save-sql">

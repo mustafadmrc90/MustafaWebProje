@@ -7319,11 +7319,19 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   const shouldSync = String(req.query.sync || "").trim() === "1";
   const shouldViewCache = String(req.query.cache || "").trim() === "1";
   const saveSucceeded = String(req.query.saved || "").trim() === "1";
+  const obusUpdateSucceeded = String(req.query.obusUpdated || "").trim() === "1";
   const saveErrorCode = String(req.query.saveErr || "").trim();
   const savedCountRaw = Number.parseInt(String(req.query.savedCount || "0"), 10);
   const savedCount = Number.isFinite(savedCountRaw) ? Math.max(0, savedCountRaw) : 0;
   const deletedCountRaw = Number.parseInt(String(req.query.deletedCount || "0"), 10);
   const deletedCount = Number.isFinite(deletedCountRaw) ? Math.max(0, deletedCountRaw) : 0;
+  const obusScannedRaw = Number.parseInt(String(req.query.obusScanned || "0"), 10);
+  const obusScanned = Number.isFinite(obusScannedRaw) ? Math.max(0, obusScannedRaw) : 0;
+  const obusFilledRaw = Number.parseInt(String(req.query.obusFilled || "0"), 10);
+  const obusFilled = Number.isFinite(obusFilledRaw) ? Math.max(0, obusFilledRaw) : 0;
+  const obusRemainingRaw = Number.parseInt(String(req.query.obusRemaining || "0"), 10);
+  const obusRemaining = Number.isFinite(obusRemainingRaw) ? Math.max(0, obusRemainingRaw) : 0;
+  const obusUpdatePartial = String(req.query.obusPartial || "").trim() === "1";
   const currentUserId = Number(req.session?.user?.id);
 
   let result = buildEmptyAllCompaniesReport(0);
@@ -7378,11 +7386,20 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   const saveMessage = saveSucceeded
     ? `SQL kayıt tamamlandı. ${savedCount} kayıt işlendi, serviste olmayan ${deletedCount} kayıt silindi.`
     : "";
+  const obusMessage = obusUpdateSucceeded
+    ? `ObusMerkezSubeID güncelleme tamamlandı. Kontrol: ${obusScanned} | Doluya dönen: ${obusFilled} | Hâlâ boş: ${obusRemaining}`
+    : "";
 
   if (saveErrorCode === "no_service_data") {
     errorParts.push("Önce 'Servisten Güncelle' butonuyla servis verisini alın.");
   } else if (saveErrorCode === "save_failed") {
     errorParts.push("SQL kayıt işlemi başarısız oldu.");
+  } else if (saveErrorCode === "obus_update_failed") {
+    errorParts.push("ObusMerkezSubeID güncellemesi başarısız oldu.");
+  }
+
+  if (obusUpdatePartial) {
+    errorParts.push("ObusMerkezSubeID güncellemesi kısmi tamamlandı.");
   }
 
   const emptyCacheMessage =
@@ -7414,6 +7431,10 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         requested: saveSucceeded,
         message: saveMessage
       },
+      obus: {
+        requested: obusUpdateSucceeded,
+        message: obusMessage
+      },
       notice: emptyCacheMessage
     }
   });
@@ -7440,6 +7461,48 @@ app.post("/reports/all-companies/save-sql", requireAuth, requireMenuAccess("all-
     }`
   );
 });
+
+app.post(
+  "/reports/all-companies/update-obus-merkez-sube-id",
+  requireAuth,
+  requireMenuAccess("all-companies"),
+  async (req, res) => {
+    try {
+      const cacheResult = await fetchAllCompaniesRowsFromCache();
+      if (cacheResult.error) {
+        return res.redirect("/reports/all-companies?saveErr=obus_update_failed");
+      }
+
+      const cacheRows = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
+      const targetRows = cacheRows.filter((row) => !String(row?.ObusMerkezSubeID || "").trim());
+      if (targetRows.length === 0) {
+        return res.redirect("/reports/all-companies?cache=1&obusUpdated=1&obusScanned=0&obusFilled=0&obusRemaining=0");
+      }
+
+      const enriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(targetRows);
+      const saveResult = await upsertAllCompaniesCacheRows(enriched.rows || []);
+      if (saveResult.error) {
+        console.error("All companies ObusMerkezSubeID update save error:", saveResult.error);
+        return res.redirect("/reports/all-companies?saveErr=obus_update_failed");
+      }
+
+      const filledCount = (enriched.rows || []).reduce((sum, row) => {
+        return sum + (String(row?.ObusMerkezSubeID || "").trim() ? 1 : 0);
+      }, 0);
+      const remainingCount = Math.max(0, targetRows.length - filledCount);
+      const partial = Boolean(enriched.notice) || remainingCount > 0;
+
+      return res.redirect(
+        `/reports/all-companies?cache=1&obusUpdated=1&obusScanned=${targetRows.length}&obusFilled=${filledCount}&obusRemaining=${remainingCount}${
+          partial ? "&obusPartial=1" : ""
+        }`
+      );
+    } catch (err) {
+      console.error("All companies ObusMerkezSubeID update error:", err);
+      return res.redirect("/reports/all-companies?saveErr=obus_update_failed");
+    }
+  }
+);
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
   const shouldFetchReport = req.query.run === "1";
