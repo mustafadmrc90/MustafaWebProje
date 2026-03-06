@@ -891,10 +891,6 @@
     const selectAllCheckbox = form.querySelector("[data-select-all='1']");
     const companyCheckboxes = Array.from(form.querySelectorAll("[data-company-checkbox='1']"));
     const selectedCompaniesInput = form.querySelector("#obus-user-create-selected-companies");
-    const templateTextarea = form.querySelector("#obus-user-create-body-template");
-    const editFieldsContainer = document.querySelector("#obus-user-create-edit-fields");
-    const editValuesInput = form.querySelector("#obus-user-create-edit-values");
-    const bodyPreviewTextarea = document.querySelector("#obus-user-create-body-preview");
     const loadingMessage = form.querySelector(".obus-user-create-loading-message");
     const submitBtn = form.querySelector(".obus-user-create-actions button[type='submit']");
 
@@ -906,41 +902,6 @@
       } catch (err) {
         return fallback;
       }
-    };
-
-    const normalizeEditTokenKey = (rawToken, fallbackIndex) => {
-      const token = String(rawToken || "").trim();
-      const withoutPrefix = token.replace(/^edit(?:[:_])?/i, "");
-      const normalized = withoutPrefix
-        .replace(/[^a-z0-9_-]+/gi, "_")
-        .replace(/^_+|_+$/g, "")
-        .toLowerCase();
-      if (normalized) return normalized;
-      return `edit_${Number(fallbackIndex) + 1}`;
-    };
-
-    const parseTemplateEditTokens = (templateText) => {
-      const text = String(templateText || "");
-      const regex = /\{\{\s*(edit(?:[:_][a-z0-9_-]+)?)\s*\}\}/gi;
-      const unique = [];
-      const seen = new Set();
-      let match;
-      let index = 0;
-
-      while ((match = regex.exec(text))) {
-        const rawToken = String(match[1] || "").trim();
-        const key = normalizeEditTokenKey(rawToken, index);
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push({
-            key,
-            rawToken
-          });
-        }
-        index += 1;
-      }
-
-      return unique;
     };
 
     const readSelectedCompanyValues = () =>
@@ -1053,103 +1014,21 @@
       });
     });
 
-    let editValues = parseJson(editValuesInput?.value, {});
-    if (!editValues || typeof editValues !== "object" || Array.isArray(editValues)) {
-      editValues = {};
-    }
-
-    const buildResolvedBody = () => {
-      if (!templateTextarea) return "";
-      const templateText = String(templateTextarea.value || "");
-      const regex = /\{\{\s*(edit(?:[:_][a-z0-9_-]+)?)\s*\}\}/gi;
-      let replaceIndex = 0;
-      return templateText.replace(regex, (_match, rawToken) => {
-        const key = normalizeEditTokenKey(rawToken, replaceIndex);
-        replaceIndex += 1;
-        return String(editValues[key] ?? "");
-      });
-    };
-
-    const syncBodyPreview = () => {
-      if (!bodyPreviewTextarea) return;
-      const resolvedBody = buildResolvedBody();
-      const parsed = parseJson(resolvedBody, null);
-      bodyPreviewTextarea.value =
-        parsed && typeof parsed === "object"
-          ? JSON.stringify(parsed, null, 2)
-          : String(resolvedBody || "");
-      if (editValuesInput) {
-        editValuesInput.value = JSON.stringify(editValues);
-      }
-    };
-
-    const renderEditInputs = () => {
-      if (!templateTextarea || !editFieldsContainer) return;
-      const tokens = parseTemplateEditTokens(templateTextarea.value);
-      const previousValues = { ...editValues };
-
-      Array.from(editFieldsContainer.querySelectorAll("input[data-edit-key]")).forEach((input) => {
-        const key = String(input.getAttribute("data-edit-key") || "").trim();
-        if (!key) return;
-        previousValues[key] = String(input.value || "");
-      });
-
-      editFieldsContainer.innerHTML = "";
-      editValues = {};
-
-      if (tokens.length === 0) {
-        const empty = document.createElement("p");
-        empty.className = "obus-edit-empty";
-        empty.textContent = "Body içinde edit tag'i bulunamadı.";
-        editFieldsContainer.appendChild(empty);
-        syncBodyPreview();
-        return;
-      }
-
-      tokens.forEach((token) => {
-        const wrapper = document.createElement("label");
-        const title = document.createElement("span");
-        title.textContent = `{{${token.rawToken}}}`;
-
-        const input = document.createElement("input");
-        input.type = "text";
-        input.setAttribute("data-edit-key", token.key);
-        input.placeholder = token.key;
-        input.value = String(previousValues[token.key] || "");
-
-        wrapper.appendChild(title);
-        wrapper.appendChild(input);
-        editFieldsContainer.appendChild(wrapper);
-
-        editValues[token.key] = input.value;
-        input.addEventListener("input", () => {
-          editValues[token.key] = String(input.value || "");
-          syncBodyPreview();
-        });
-      });
-
-      syncBodyPreview();
-    };
-
-    if (templateTextarea) {
-      templateTextarea.addEventListener("input", () => {
-        renderEditInputs();
-      });
-    }
-
     if (submitBtn) {
+      const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcı Oluştur";
       form.classList.remove("is-loading");
       submitBtn.disabled = false;
+      submitBtn.textContent = defaultLabel;
       if (loadingMessage) loadingMessage.hidden = true;
       form.addEventListener("submit", () => {
         submitBtn.disabled = true;
+        submitBtn.textContent = "Oluşturuluyor...";
         form.classList.add("is-loading");
         if (loadingMessage) loadingMessage.hidden = false;
       });
     }
 
     applyInitialCompanySelection();
-    renderEditInputs();
   };
 
   const initAllCompaniesLoading = () => {

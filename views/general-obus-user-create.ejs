@@ -40,12 +40,6 @@
       <section class="table-card panel-card obus-user-create-section">
         <div class="table-head">
           <h2>Kullanıcı Oluşturma Hazırlığı</h2>
-          <div class="table-actions">
-            <form method="get" action="/general/obus-user-create">
-              <input type="hidden" name="bulk" value="1" />
-              <button class="button-link" type="submit">Kullanıcıları Tüm Firmalar Oluştur</button>
-            </form>
-          </div>
         </div>
 
         <form class="obus-user-create-form" method="get" action="/general/obus-user-create">
@@ -56,7 +50,6 @@
             id="obus-user-create-selected-companies"
             value="<%= selectedCompaniesJson || '[]' %>"
           />
-          <input type="hidden" id="obus-user-create-edit-values" value="{}" />
 
           <div class="obus-user-create-grid">
             <label class="obus-user-create-field obus-user-create-field-company">
@@ -93,30 +86,28 @@
               <small class="muted">Varsayılan olarak Hepsi seçili gelir. Sadece işaretli firmalara istek atılacak.</small>
             </label>
 
-            <label class="obus-user-create-field obus-user-create-field-template">
-              <span>Body Template</span>
-              <textarea id="obus-user-create-body-template" name="bodyTemplate" rows="12"><%= bodyTemplate %></textarea>
-              <small class="muted">`{{edit:alan_adi}}` veya `{{edit}}` taglerini kullanabilirsin.</small>
+            <label class="obus-user-create-field">
+              <span>Ad Soyad</span>
+              <input type="text" name="fullName" value="<%= formValues?.fullName || '' %>" />
+            </label>
+
+            <label class="obus-user-create-field">
+              <span>KullanıcıAdı</span>
+              <input type="text" name="username" value="<%= formValues?.username || '' %>" />
+            </label>
+
+            <label class="obus-user-create-field">
+              <span>Şifre</span>
+              <input type="password" name="password" value="<%= formValues?.password || '' %>" />
             </label>
           </div>
 
           <div class="obus-user-create-actions">
-            <button class="button-link ghost" type="submit">Seçimi Koruyarak Yenile</button>
+            <button class="button-link" type="submit">Kullanıcı Oluştur</button>
           </div>
 
-          <div class="obus-user-create-loading-message" hidden>Hazırlanıyor...</div>
+          <div class="obus-user-create-loading-message" hidden>Kullanıcı oluşturma isteği hazırlanıyor...</div>
         </form>
-      </section>
-
-      <section class="table-card panel-card obus-user-create-editor-section">
-        <div class="table-head">
-          <h2>Body Alanları</h2>
-        </div>
-        <div id="obus-user-create-edit-fields" class="obus-edit-fields"></div>
-        <label class="obus-user-create-field obus-user-create-preview">
-          <span>Doldurulmuş Body Önizleme</span>
-          <textarea id="obus-user-create-body-preview" rows="12" readonly></textarea>
-        </label>
       </section>
     </section>
 

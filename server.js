@@ -139,19 +139,6 @@ const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
 const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
 const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
-const OBUS_USER_CREATE_BODY_TEMPLATE = String(
-  process.env.OBUS_USER_CREATE_BODY_TEMPLATE ||
-    `{
-  "data": {
-    "username": "{{edit:username}}",
-    "name": "{{edit:name}}",
-    "surname": "{{edit:surname}}",
-    "email": "{{edit:email}}",
-    "phone": "{{edit:phone}}",
-    "password": "{{edit:password}}"
-  }
-}`
-);
 const SLACK_SELECTED_USERS = [
   { id: "U03M921BDCJ", name: "Onur Uğur - Corp" },
   { id: "U03MBE47P1A", name: "Çağatay Atalay - Corp" },
@@ -7025,7 +7012,9 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
 app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
   const bulkMode = String(req.query.bulk || "").trim() === "1";
   const requestedSelectedCompanies = parseSelectedCompanyValuesFromInput(req.query.selectedCompanies);
-  const requestedBodyTemplate = typeof req.query.bodyTemplate === "string" ? req.query.bodyTemplate : "";
+  const fullName = typeof req.query.fullName === "string" ? req.query.fullName.trim() : "";
+  const username = typeof req.query.username === "string" ? req.query.username.trim() : "";
+  const password = typeof req.query.password === "string" ? req.query.password : "";
   const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
   const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
 
@@ -7059,7 +7048,11 @@ app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-c
     partnerError,
     selectedCompanyValues: defaultSelectedCompanyValues,
     selectedCompaniesJson: JSON.stringify(defaultSelectedCompanyValues),
-    bodyTemplate: requestedBodyTemplate || OBUS_USER_CREATE_BODY_TEMPLATE
+    formValues: {
+      fullName,
+      username,
+      password
+    }
   });
 });
 
