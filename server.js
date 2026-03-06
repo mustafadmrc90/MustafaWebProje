@@ -86,6 +86,12 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
+const OBUS_USER_CREATE_API_URL =
+  process.env.OBUS_USER_CREATE_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/membership/createagencyuser";
+const OBUS_USER_CREATE_API_AUTH = process.env.OBUS_USER_CREATE_API_AUTH || PARTNERS_API_AUTH;
+const OBUS_USER_CREATE_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const INVENTORY_BRANCHES_API_URL =
   process.env.INVENTORY_BRANCHES_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
@@ -6995,9 +7001,11 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
 });
 
 app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), (req, res) => {
+  const bulkMode = String(req.query.bulk || "").trim() === "1";
   res.render("general-obus-user-create", {
     user: req.session.user,
-    active: "obus-user-create"
+    active: "obus-user-create",
+    bulkMode
   });
 });
 

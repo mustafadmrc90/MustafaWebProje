@@ -33,7 +33,16 @@
       <section class="table-card panel-card">
         <div class="table-head">
           <h2>Hazırlık</h2>
+          <div class="table-actions">
+            <form method="get" action="/general/obus-user-create">
+              <input type="hidden" name="bulk" value="1" />
+              <button class="button-link" type="submit">Kullanıcıları Tüm Firmalar Oluştur</button>
+            </form>
+          </div>
         </div>
+        <% if (bulkMode) { %>
+          <div class="inline-success">Toplu kullanıcı oluşturma modu seçildi.</div>
+        <% } %>
         <p class="muted">Servis bilgisini paylaştığında kullanıcı oluşturma akışını bu ekrana ekleyeceğim.</p>
       </section>
     </section>
