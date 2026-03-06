@@ -2226,6 +2226,25 @@ function buildPartnerFetchUrls() {
   return deduped;
 }
 
+function resolvePartnerFetchUrlByCluster(clusterLabel) {
+  const normalizedCluster = extractClusterLabel(clusterLabel);
+  const partnerUrls = buildPartnerFetchUrls();
+  if (!Array.isArray(partnerUrls) || partnerUrls.length === 0) return "";
+
+  const exactMatch = partnerUrls.find((url) => extractClusterLabel(url) === normalizedCluster);
+  if (exactMatch) return exactMatch;
+
+  if (/^cluster\d+$/i.test(normalizedCluster)) {
+    const clusterShifted = partnerUrls
+      .map((url) => buildUrlForCluster(url, normalizedCluster))
+      .map((url) => normalizePartnerGetPartnersUrl(url))
+      .find(Boolean);
+    if (clusterShifted) return clusterShifted;
+  }
+
+  return partnerUrls[0] || "";
+}
+
 function isRequiredExtraPartnerFetchUrl(partnerUrl) {
   const normalizedPartnerUrl = normalizePartnerGetPartnersUrl(partnerUrl);
   if (!normalizedPartnerUrl) return false;
@@ -7186,7 +7205,6 @@ async function loadObusUserCreatePageState({ selectedCompaniesInput, formSource 
 
 async function createObusUserForCompany({ company, formValues }) {
   const companyLabel = String(company?.label || "").trim() || String(company?.value || "").trim();
-  const companyUrl = String(company?.meta?.url || "").trim();
   const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
   const partnerCode = String(company?.meta?.code || "").trim();
   const branchRaw = String(company?.obusMerkezSubeId || "").trim();
@@ -7199,8 +7217,9 @@ async function createObusUserForCompany({ company, formValues }) {
     };
   }
 
+  const clusterSourceUrl = resolvePartnerFetchUrlByCluster(companyCluster);
   const createUserBaseUrl =
-    companyUrl || buildUrlForCluster(OBUS_USER_CREATE_API_URL, companyCluster) || OBUS_USER_CREATE_API_URL;
+    clusterSourceUrl || buildUrlForCluster(OBUS_USER_CREATE_API_URL, companyCluster) || OBUS_USER_CREATE_API_URL;
   const createUserUrl = buildMembershipCreateUserUrl(createUserBaseUrl, companyCluster);
   if (!createUserUrl) {
     return {
@@ -7212,7 +7231,7 @@ async function createObusUserForCompany({ company, formValues }) {
 
   const loginResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl: createUserUrl,
-    companyUrl,
+    companyUrl: "",
     partnerCode,
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
     password: OBUS_USER_CREATE_LOGIN_PASSWORD,
