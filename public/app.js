@@ -888,12 +888,13 @@
     const multiselect = form.querySelector(".obus-company-multiselect");
     const trigger = form.querySelector("#obus-company-trigger");
     const dropdown = form.querySelector("#obus-company-dropdown");
-    const searchInput = form.querySelector("#obus-company-search");
     const selectAllCheckbox = form.querySelector("[data-select-all='1']");
     const companyCheckboxes = Array.from(form.querySelectorAll("[data-company-checkbox='1']"));
     const selectedCompaniesInput = form.querySelector("#obus-user-create-selected-companies");
     const loadingMessage = form.querySelector(".obus-user-create-loading-message");
     const submitBtn = form.querySelector(".obus-user-create-actions button[type='submit']");
+    let typeAheadText = "";
+    let typeAheadTimerId = null;
 
     const parseJson = (raw, fallback) => {
       const text = String(raw || "").trim();
@@ -912,23 +913,68 @@
         .filter(Boolean);
 
     const normalizeSearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
-
-    const filterCompanyOptions = (query) => {
-      const normalizedQuery = normalizeSearchText(query);
-      const optionRows = Array.from(form.querySelectorAll(".obus-company-option[data-company-option-row='1']"));
-      optionRows.forEach((row) => {
-        const labelText = String(row.querySelector("span")?.textContent || "");
-        const matched = !normalizedQuery || normalizeSearchText(labelText).includes(normalizedQuery);
-        row.hidden = !matched;
-      });
+    const clearTypeAhead = () => {
+      typeAheadText = "";
+      if (typeAheadTimerId) {
+        clearTimeout(typeAheadTimerId);
+        typeAheadTimerId = null;
+      }
+    };
+    const queueTypeAheadReset = () => {
+      if (typeAheadTimerId) {
+        clearTimeout(typeAheadTimerId);
+      }
+      typeAheadTimerId = setTimeout(() => {
+        typeAheadText = "";
+        typeAheadTimerId = null;
+      }, 900);
     };
 
-    const resetCompanySearch = () => {
-      if (!searchInput) return;
-      if (searchInput.value) {
-        searchInput.value = "";
+    const findMatchingCompanyOption = (queryText) => {
+      const normalizedQuery = normalizeSearchText(queryText);
+      if (!normalizedQuery) return null;
+      const optionRows = Array.from(form.querySelectorAll(".obus-company-option[data-company-option-row='1']"));
+      return (
+        optionRows.find((row) => {
+          const labelText = String(row.querySelector("span")?.textContent || "");
+          return normalizeSearchText(labelText).includes(normalizedQuery);
+        }) || null
+      );
+    };
+
+    const focusCompanyOptionRow = (row) => {
+      if (!row) return;
+      row.scrollIntoView({ block: "nearest" });
+      row.classList.add("obus-company-option-focus");
+      setTimeout(() => {
+        row.classList.remove("obus-company-option-focus");
+      }, 450);
+    };
+
+    const handleTypeAheadKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") return;
+      if (event.key === "Tab") return;
+
+      let nextQuery = typeAheadText;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        nextQuery = String(typeAheadText || "").slice(0, -1);
+      } else if (event.key.length === 1) {
+        event.preventDefault();
+        nextQuery = `${String(typeAheadText || "")}${event.key}`;
+      } else {
+        return;
       }
-      filterCompanyOptions("");
+
+      typeAheadText = normalizeSearchText(nextQuery);
+      queueTypeAheadReset();
+      if (!typeAheadText) return;
+
+      if (dropdown && dropdown.hidden) {
+        openDropdown();
+      }
+      focusCompanyOptionRow(findMatchingCompanyOption(typeAheadText));
     };
 
     const updateCompanyTriggerLabel = () => {
@@ -989,16 +1035,13 @@
       if (!dropdown || !trigger) return;
       dropdown.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
-      resetCompanySearch();
+      clearTypeAhead();
     };
 
     const openDropdown = () => {
       if (!dropdown || !trigger) return;
       dropdown.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
-      if (searchInput) {
-        searchInput.focus();
-      }
     };
 
     if (trigger && dropdown) {
@@ -1012,15 +1055,7 @@
       });
 
       trigger.addEventListener("keydown", (event) => {
-        if (!searchInput) return;
-        if (event.metaKey || event.ctrlKey || event.altKey) return;
-        if (event.key.length !== 1) return;
-        event.preventDefault();
-        if (dropdown.hidden) {
-          openDropdown();
-        }
-        searchInput.value = `${String(searchInput.value || "")}${event.key}`;
-        filterCompanyOptions(searchInput.value);
+        handleTypeAheadKey(event);
       });
 
       document.addEventListener("click", (event) => {
@@ -1036,9 +1071,13 @@
       });
     }
 
-    if (searchInput) {
-      searchInput.addEventListener("input", () => {
-        filterCompanyOptions(searchInput.value);
+    if (multiselect) {
+      multiselect.addEventListener("keydown", (event) => {
+        const activeElement = document.activeElement;
+        const isCheckboxActive =
+          activeElement instanceof HTMLInputElement && activeElement.type === "checkbox";
+        if (!isCheckboxActive) return;
+        handleTypeAheadKey(event);
       });
     }
 

@@ -2481,27 +2481,6 @@ button.ghost {
   padding: 6px;
 }
 
-.obus-company-search-wrap {
-  padding: 4px 2px 8px;
-}
-
-.obus-company-search {
-  width: 100%;
-  min-height: 34px;
-  border-radius: 8px;
-  border: 1px solid #cfd8e5;
-  background: #f7f9fc;
-  color: #1f2735;
-  padding: 7px 9px;
-  font-size: 13px;
-}
-
-.obus-company-search:focus {
-  outline: none;
-  border-color: #8ca4c0;
-  background: #fff;
-}
-
 .obus-company-option {
   display: flex;
   align-items: flex-start;
@@ -2515,6 +2494,11 @@ button.ghost {
 
 .obus-company-option:hover {
   background: #f2f6fb;
+}
+
+.obus-company-option-focus {
+  background: #eaf2fd;
+  outline: 1px solid #9bb8df;
 }
 
 .obus-company-option input[type="checkbox"] {
