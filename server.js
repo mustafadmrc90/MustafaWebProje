@@ -7197,14 +7197,29 @@ function buildObusCreateUserRequestBody({
 async function loadObusUserCreatePageState({ selectedCompaniesInput, formSource }) {
   const requestedSelectedCompanies = parseSelectedCompanyValuesFromInput(selectedCompaniesInput);
   const formValues = normalizeObusUserCreateFormValues(formSource);
-  const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+  const cacheResult = await fetchAllCompaniesRowsFromCache();
+  const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+  const partnerItems = normalizePartnerItems(
+    cacheRows.map((row) => ({
+      code: String(row?.code || "").trim(),
+      id: String(row?.id || "").trim(),
+      cluster: extractClusterLabel(String(row?.source || "").trim()),
+      url: normalizeTargetUrl(row?.url || ""),
+      branchId: String(row?.ObusMerkezSubeID || "").trim()
+    }))
+  );
+  let partnerError = cacheResult?.error || null;
+  if (!partnerError && partnerItems.length === 0) {
+    partnerError =
+      "Firma listesi SQL'de boş. Önce Tüm Firmalar ekranında 'Servisten Güncelle' ve 'SQL'e Kaydet' çalıştırın.";
+  }
   const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
 
   const companies = partnerItems.map((item) => {
     const idText = item.id || "N/A";
     const clusterText = item.cluster || "cluster";
     const value = buildCompanyOptionValue(item);
-    const obusMerkezSubeId = String(obusMerkezSubeIdByCompany.get(value) || "").trim();
+    const obusMerkezSubeId = String(item.branchId || obusMerkezSubeIdByCompany.get(value) || "").trim();
     const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
     return {
       value,
