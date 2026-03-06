@@ -61,6 +61,7 @@ const PARTNERS_API_URL =
   process.env.PARTNERS_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/partner/getpartners";
 const PARTNERS_REQUIRED_EXTRA_API_URL = "https://api-preprod.obus.com.tr/api";
+const PARTNERS_REQUIRED_EXTRA_ONLY_ID = "1016";
 const PARTNERS_EXTRA_API_URLS_RAW = String(
   process.env.PARTNERS_EXTRA_API_URLS || PARTNERS_REQUIRED_EXTRA_API_URL
 ).trim();
@@ -2225,6 +2226,35 @@ function buildPartnerFetchUrls() {
   return deduped;
 }
 
+function isRequiredExtraPartnerFetchUrl(partnerUrl) {
+  const normalizedPartnerUrl = normalizePartnerGetPartnersUrl(partnerUrl);
+  if (!normalizedPartnerUrl) return false;
+  const normalizedRequiredUrl = normalizePartnerGetPartnersUrl(PARTNERS_REQUIRED_EXTRA_API_URL);
+  return normalizedRequiredUrl ? normalizedPartnerUrl === normalizedRequiredUrl : false;
+}
+
+function filterAllCompaniesRowsForSource(partnerUrl, rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (!isRequiredExtraPartnerFetchUrl(partnerUrl)) return sourceRows;
+
+  return sourceRows.filter((row) => {
+    const partnerId = readPartnerRawValueByAliases(row, [
+      "id",
+      "partner-id",
+      "partner_id",
+      "partnerid",
+      "partnerId",
+      "partnerID",
+      "provider-id",
+      "provider_id",
+      "providerid",
+      "providerId",
+      "providerID"
+    ]);
+    return String(partnerId ?? "").trim() === PARTNERS_REQUIRED_EXTRA_ONLY_ID;
+  });
+}
+
 function buildUrlForCluster(baseUrl, clusterLabel) {
   const raw = String(baseUrl || "").trim();
   const cluster = String(clusterLabel || "").trim().toLowerCase();
@@ -2646,7 +2676,7 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
 
     return {
       clusterLabel,
-      rows: extractPartnerRawRows(payload, clusterLabel),
+      rows: filterAllCompaniesRowsForSource(partnerUrl, extractPartnerRawRows(payload, clusterLabel)),
       error: null
     };
   } catch (err) {
