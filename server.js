@@ -3112,6 +3112,42 @@ async function fetchAllCompaniesRowsFromCache() {
   }
 }
 
+async function fetchAllCompaniesObusMerkezSubeIdMap() {
+  try {
+    const query = `
+      SELECT
+        code,
+        id,
+        source,
+        obus_merkez_sube_id
+      FROM all_companies_cache
+      WHERE COALESCE(NULLIF(TRIM(obus_merkez_sube_id), ''), '') <> ''
+    `;
+    const result = await pool.query(query);
+    const map = new Map();
+
+    (result.rows || []).forEach((row) => {
+      const code = String(row?.code || "").trim();
+      const id = String(row?.id || "").trim();
+      const source = extractClusterLabel(String(row?.source || "").trim());
+      const obusMerkezSubeId = String(row?.obus_merkez_sube_id || "").trim();
+      if (!code || !source || !obusMerkezSubeId) return;
+      const key = `${code}|||${id}|||${source}`;
+      map.set(key, obusMerkezSubeId);
+    });
+
+    return {
+      map,
+      error: null
+    };
+  } catch (err) {
+    return {
+      map: new Map(),
+      error: `ObusMerkezSubeID önbelleği okunamadı: ${err?.message || "Bilinmeyen hata"}`
+    };
+  }
+}
+
 async function upsertAllCompaniesCacheRows(rows, options = {}) {
   const pruneMissing = options?.pruneMissing === true;
   const normalizedRows = normalizeAllCompaniesCacheRows(rows).filter((row) => {
@@ -7234,12 +7270,14 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
   const endDate = normalizeDate(req.query.endDate) || today;
   const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "all";
   const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
+  const { map: obusMerkezSubeIdByCompany, error: obusCacheError } = await fetchAllCompaniesObusMerkezSubeIdMap();
   const companies = [{ value: "all", label: "Tümü" }].concat(
     partnerItems.map((item) => {
       const idText = item.id || "N/A";
       const clusterText = item.cluster || "cluster";
-      const label = `${item.code} - ${idText} - ${clusterText}`;
       const value = buildCompanyOptionValue(item);
+      const obusMerkezSubeId = String(obusMerkezSubeIdByCompany.get(value) || "").trim();
+      const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
       return {
         value,
         label,
@@ -7247,6 +7285,9 @@ app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, r
       };
     })
   );
+  if (obusCacheError) {
+    console.error("Sales report ObusMerkezSubeID cache read error:", obusCacheError);
+  }
   if (partnerError) {
     companies.push({
       value: "__partner_error__",
