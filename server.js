@@ -101,6 +101,15 @@ const OBUS_USER_CREATE_LOGIN_PASSWORD = String(
 );
 const OBUS_USER_CREATE_TIMEOUT_MS = Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_USER_CREATE_CONCURRENCY = Number.parseInt(process.env.OBUS_USER_CREATE_CONCURRENCY || "4", 10) || 4;
+const OBUS_USER_DEACTIVATE_LIST_API_URL =
+  process.env.OBUS_USER_DEACTIVATE_LIST_API_URL ||
+  "https://api-preprod.obus.com.tr/api/membership/GetUsersWithoutPermissions";
+const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || String(OBUS_USER_CREATE_TIMEOUT_MS || 90000), 10) ||
+  Math.max(5000, Number(OBUS_USER_CREATE_TIMEOUT_MS || 90000));
+const OBUS_USER_DEACTIVATE_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_CONCURRENCY || String(OBUS_USER_CREATE_CONCURRENCY || 4), 10) ||
+  Math.max(1, Number(OBUS_USER_CREATE_CONCURRENCY || 4));
 const INVENTORY_BRANCHES_API_URL =
   process.env.INVENTORY_BRANCHES_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
@@ -2339,6 +2348,19 @@ function buildMembershipCreateUserUrl(baseUrl, clusterLabel = "") {
   try {
     const parsed = new URL(String(clusteredUrl || ""));
     parsed.pathname = "/api/membership/createuser";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildMembershipGetUsersWithoutPermissionsUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/membership/GetUsersWithoutPermissions";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -7065,6 +7087,368 @@ function buildObusUserCreateReportModel() {
   };
 }
 
+function buildObusUserDeactivateReportModel() {
+  return {
+    requested: false,
+    error: null,
+    totalCount: 0,
+    clusterCount: 0,
+    items: []
+  };
+}
+
+function buildPartnerCodeLookupFromAllCompaniesRows(rows) {
+  const byClusterAndPartnerId = new Map();
+  const byPartnerId = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const source = extractClusterLabel(String(row?.source || "").trim());
+    const partnerId = String(row?.id || "").trim();
+    const code = String(row?.code || "").trim();
+    if (!partnerId || !code) return;
+
+    const clusterKey = `${source}|||${partnerId}`;
+    if (!byClusterAndPartnerId.has(clusterKey)) {
+      byClusterAndPartnerId.set(clusterKey, code);
+    }
+    if (!byPartnerId.has(partnerId)) {
+      byPartnerId.set(partnerId, code);
+    }
+  });
+  return {
+    byClusterAndPartnerId,
+    byPartnerId
+  };
+}
+
+function buildObusUserDeactivateScanTargets(cacheRows) {
+  const rows = Array.isArray(cacheRows) ? cacheRows : [];
+  const partnerCodeByCluster = new Map();
+  let fallbackPartnerCode = "";
+
+  rows.forEach((row) => {
+    const source = extractClusterLabel(String(row?.source || "").trim());
+    const code = String(row?.code || "").trim();
+    if (!code) return;
+    if (!fallbackPartnerCode) fallbackPartnerCode = code;
+    if (source && !partnerCodeByCluster.has(source)) {
+      partnerCodeByCluster.set(source, code);
+    }
+  });
+
+  const sourceUrls = buildPartnerFetchUrls();
+  const targets = [];
+  const seen = new Set();
+
+  sourceUrls.forEach((sourceUrl) => {
+    const cluster = extractClusterLabel(sourceUrl);
+    const endpointUrl = buildMembershipGetUsersWithoutPermissionsUrl(sourceUrl, cluster);
+    const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+    if (!normalizedEndpointUrl) return;
+    const key = String(normalizedEndpointUrl || "").toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({
+      cluster,
+      endpointUrl: normalizedEndpointUrl,
+      partnerCode: String(partnerCodeByCluster.get(cluster) || fallbackPartnerCode || "").trim()
+    });
+  });
+
+  const requiredExtraEndpoint = normalizeTargetUrl(
+    buildMembershipGetUsersWithoutPermissionsUrl(OBUS_USER_DEACTIVATE_LIST_API_URL, "")
+  );
+  if (requiredExtraEndpoint) {
+    const requiredKey = requiredExtraEndpoint.toLowerCase();
+    if (!seen.has(requiredKey)) {
+      const requiredCluster = extractClusterLabel(requiredExtraEndpoint);
+      targets.push({
+        cluster: requiredCluster,
+        endpointUrl: requiredExtraEndpoint,
+        partnerCode: String(partnerCodeByCluster.get(requiredCluster) || fallbackPartnerCode || "").trim()
+      });
+    }
+  }
+
+  return targets;
+}
+
+function extractObusUsersWithoutPermissionsRows(payload, { usernameFilter = "", clusterLabel = "" } = {}) {
+  const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
+  const collected = [];
+  const visited = new Set();
+
+  const pushCandidateRow = (row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return;
+
+    const id = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["id", "user-id", "user_id", "userid"]));
+    const partnerId = formatPartnerCellValue(
+      readPartnerRawValueByAliases(row, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
+    );
+    const username = formatPartnerCellValue(
+      readPartnerRawValueByAliases(row, [
+        "username",
+        "user-name",
+        "user_name",
+        "user",
+        "name",
+        "login-name",
+        "login_name"
+      ])
+    );
+
+    const normalizedId = String(id || "").trim();
+    const normalizedPartnerId = String(partnerId || "").trim();
+    const normalizedUsername = String(username || "").trim();
+    if (!normalizedId || !normalizedPartnerId || !normalizedUsername) return;
+    if (normalizedFilter && !normalizedUsername.toLocaleLowerCase("tr").includes(normalizedFilter)) return;
+
+    collected.push({
+      source: extractClusterLabel(clusterLabel),
+      id: normalizedId,
+      "partner-id": normalizedPartnerId,
+      username: normalizedUsername
+    });
+  };
+
+  const walk = (node) => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed);
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item));
+      return;
+    }
+
+    pushCandidateRow(node);
+    Object.values(node).forEach((value) => walk(value));
+  };
+
+  walk(payload);
+
+  const deduped = new Map();
+  collected.forEach((item) => {
+    const key = `${item.source}|||${item["partner-id"]}|||${item.id}|||${item.username}`.toLocaleLowerCase("tr");
+    if (!deduped.has(key)) {
+      deduped.set(key, item);
+    }
+  });
+  return Array.from(deduped.values());
+}
+
+async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter, signal }) {
+  const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
+  const endpointUrl = normalizeTargetUrl(target?.endpointUrl || "");
+  const partnerCode = String(target?.partnerCode || "").trim();
+  if (!endpointUrl) {
+    return {
+      cluster,
+      rows: [],
+      error: `${cluster}: GetUsersWithoutPermissions URL oluşturulamadı.`
+    };
+  }
+
+  const loginResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl: "",
+    partnerCode,
+    username: OBUS_USER_CREATE_LOGIN_USERNAME,
+    password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+    fallbackBranchId: "",
+    timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+    authorization: OBUS_USER_CREATE_API_AUTH,
+    allowEmptyPartnerCode: true
+  });
+  if (!loginResult.ok) {
+    return {
+      cluster,
+      rows: [],
+      error: `${cluster}: ${loginResult.error || "UserLogin başarısız."}`
+    };
+  }
+
+  const sessionId = String(loginResult.sessionId || "").trim();
+  const deviceId = String(loginResult.deviceId || "").trim();
+  const token = String(loginResult.token || "").trim();
+  if (!sessionId || !deviceId || !token) {
+    return {
+      cluster,
+      rows: [],
+      error: `${cluster}: UserLogin sonrası session/device/token eksik.`
+    };
+  }
+
+  const basePayload = {
+    date: formatObusRequestDate(new Date()),
+    "device-session": {
+      "session-id": sessionId,
+      "device-id": deviceId
+    },
+    language: "tr-TR",
+    token
+  };
+  const requestCandidates = [
+    { ...basePayload, data: { username: String(usernameFilter || "").trim() } },
+    { ...basePayload, data: String(usernameFilter || "").trim() }
+  ];
+
+  let lastError = `${cluster}: GetUsersWithoutPermissions çağrısı başarısız.`;
+  for (const requestBody of requestCandidates) {
+    try {
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: OBUS_USER_CREATE_API_AUTH
+        },
+        body: JSON.stringify(requestBody),
+        signal
+      });
+      const raw = await response.text();
+      const parsed = parseJsonSafe(raw);
+      const apiError =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+
+      if (!response.ok) {
+        lastError = `${cluster}: HTTP ${response.status}: ${apiError}`;
+        continue;
+      }
+
+      return {
+        cluster,
+        rows: extractObusUsersWithoutPermissionsRows(parsed, {
+          usernameFilter,
+          clusterLabel: cluster
+        }),
+        error: null
+      };
+    } catch (err) {
+      lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."}`;
+    }
+  }
+
+  return {
+    cluster,
+    rows: [],
+    error: lastError
+  };
+}
+
+async function searchObusUsersWithoutPermissions(usernameFilter) {
+  const normalizedUsername = String(usernameFilter || "").trim();
+  if (!normalizedUsername) {
+    return {
+      items: [],
+      error: "Kullanıcı adı zorunludur.",
+      clusterCount: 0
+    };
+  }
+
+  const cacheResult = await fetchAllCompaniesRowsFromCache();
+  const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+  const codeLookup = buildPartnerCodeLookupFromAllCompaniesRows(cacheRows);
+  const scanTargets = buildObusUserDeactivateScanTargets(cacheRows);
+
+  if (scanTargets.length === 0) {
+    return {
+      items: [],
+      error: "Cluster hedefleri bulunamadı.",
+      clusterCount: 0
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000)
+  );
+
+  try {
+    const results = await runWithConcurrency(
+      scanTargets,
+      Math.max(1, OBUS_USER_DEACTIVATE_CONCURRENCY),
+      async (target) => fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter: normalizedUsername, signal: controller.signal }),
+      () => Boolean(controller.signal.aborted)
+    );
+
+    const mergedRows = [];
+    const errors = [];
+    results.forEach((result) => {
+      if (result?.error) errors.push(String(result.error).trim());
+      (result?.rows || []).forEach((row) => mergedRows.push(row));
+    });
+
+    const dedupedItems = new Map();
+    mergedRows.forEach((row) => {
+      const source = extractClusterLabel(String(row?.source || "").trim());
+      const id = String(row?.id || "").trim();
+      const partnerId = String(row?.["partner-id"] || row?.partnerId || "").trim();
+      const username = String(row?.username || "").trim();
+      if (!id || !partnerId || !username) return;
+
+      const code =
+        String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
+        String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
+        "-";
+      const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
+      dedupedItems.set(key, {
+        value: `${source}|||${partnerId}|||${id}|||${username}`,
+        id,
+        "partner-id": partnerId,
+        username,
+        code
+      });
+    });
+
+    const items = Array.from(dedupedItems.values()).sort((a, b) => {
+      const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+      if (byCode !== 0) return byCode;
+      const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
+      if (byUsername !== 0) return byUsername;
+      const byPartnerId = String(a["partner-id"] || "").localeCompare(String(b["partner-id"] || ""), "tr");
+      if (byPartnerId !== 0) return byPartnerId;
+      return String(a.id || "").localeCompare(String(b.id || ""), "tr");
+    });
+
+    const errorParts = [];
+    if (cacheResult?.error) {
+      errorParts.push(`SQL eşleme uyarısı: ${cacheResult.error}`);
+    }
+    if (errors.length > 0) {
+      errorParts.push(`${errors.length}/${scanTargets.length} cluster alınamadı.`);
+    }
+    if (Boolean(controller.signal.aborted)) {
+      errorParts.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
+    }
+    if (errorParts.length === 0 && items.length === 0) {
+      errorParts.push("Eşleşen kullanıcı bulunamadı.");
+    }
+
+    return {
+      items,
+      error: errorParts.length > 0 ? errorParts.join(" ") : null,
+      clusterCount: scanTargets.length
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizeObusUserCreateFormValues(source) {
   const values = source && typeof source === "object" ? source : {};
   return {
@@ -7543,10 +7927,35 @@ app.post("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-
   });
 });
 
-app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), (req, res) => {
+app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
+  const filters = {
+    username: String(req.query.username || "").trim()
+  };
+  const shouldRun = String(req.query.run || "").trim() === "1";
+  const report = buildObusUserDeactivateReportModel();
+
+  if (shouldRun) {
+    report.requested = true;
+    if (!filters.username) {
+      report.error = "Kullanıcı adı zorunludur.";
+    } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+      report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
+    } else {
+      const searchResult = await searchObusUsersWithoutPermissions(filters.username);
+      report.items = Array.isArray(searchResult?.items) ? searchResult.items : [];
+      report.totalCount = report.items.length;
+      report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
+        ? Number(searchResult.clusterCount)
+        : 0;
+      report.error = searchResult?.error || null;
+    }
+  }
+
   res.render("general-obus-user-deactivate", {
     user: req.session.user,
-    active: "obus-user-deactivate"
+    active: "obus-user-deactivate",
+    filters,
+    report
   });
 });
 

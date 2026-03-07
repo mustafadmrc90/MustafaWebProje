@@ -2568,6 +2568,77 @@ button.ghost {
   color: #a24a4a;
 }
 
+.obus-user-deactivate-section {
+  margin-bottom: 12px;
+}
+
+.obus-user-deactivate-form {
+  display: grid;
+  gap: 12px;
+}
+
+.obus-user-deactivate-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px);
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.obus-user-deactivate-loading-message {
+  font-size: 12px;
+  color: #4f6176;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.obus-user-deactivate-loading-message::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid #b7c5d8;
+  border-top-color: #4f6176;
+  animation: salesSpin 0.8s linear infinite;
+}
+
+.obus-user-deactivate-form.is-loading .obus-user-deactivate-loading-message {
+  display: inline-flex;
+}
+
+.obus-user-deactivate-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #1f2735;
+  border: 1px solid #cfd9e6;
+  background: #f7f9fc;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.obus-user-deactivate-select-all input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  margin: 0;
+  accent-color: #0f6bdc;
+}
+
+.obus-user-deactivate-checkbox-cell {
+  width: 56px;
+  text-align: center;
+}
+
+.obus-user-deactivate-checkbox-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  accent-color: #0f6bdc;
+}
+
 .slack-analysis-summary-table {
   min-width: 620px;
 }
@@ -3113,6 +3184,10 @@ button.ghost {
   }
 
   .obus-user-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .obus-user-deactivate-grid {
     grid-template-columns: 1fr;
   }
 

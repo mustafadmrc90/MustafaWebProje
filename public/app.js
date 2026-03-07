@@ -1113,6 +1113,62 @@
     applyInitialCompanySelection();
   };
 
+  const initObusUserDeactivateForm = () => {
+    const form = document.querySelector(".obus-user-deactivate-form");
+    if (!form) return;
+    if (form.dataset.deactivateBound === "1") return;
+    form.dataset.deactivateBound = "1";
+
+    const submitBtn = form.querySelector("button[type='submit']");
+    const loadingMessage = form.querySelector(".obus-user-deactivate-loading-message");
+    const selectAllCheckbox = document.querySelector("[data-obus-user-select-all='1']");
+    const itemCheckboxes = Array.from(document.querySelectorAll("[data-obus-user-item='1']"));
+
+    const syncSelectAll = () => {
+      if (!selectAllCheckbox) return;
+      const enabledCheckboxes = itemCheckboxes.filter((item) => !item.disabled);
+      if (enabledCheckboxes.length === 0) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+        return;
+      }
+      const checkedCount = enabledCheckboxes.filter((item) => item.checked).length;
+      selectAllCheckbox.checked = checkedCount === enabledCheckboxes.length;
+      selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < enabledCheckboxes.length;
+    };
+
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener("change", () => {
+        itemCheckboxes.forEach((item) => {
+          if (item.disabled) return;
+          item.checked = selectAllCheckbox.checked;
+        });
+        syncSelectAll();
+      });
+    }
+
+    itemCheckboxes.forEach((item) => {
+      item.addEventListener("change", () => {
+        syncSelectAll();
+      });
+    });
+    syncSelectAll();
+
+    if (submitBtn) {
+      const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcıları Listele";
+      form.classList.remove("is-loading");
+      submitBtn.disabled = false;
+      submitBtn.textContent = defaultLabel;
+      if (loadingMessage) loadingMessage.hidden = true;
+      form.addEventListener("submit", () => {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Listeleniyor...";
+        form.classList.add("is-loading");
+        if (loadingMessage) loadingMessage.hidden = false;
+      });
+    }
+  };
+
   const initAllCompaniesLoading = () => {
     const forms = Array.from(document.querySelectorAll(".all-companies-loading-form"));
     if (forms.length === 0) return;
@@ -1194,6 +1250,7 @@
     initSlackReportLoading();
     initAllowedLinesLoading();
     initObusUserCreateBuilder();
+    initObusUserDeactivateForm();
     initAllCompaniesLoading();
     initPermissionsBulkForm();
 
