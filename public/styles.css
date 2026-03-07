@@ -2640,8 +2640,11 @@ button.ghost {
 }
 
 .obus-user-deactivate-table-scroll {
-  max-height: clamp(420px, 72vh, 980px);
+  height: min(78vh, 1100px);
+  min-height: 540px;
   overflow: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   border: 1px solid #e2e8f2;
   border-radius: 10px;
 }
@@ -3210,7 +3213,8 @@ button.ghost {
   }
 
   .obus-user-deactivate-table-scroll {
-    max-height: 62vh;
+    height: 64vh;
+    min-height: 420px;
   }
 
   .obus-user-create-actions {
