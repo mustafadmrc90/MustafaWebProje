@@ -2639,6 +2639,24 @@ button.ghost {
   accent-color: #0f6bdc;
 }
 
+.obus-user-deactivate-table-scroll {
+  max-height: clamp(420px, 72vh, 980px);
+  overflow: auto;
+  border: 1px solid #e2e8f2;
+  border-radius: 10px;
+}
+
+.obus-user-deactivate-table-scroll .partners-raw-table {
+  min-width: 920px;
+}
+
+.obus-user-deactivate-table-scroll .partners-raw-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f7f9fc;
+}
+
 .slack-analysis-summary-table {
   min-width: 620px;
 }
@@ -3189,6 +3207,10 @@ button.ghost {
 
   .obus-user-deactivate-grid {
     grid-template-columns: 1fr;
+  }
+
+  .obus-user-deactivate-table-scroll {
+    max-height: 62vh;
   }
 
   .obus-user-create-actions {
