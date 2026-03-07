@@ -7143,54 +7143,36 @@ function buildPartnerCodeLookupFromAllCompaniesRows(rows) {
 
 function buildObusUserDeactivateScanTargets(cacheRows) {
   const rows = Array.isArray(cacheRows) ? cacheRows : [];
-  const partnerCodeByCluster = new Map();
-  let fallbackPartnerCode = "";
-
-  rows.forEach((row) => {
-    const source = extractClusterLabel(String(row?.source || "").trim());
-    const code = String(row?.code || "").trim();
-    if (!code) return;
-    if (!fallbackPartnerCode) fallbackPartnerCode = code;
-    if (source && !partnerCodeByCluster.has(source)) {
-      partnerCodeByCluster.set(source, code);
-    }
-  });
-
-  const sourceUrls = buildPartnerFetchUrls();
   const targets = [];
   const seen = new Set();
 
-  sourceUrls.forEach((sourceUrl) => {
-    const cluster = extractClusterLabel(sourceUrl);
+  rows.forEach((row) => {
+    const cluster = extractClusterLabel(String(row?.source || row?.url || "").trim());
+    const partnerCode = String(row?.code || "").trim();
+    const partnerId = String(row?.id || "").trim();
+    const fallbackSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
+    const sourceUrl = normalizeTargetUrl(String(row?.url || "").trim()) || fallbackSourceUrl || "";
     const endpointUrl = buildMembershipGetUsersWithoutPermissionsUrl(sourceUrl, cluster);
     const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
-    if (!normalizedEndpointUrl) return;
-    const key = String(normalizedEndpointUrl || "").toLowerCase();
+    if (!normalizedEndpointUrl || !partnerCode) return;
+    const key = `${String(normalizedEndpointUrl || "").toLowerCase()}|||${partnerCode.toLocaleLowerCase("tr")}|||${partnerId}`;
     if (seen.has(key)) return;
     seen.add(key);
     targets.push({
       cluster,
       endpointUrl: normalizedEndpointUrl,
-      partnerCode: String(partnerCodeByCluster.get(cluster) || fallbackPartnerCode || "").trim()
+      partnerCode,
+      partnerId
     });
   });
 
-  const requiredExtraEndpoint = normalizeTargetUrl(
-    buildMembershipGetUsersWithoutPermissionsUrl(OBUS_USER_DEACTIVATE_LIST_API_URL, "")
-  );
-  if (requiredExtraEndpoint) {
-    const requiredKey = requiredExtraEndpoint.toLowerCase();
-    if (!seen.has(requiredKey)) {
-      const requiredCluster = extractClusterLabel(requiredExtraEndpoint);
-      targets.push({
-        cluster: requiredCluster,
-        endpointUrl: requiredExtraEndpoint,
-        partnerCode: String(partnerCodeByCluster.get(requiredCluster) || fallbackPartnerCode || "").trim()
-      });
-    }
-  }
-
-  return targets;
+  return targets.sort((a, b) => {
+    const byCluster = String(a.cluster || "").localeCompare(String(b.cluster || ""), "tr");
+    if (byCluster !== 0) return byCluster;
+    const byCode = String(a.partnerCode || "").localeCompare(String(b.partnerCode || ""), "tr");
+    if (byCode !== 0) return byCode;
+    return String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
+  });
 }
 
 function extractObusUsersWithoutPermissionsRows(payload, { usernameFilter = "", clusterLabel = "" } = {}) {
@@ -7267,15 +7249,25 @@ function extractObusUsersWithoutPermissionsRows(payload, { usernameFilter = "", 
   return Array.from(deduped.values());
 }
 
-async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter, signal }) {
+async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter }) {
   const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
   const endpointUrl = normalizeTargetUrl(target?.endpointUrl || "");
   const partnerCode = String(target?.partnerCode || "").trim();
+  const partnerId = String(target?.partnerId || "").trim();
+  const companyRef = `${partnerCode || "code?"}${partnerId ? ` - ${partnerId}` : ""}`;
   if (!endpointUrl) {
     return {
       cluster,
       rows: [],
-      error: `${cluster}: GetUsersWithoutPermissions URL oluşturulamadı.`
+      error: `${cluster}: GetUsersWithoutPermissions URL oluşturulamadı. (${companyRef})`
+    };
+  }
+
+  if (!partnerCode) {
+    return {
+      cluster,
+      rows: [],
+      error: `${cluster}: partner-code boş olduğu için istek atlanıyor. (${companyRef})`
     };
   }
 
@@ -7288,13 +7280,13 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     fallbackBranchId: "",
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
     authorization: OBUS_USER_CREATE_API_AUTH,
-    allowEmptyPartnerCode: true
+    allowEmptyPartnerCode: false
   });
   if (!loginResult.ok) {
     return {
       cluster,
       rows: [],
-      error: `${cluster}: ${loginResult.error || "UserLogin başarısız."}`
+      error: `${cluster}: ${loginResult.error || "UserLogin başarısız."} (${companyRef})`
     };
   }
 
@@ -7322,9 +7314,12 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     { ...basePayload, data: { username: String(usernameFilter || "").trim() } },
     { ...basePayload, data: String(usernameFilter || "").trim() }
   ];
+  const requestTimeoutMs = toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000);
 
-  let lastError = `${cluster}: GetUsersWithoutPermissions çağrısı başarısız.`;
+  let lastError = `${cluster}: GetUsersWithoutPermissions çağrısı başarısız. (${companyRef})`;
   for (const requestBody of requestCandidates) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const response = await fetch(endpointUrl, {
         method: "POST",
@@ -7334,7 +7329,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
           Authorization: OBUS_USER_CREATE_API_AUTH
         },
         body: JSON.stringify(requestBody),
-        signal
+        signal: controller.signal
       });
       const raw = await response.text();
       const parsed = parseJsonSafe(raw);
@@ -7346,7 +7341,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         "Bilinmeyen hata";
 
       if (!response.ok) {
-        lastError = `${cluster}: HTTP ${response.status}: ${apiError}`;
+        lastError = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
         continue;
       }
 
@@ -7359,7 +7354,9 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         error: null
       };
     } catch (err) {
-      lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."}`;
+      lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."} (${companyRef})`;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -7388,87 +7385,83 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   if (scanTargets.length === 0) {
     return {
       items: [],
-      error: "Cluster hedefleri bulunamadı.",
+      error: "SQL tablosunda taranacak firma bulunamadı.",
       clusterCount: 0
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000)
+  const results = await runWithConcurrency(
+    scanTargets,
+    Math.max(1, OBUS_USER_DEACTIVATE_CONCURRENCY),
+    async (target) => fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter: normalizedUsername })
   );
 
-  try {
-    const results = await runWithConcurrency(
-      scanTargets,
-      Math.max(1, OBUS_USER_DEACTIVATE_CONCURRENCY),
-      async (target) => fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter: normalizedUsername, signal: controller.signal }),
-      () => Boolean(controller.signal.aborted)
-    );
+  const mergedRows = [];
+  const errors = [];
+  results.forEach((result) => {
+    if (result?.error) errors.push(String(result.error).trim());
+    (result?.rows || []).forEach((row) => mergedRows.push(row));
+  });
 
-    const mergedRows = [];
-    const errors = [];
-    results.forEach((result) => {
-      if (result?.error) errors.push(String(result.error).trim());
-      (result?.rows || []).forEach((row) => mergedRows.push(row));
+  const dedupedItems = new Map();
+  mergedRows.forEach((row) => {
+    const source = extractClusterLabel(String(row?.source || "").trim());
+    const id = String(row?.id || "").trim();
+    const partnerId = String(row?.["partner-id"] || row?.partnerId || "").trim();
+    const username = String(row?.username || "").trim();
+    if (!id || !partnerId || !username) return;
+
+    const code =
+      String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
+      String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
+      "-";
+    const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
+    dedupedItems.set(key, {
+      value: `${source}|||${partnerId}|||${id}|||${username}`,
+      source,
+      id,
+      "partner-id": partnerId,
+      username,
+      code
     });
+  });
 
-    const dedupedItems = new Map();
-    mergedRows.forEach((row) => {
-      const source = extractClusterLabel(String(row?.source || "").trim());
-      const id = String(row?.id || "").trim();
-      const partnerId = String(row?.["partner-id"] || row?.partnerId || "").trim();
-      const username = String(row?.username || "").trim();
-      if (!id || !partnerId || !username) return;
+  const items = Array.from(dedupedItems.values()).sort((a, b) => {
+    const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+    if (byCode !== 0) return byCode;
+    const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
+    if (byUsername !== 0) return byUsername;
+    const byPartnerId = String(a["partner-id"] || "").localeCompare(String(b["partner-id"] || ""), "tr");
+    if (byPartnerId !== 0) return byPartnerId;
+    return String(a.id || "").localeCompare(String(b.id || ""), "tr");
+  });
 
-      const code =
-        String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
-        String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
-        "-";
-      const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
-      dedupedItems.set(key, {
-        value: `${source}|||${partnerId}|||${id}|||${username}`,
-        source,
-        id,
-        "partner-id": partnerId,
-        username,
-        code
-      });
-    });
-
-    const items = Array.from(dedupedItems.values()).sort((a, b) => {
-      const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
-      if (byCode !== 0) return byCode;
-      const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
-      if (byUsername !== 0) return byUsername;
-      const byPartnerId = String(a["partner-id"] || "").localeCompare(String(b["partner-id"] || ""), "tr");
-      if (byPartnerId !== 0) return byPartnerId;
-      return String(a.id || "").localeCompare(String(b.id || ""), "tr");
-    });
-
-    const errorParts = [];
-    if (cacheResult?.error) {
-      errorParts.push(`SQL eşleme uyarısı: ${cacheResult.error}`);
-    }
-    if (errors.length > 0) {
-      errorParts.push(`${errors.length}/${scanTargets.length} cluster alınamadı.`);
-    }
-    if (Boolean(controller.signal.aborted)) {
-      errorParts.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
-    }
-    if (errorParts.length === 0 && items.length === 0) {
-      errorParts.push("Eşleşen kullanıcı bulunamadı.");
-    }
-
-    return {
-      items,
-      error: errorParts.length > 0 ? errorParts.join(" ") : null,
-      clusterCount: scanTargets.length
-    };
-  } finally {
-    clearTimeout(timeout);
+  const errorParts = [];
+  if (cacheResult?.error) {
+    errorParts.push(`SQL eşleme uyarısı: ${cacheResult.error}`);
   }
+  if (errors.length > 0) {
+    errorParts.push(`${errors.length}/${scanTargets.length} firma alınamadı.`);
+  }
+  if (errorParts.length === 0 && items.length === 0) {
+    errorParts.push("Eşleşen kullanıcı bulunamadı.");
+  }
+
+  const clusterCount = new Set(
+    scanTargets
+      .map((target) => extractClusterLabel(target?.cluster || target?.endpointUrl || ""))
+      .filter(Boolean)
+  ).size;
+
+  return {
+    items,
+    error: errorParts.length > 0 ? errorParts.join(" ") : null,
+    clusterCount
+  };
+}
+
+function buildObusUserDeactivateClusterContextKey(cluster, partnerCode) {
+  return `${extractClusterLabel(cluster || "")}|||${String(partnerCode || "").trim().toLocaleLowerCase("tr")}`;
 }
 
 function parseSelectedObusUserDeactivateValues(value) {
@@ -7487,15 +7480,17 @@ function buildObusUserDeactivateClusterContextMap(cacheRows) {
   const targets = buildObusUserDeactivateScanTargets(cacheRows);
   targets.forEach((target) => {
     const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
+    const partnerCode = String(target?.partnerCode || "").trim();
     const deleteEndpointUrl = normalizeTargetUrl(
       buildMembershipDeleteUserUrl(target?.endpointUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL, cluster)
     );
-    if (!cluster || !deleteEndpointUrl) return;
-    if (!map.has(cluster)) {
-      map.set(cluster, {
+    if (!cluster || !deleteEndpointUrl || !partnerCode) return;
+    const key = buildObusUserDeactivateClusterContextKey(cluster, partnerCode);
+    if (!map.has(key)) {
+      map.set(key, {
         cluster,
         deleteEndpointUrl,
-        partnerCode: String(target?.partnerCode || "").trim()
+        partnerCode
       });
     }
   });
@@ -7609,15 +7604,32 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows }) {
   }
 
   const clusterContextMap = buildObusUserDeactivateClusterContextMap(normalizedRows);
-  const groupedByCluster = new Map();
+  const groupedByContext = new Map();
   items.forEach((item) => {
     const cluster = extractClusterLabel(item?.source || "");
-    if (!groupedByCluster.has(cluster)) groupedByCluster.set(cluster, []);
-    groupedByCluster.get(cluster).push(item);
+    const partnerCode = String(item?.code || "").trim();
+    const contextKey = buildObusUserDeactivateClusterContextKey(cluster, partnerCode);
+    if (!cluster || !partnerCode) {
+      failureItems.push({
+        label: buildObusUserDeactivateItemLabel(item),
+        error: "Silinecek kullanıcı için cluster veya firma code bilgisi eksik."
+      });
+      return;
+    }
+    if (!groupedByContext.has(contextKey)) {
+      groupedByContext.set(contextKey, {
+        cluster,
+        partnerCode,
+        items: []
+      });
+    }
+    groupedByContext.get(contextKey).items.push(item);
   });
 
-  for (const [cluster, clusterItems] of groupedByCluster.entries()) {
-    const contextFromMap = clusterContextMap.get(cluster);
+  for (const [contextKey, contextGroup] of groupedByContext.entries()) {
+    const cluster = extractClusterLabel(contextGroup?.cluster || "");
+    const clusterItems = Array.isArray(contextGroup?.items) ? contextGroup.items : [];
+    const contextFromMap = clusterContextMap.get(contextKey);
     const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
     const fallbackDeleteEndpointUrl = normalizeTargetUrl(
       buildMembershipDeleteUserUrl(
@@ -7630,7 +7642,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows }) {
     ).trim();
     const partnerCode =
       String(contextFromMap?.partnerCode || "").trim() ||
-      String(clusterItems[0]?.code || "").trim();
+      String(contextGroup?.partnerCode || "").trim();
 
     if (!deleteEndpointUrl) {
       clusterItems.forEach((item) => {
@@ -7651,7 +7663,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows }) {
       fallbackBranchId: "",
       timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
       authorization: OBUS_USER_CREATE_API_AUTH,
-      allowEmptyPartnerCode: true
+      allowEmptyPartnerCode: false
     });
     if (!loginResult.ok) {
       clusterItems.forEach((item) => {
