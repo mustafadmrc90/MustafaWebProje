@@ -7309,6 +7309,20 @@ function extractObusUsersWithoutPermissionsRows(
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
   const collected = [];
   const visited = new Set();
+  const parseIsActiveValue = (value) => {
+    if (value === true) return true;
+    if (value === false) return false;
+    if (Number.isFinite(Number(value))) {
+      const parsedNumber = Number(value);
+      if (parsedNumber === 1) return true;
+      if (parsedNumber === 0) return false;
+    }
+    const normalized = String(value || "").trim().toLocaleLowerCase("tr");
+    if (!normalized) return null;
+    if (["true", "1", "yes", "evet", "aktif", "active"].includes(normalized)) return true;
+    if (["false", "0", "no", "hayir", "pasif", "inactive"].includes(normalized)) return false;
+    return null;
+  };
 
   const pushCandidateRow = (row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
@@ -7329,11 +7343,23 @@ function extractObusUsersWithoutPermissionsRows(
         "login_name"
       ])
     );
+    const isActiveRaw = readPartnerRawValueByAliases(row, [
+      "is-active",
+      "is_active",
+      "isactive",
+      "isActive",
+      "active",
+      "is-enabled",
+      "is_enabled",
+      "isenabled"
+    ]);
+    const isActive = parseIsActiveValue(isActiveRaw);
 
     const normalizedId = String(id || "").trim();
     const normalizedPartnerId = String(partnerId || "").trim();
     const normalizedUsername = String(username || "").trim();
     if (!normalizedId || !normalizedPartnerId || !normalizedUsername) return;
+    if (isActive !== true) return;
     if (normalizedFilter && !normalizedUsername.toLocaleLowerCase("tr").includes(normalizedFilter)) return;
 
     collected.push({
