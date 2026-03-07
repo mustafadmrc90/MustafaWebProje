@@ -104,6 +104,8 @@ const OBUS_USER_CREATE_CONCURRENCY = Number.parseInt(process.env.OBUS_USER_CREAT
 const OBUS_USER_DEACTIVATE_LIST_API_URL =
   process.env.OBUS_USER_DEACTIVATE_LIST_API_URL ||
   "https://api-preprod.obus.com.tr/api/membership/GetUsersWithoutPermissions";
+const OBUS_USER_DEACTIVATE_DELETE_API_URL =
+  process.env.OBUS_USER_DEACTIVATE_DELETE_API_URL || "https://api-preprod.obus.com.tr/api/membership/deleteuser";
 const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || String(OBUS_USER_CREATE_TIMEOUT_MS || 90000), 10) ||
   Math.max(5000, Number(OBUS_USER_CREATE_TIMEOUT_MS || 90000));
@@ -2361,6 +2363,19 @@ function buildMembershipGetUsersWithoutPermissionsUrl(baseUrl, clusterLabel = ""
   try {
     const parsed = new URL(String(clusteredUrl || ""));
     parsed.pathname = "/api/membership/GetUsersWithoutPermissions";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildMembershipDeleteUserUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/membership/deleteuser";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -7093,7 +7108,13 @@ function buildObusUserDeactivateReportModel() {
     error: null,
     totalCount: 0,
     clusterCount: 0,
-    items: []
+    items: [],
+    deleteRequested: false,
+    deleteTotalCount: 0,
+    deleteSuccessCount: 0,
+    deleteFailureCount: 0,
+    deleteSuccessItems: [],
+    deleteFailureItems: []
   };
 }
 
@@ -7408,6 +7429,7 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
       const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
       dedupedItems.set(key, {
         value: `${source}|||${partnerId}|||${id}|||${username}`,
+        source,
         id,
         "partner-id": partnerId,
         username,
@@ -7447,6 +7469,242 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function parseSelectedObusUserDeactivateValues(value) {
+  const values = Array.isArray(value) ? value : [value];
+  const deduped = [];
+  values.forEach((item) => {
+    const normalized = String(item || "").trim();
+    if (!normalized) return;
+    if (!deduped.includes(normalized)) deduped.push(normalized);
+  });
+  return deduped;
+}
+
+function buildObusUserDeactivateClusterContextMap(cacheRows) {
+  const map = new Map();
+  const targets = buildObusUserDeactivateScanTargets(cacheRows);
+  targets.forEach((target) => {
+    const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
+    const deleteEndpointUrl = normalizeTargetUrl(
+      buildMembershipDeleteUserUrl(target?.endpointUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL, cluster)
+    );
+    if (!cluster || !deleteEndpointUrl) return;
+    if (!map.has(cluster)) {
+      map.set(cluster, {
+        cluster,
+        deleteEndpointUrl,
+        partnerCode: String(target?.partnerCode || "").trim()
+      });
+    }
+  });
+  return map;
+}
+
+function buildObusUserDeactivateItemLabel(item) {
+  const code = String(item?.code || "-").trim() || "-";
+  const partnerId = String(item?.["partner-id"] || "").trim();
+  const username = String(item?.username || "").trim();
+  const id = String(item?.id || "").trim();
+  return `${code} - ${partnerId || "?"} - ${username || "?"} - ${id || "?"}`;
+}
+
+function normalizeObusDeleteUserIdValue(rawValue) {
+  const text = String(rawValue || "").trim();
+  if (!text) return null;
+  if (/^-?\d+$/.test(text)) {
+    const parsed = Number.parseInt(text, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return text;
+}
+
+async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, token, userId }) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  if (!normalizedEndpointUrl) {
+    return { ok: false, error: "DeleteUser endpoint URL geçersiz." };
+  }
+
+  const normalizedUserId = normalizeObusDeleteUserIdValue(userId);
+  if (normalizedUserId === null || normalizedUserId === undefined || String(normalizedUserId).trim() === "") {
+    return { ok: false, error: "Silinecek kullanıcı id bilgisi boş." };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000)
+  );
+
+  try {
+    const requestBodyObject = {
+      data: normalizedUserId,
+      "device-session": {
+        "session-id": String(sessionId || "").trim(),
+        "device-id": String(deviceId || "").trim()
+      },
+      token: String(token || "").trim(),
+      date: "2016-03-11T11:33:00",
+      language: "tr-TR"
+    };
+
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_USER_CREATE_API_AUTH
+      },
+      body: JSON.stringify(requestBodyObject),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const errorText =
+      (parsed &&
+        typeof parsed === "object" &&
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `HTTP ${response.status}: ${errorText}`
+      };
+    }
+
+    const successByPayload = parsed && typeof parsed === "object" ? isSuccessStatusPayload(parsed) : true;
+    if (!successByPayload) {
+      return {
+        ok: false,
+        error: errorText || "İşlem başarısız döndü."
+      };
+    }
+
+    return {
+      ok: true,
+      message: String(errorText || "Kullanıcı pasife alındı.").trim()
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err?.message || "DeleteUser isteği gönderilemedi."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function deactivateObusUsersBySelection({ selectedItems, cacheRows }) {
+  const items = Array.isArray(selectedItems) ? selectedItems : [];
+  const normalizedRows = Array.isArray(cacheRows) ? cacheRows : [];
+  const successItems = [];
+  const failureItems = [];
+
+  if (items.length === 0) {
+    return {
+      successItems,
+      failureItems
+    };
+  }
+
+  const clusterContextMap = buildObusUserDeactivateClusterContextMap(normalizedRows);
+  const groupedByCluster = new Map();
+  items.forEach((item) => {
+    const cluster = extractClusterLabel(item?.source || "");
+    if (!groupedByCluster.has(cluster)) groupedByCluster.set(cluster, []);
+    groupedByCluster.get(cluster).push(item);
+  });
+
+  for (const [cluster, clusterItems] of groupedByCluster.entries()) {
+    const contextFromMap = clusterContextMap.get(cluster);
+    const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
+    const fallbackDeleteEndpointUrl = normalizeTargetUrl(
+      buildMembershipDeleteUserUrl(
+        fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
+        cluster
+      )
+    );
+    const deleteEndpointUrl = String(
+      contextFromMap?.deleteEndpointUrl || fallbackDeleteEndpointUrl || ""
+    ).trim();
+    const partnerCode =
+      String(contextFromMap?.partnerCode || "").trim() ||
+      String(clusterItems[0]?.code || "").trim();
+
+    if (!deleteEndpointUrl) {
+      clusterItems.forEach((item) => {
+        failureItems.push({
+          label: buildObusUserDeactivateItemLabel(item),
+          error: `${cluster}: DeleteUser URL oluşturulamadı.`
+        });
+      });
+      continue;
+    }
+
+    const loginResult = await fetchAuthorizedLinesLoginInfo({
+      endpointUrl: deleteEndpointUrl,
+      companyUrl: "",
+      partnerCode,
+      username: OBUS_USER_CREATE_LOGIN_USERNAME,
+      password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+      fallbackBranchId: "",
+      timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+      authorization: OBUS_USER_CREATE_API_AUTH,
+      allowEmptyPartnerCode: true
+    });
+    if (!loginResult.ok) {
+      clusterItems.forEach((item) => {
+        failureItems.push({
+          label: buildObusUserDeactivateItemLabel(item),
+          error: `${cluster}: ${loginResult.error || "UserLogin başarısız."}`
+        });
+      });
+      continue;
+    }
+
+    const sessionId = String(loginResult.sessionId || "").trim();
+    const deviceId = String(loginResult.deviceId || "").trim();
+    const token = String(loginResult.token || "").trim();
+    if (!sessionId || !deviceId || !token) {
+      clusterItems.forEach((item) => {
+        failureItems.push({
+          label: buildObusUserDeactivateItemLabel(item),
+          error: `${cluster}: UserLogin sonrası session/device/token eksik.`
+        });
+      });
+      continue;
+    }
+
+    for (const item of clusterItems) {
+      const result = await sendObusDeleteUserRequest({
+        endpointUrl: deleteEndpointUrl,
+        sessionId,
+        deviceId,
+        token,
+        userId: item?.id
+      });
+      if (result.ok) {
+        successItems.push({
+          label: buildObusUserDeactivateItemLabel(item),
+          message: String(result.message || "Kullanıcı pasife alındı.").trim()
+        });
+      } else {
+        failureItems.push({
+          label: buildObusUserDeactivateItemLabel(item),
+          error: `${cluster}: ${String(result.error || "DeleteUser başarısız.").trim()}`
+        });
+      }
+    }
+  }
+
+  return {
+    successItems,
+    failureItems
+  };
 }
 
 function normalizeObusUserCreateFormValues(source) {
@@ -7948,6 +8206,64 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
         ? Number(searchResult.clusterCount)
         : 0;
       report.error = searchResult?.error || null;
+    }
+  }
+
+  res.render("general-obus-user-deactivate", {
+    user: req.session.user,
+    active: "obus-user-deactivate",
+    filters,
+    report
+  });
+});
+
+app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
+  const filters = {
+    username: String(req.body.username || "").trim()
+  };
+  const report = buildObusUserDeactivateReportModel();
+  report.requested = true;
+
+  if (!filters.username) {
+    report.error = "Kullanıcı adı zorunludur.";
+  } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+    report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
+  } else {
+    const searchResult = await searchObusUsersWithoutPermissions(filters.username);
+    report.items = Array.isArray(searchResult?.items) ? searchResult.items : [];
+    report.totalCount = report.items.length;
+    report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
+      ? Number(searchResult.clusterCount)
+      : 0;
+    report.error = searchResult?.error || null;
+
+    const selectedValues = parseSelectedObusUserDeactivateValues(req.body.selectedUsers);
+    const selectedValueSet = new Set(selectedValues);
+    const selectedItems = report.items.filter((item) => selectedValueSet.has(String(item?.value || "").trim()));
+
+    report.deleteRequested = true;
+    report.deleteTotalCount = selectedItems.length;
+
+    if (selectedItems.length === 0) {
+      report.error = report.error
+        ? `${report.error} | En az bir kullanıcı seçmelisiniz.`
+        : "En az bir kullanıcı seçmelisiniz.";
+    } else {
+      const cacheResult = await fetchAllCompaniesRowsFromCache();
+      const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+      const deleteResult = await deactivateObusUsersBySelection({
+        selectedItems,
+        cacheRows
+      });
+
+      report.deleteSuccessItems = Array.isArray(deleteResult?.successItems) ? deleteResult.successItems : [];
+      report.deleteFailureItems = Array.isArray(deleteResult?.failureItems) ? deleteResult.failureItems : [];
+      report.deleteSuccessCount = report.deleteSuccessItems.length;
+      report.deleteFailureCount = report.deleteFailureItems.length;
+
+      if (report.deleteSuccessCount === 0 && report.deleteFailureCount > 0 && !report.error) {
+        report.error = "Seçili kullanıcılar pasife alınamadı.";
+      }
     }
   }
 

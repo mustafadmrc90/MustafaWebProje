@@ -1114,15 +1114,34 @@
   };
 
   const initObusUserDeactivateForm = () => {
-    const form = document.querySelector(".obus-user-deactivate-form");
-    if (!form) return;
-    if (form.dataset.deactivateBound === "1") return;
-    form.dataset.deactivateBound = "1";
+    const searchForm = document.querySelector(".obus-user-deactivate-search-form");
+    if (searchForm && searchForm.dataset.deactivateSearchBound !== "1") {
+      searchForm.dataset.deactivateSearchBound = "1";
+      const submitBtn = searchForm.querySelector("button[type='submit']");
+      const loadingMessage = searchForm.querySelector(".obus-user-deactivate-search-loading-message");
+      if (submitBtn) {
+        const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcıları Listele";
+        searchForm.classList.remove("is-loading");
+        submitBtn.disabled = false;
+        submitBtn.textContent = defaultLabel;
+        if (loadingMessage) loadingMessage.hidden = true;
+        searchForm.addEventListener("submit", () => {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Listeleniyor...";
+          searchForm.classList.add("is-loading");
+          if (loadingMessage) loadingMessage.hidden = false;
+        });
+      }
+    }
 
-    const submitBtn = form.querySelector("button[type='submit']");
-    const loadingMessage = form.querySelector(".obus-user-deactivate-loading-message");
-    const selectAllCheckbox = document.querySelector("[data-obus-user-select-all='1']");
-    const itemCheckboxes = Array.from(document.querySelectorAll("[data-obus-user-item='1']"));
+    const deleteForm = document.querySelector(".obus-user-deactivate-delete-form");
+    if (!deleteForm || deleteForm.dataset.deactivateDeleteBound === "1") return;
+    deleteForm.dataset.deactivateDeleteBound = "1";
+
+    const submitBtn = deleteForm.querySelector("button[type='submit']");
+    const loadingMessage = deleteForm.querySelector(".obus-user-deactivate-delete-loading-message");
+    const selectAllCheckbox = deleteForm.querySelector("[data-obus-user-select-all='1']");
+    const itemCheckboxes = Array.from(deleteForm.querySelectorAll("[data-obus-user-item='1']"));
 
     const syncSelectAll = () => {
       if (!selectAllCheckbox) return;
@@ -1155,15 +1174,15 @@
     syncSelectAll();
 
     if (submitBtn) {
-      const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcıları Listele";
-      form.classList.remove("is-loading");
+      const defaultLabel = String(submitBtn.textContent || "").trim() || "Seçili Kullanıcıları Pasife Al";
+      deleteForm.classList.remove("is-loading");
       submitBtn.disabled = false;
       submitBtn.textContent = defaultLabel;
       if (loadingMessage) loadingMessage.hidden = true;
-      form.addEventListener("submit", () => {
+      deleteForm.addEventListener("submit", () => {
         submitBtn.disabled = true;
-        submitBtn.textContent = "Listeleniyor...";
-        form.classList.add("is-loading");
+        submitBtn.textContent = "Pasife Alınıyor...";
+        deleteForm.classList.add("is-loading");
         if (loadingMessage) loadingMessage.hidden = false;
       });
     }

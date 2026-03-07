@@ -38,7 +38,7 @@
           <h2>Kullanıcı Arama</h2>
         </div>
 
-        <form class="obus-user-deactivate-form" method="get" action="/general/obus-user-deactivate">
+        <form class="obus-user-deactivate-form obus-user-deactivate-search-form" method="get" action="/general/obus-user-deactivate">
           <input type="hidden" name="run" value="1" />
 
           <div class="obus-user-deactivate-grid">
@@ -52,57 +52,108 @@
             <button class="button-link" type="submit">Kullanıcıları Listele</button>
           </div>
 
-          <div class="obus-user-deactivate-loading-message" hidden>Kullanıcılar clusterlardan getiriliyor...</div>
+          <div class="obus-user-deactivate-loading-message obus-user-deactivate-search-loading-message" hidden>
+            Kullanıcılar clusterlardan getiriliyor...
+          </div>
         </form>
       </section>
 
       <% if (report && report.requested) { %>
         <section class="table-card panel-card obus-user-deactivate-results">
-          <div class="table-head">
-            <h2>Kullanıcı Listesi</h2>
-            <div class="table-actions">
-              <span class="pill">Toplam: <%= report.totalCount %></span>
-              <span class="pill">Cluster: <%= report.clusterCount || 0 %></span>
-              <% if (report.items && report.items.length > 0) { %>
-                <label class="obus-user-deactivate-select-all">
-                  <input type="checkbox" data-obus-user-select-all="1" checked />
-                  <span>Hepsi</span>
-                </label>
-              <% } %>
+          <form class="obus-user-deactivate-form obus-user-deactivate-delete-form" method="post" action="/general/obus-user-deactivate">
+            <input type="hidden" name="username" value="<%= filters?.username || '' %>" />
+
+            <div class="table-head">
+              <h2>Kullanıcı Listesi</h2>
+              <div class="table-actions">
+                <span class="pill">Toplam: <%= report.totalCount %></span>
+                <span class="pill">Cluster: <%= report.clusterCount || 0 %></span>
+                <% if (report.items && report.items.length > 0) { %>
+                  <label class="obus-user-deactivate-select-all">
+                    <input type="checkbox" data-obus-user-select-all="1" checked />
+                    <span>Hepsi</span>
+                  </label>
+                <% } %>
+              </div>
             </div>
-          </div>
 
-          <% if (!report.items || report.items.length === 0) { %>
-            <p class="muted">Eşleşen kullanıcı bulunamadı.</p>
-          <% } %>
+            <% if (!report.items || report.items.length === 0) { %>
+              <p class="muted">Eşleşen kullanıcı bulunamadı.</p>
+            <% } %>
 
-          <% if (report.items && report.items.length > 0) { %>
-            <div class="table-scroll">
-              <table class="partners-raw-table">
-                <thead>
-                  <tr>
-                    <th>Seç</th>
-                    <th>id</th>
-                    <th>partner-id</th>
-                    <th>username</th>
-                    <th>code</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <% report.items.forEach((item) => { %>
+            <% if (report.items && report.items.length > 0) { %>
+              <div class="table-scroll">
+                <table class="partners-raw-table">
+                  <thead>
                     <tr>
-                      <td class="obus-user-deactivate-checkbox-cell">
-                        <input type="checkbox" data-obus-user-item="1" value="<%= item.value %>" checked />
-                      </td>
-                      <td><%= item.id %></td>
-                      <td><%= item["partner-id"] %></td>
-                      <td><%= item.username %></td>
-                      <td><%= item.code %></td>
+                      <th>Seç</th>
+                      <th>id</th>
+                      <th>partner-id</th>
+                      <th>username</th>
+                      <th>code</th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    <% report.items.forEach((item) => { %>
+                      <tr>
+                        <td class="obus-user-deactivate-checkbox-cell">
+                          <input type="checkbox" data-obus-user-item="1" name="selectedUsers" value="<%= item.value %>" checked />
+                        </td>
+                        <td><%= item.id %></td>
+                        <td><%= item["partner-id"] %></td>
+                        <td><%= item.username %></td>
+                        <td><%= item.code %></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="obus-user-create-actions">
+                <button class="button-link" type="submit">Seçili Kullanıcıları Pasife Al</button>
+              </div>
+
+              <div class="obus-user-deactivate-loading-message obus-user-deactivate-delete-loading-message" hidden>
+                Seçili kullanıcılar pasife alınıyor...
+              </div>
+            <% } %>
+          </form>
+
+          <% if (report.deleteRequested) { %>
+            <section class="table-card panel-card obus-user-create-results">
+              <div class="table-head">
+                <h2>Pasife Alma Sonuçları</h2>
+                <div class="table-actions">
+                  <span class="pill">Toplam: <%= report.deleteTotalCount %></span>
+                  <span class="pill">Başarılı: <%= report.deleteSuccessCount %></span>
+                  <span class="pill">Hatalı: <%= report.deleteFailureCount %></span>
+                </div>
+              </div>
+
+              <% if (report.deleteSuccessItems && report.deleteSuccessItems.length > 0) { %>
+                <h3>Başarılı Kayıtlar</h3>
+                <ul class="obus-user-create-result-list success">
+                  <% report.deleteSuccessItems.forEach((item) => { %>
+                    <li>
+                      <strong><%= item.label %></strong>
+                      <span><%= item.message %></span>
+                    </li>
                   <% }) %>
-                </tbody>
-              </table>
-            </div>
+                </ul>
+              <% } %>
+
+              <% if (report.deleteFailureItems && report.deleteFailureItems.length > 0) { %>
+                <h3>Hatalı Kayıtlar</h3>
+                <ul class="obus-user-create-result-list failure">
+                  <% report.deleteFailureItems.forEach((item) => { %>
+                    <li>
+                      <strong><%= item.label %></strong>
+                      <span><%= item.error %></span>
+                    </li>
+                  <% }) %>
+                </ul>
+              <% } %>
+            </section>
           <% } %>
         </section>
       <% } %>
