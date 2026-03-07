@@ -63,14 +63,17 @@
           <form class="obus-user-deactivate-form obus-user-deactivate-delete-form" method="post" action="/general/obus-user-deactivate">
             <input type="hidden" name="username" value="<%= filters?.username || '' %>" />
 
-            <div class="table-head">
-              <h2>Kullanıcı Listesi</h2>
-              <div class="table-actions">
-                <span class="pill">Toplam: <%= report.totalCount %></span>
-                <span class="pill">Cluster: <%= report.clusterCount || 0 %></span>
-                <% if (report.items && report.items.length > 0) { %>
-                  <label class="obus-user-deactivate-select-all">
-                    <input type="checkbox" data-obus-user-select-all="1" checked />
+              <div class="table-head">
+                <h2>Kullanıcı Listesi</h2>
+                <div class="table-actions">
+                  <span class="pill">Toplam: <%= report.totalCount %></span>
+                  <span class="pill">Cluster: <%= report.clusterCount || 0 %></span>
+                  <span class="pill" data-obus-live-progress="1">İşlenen: 0/<%= report.totalCount %></span>
+                  <span class="pill success" data-obus-live-success="1">Başarılı: 0</span>
+                  <span class="pill muted" data-obus-live-failure="1">Hatalı: 0</span>
+                  <% if (report.items && report.items.length > 0) { %>
+                    <label class="obus-user-deactivate-select-all">
+                      <input type="checkbox" data-obus-user-select-all="1" checked />
                     <span>Hepsi</span>
                   </label>
                 <% } %>
@@ -91,11 +94,19 @@
                       <th>partner-id</th>
                       <th>username</th>
                       <th>code</th>
+                      <th>Durum</th>
                     </tr>
                   </thead>
                   <tbody>
                     <% report.items.forEach((item) => { %>
-                      <tr>
+                      <tr
+                        data-obus-user-row-key="<%= item.value %>"
+                        data-obus-user-row-source="<%= item.source || '' %>"
+                        data-obus-user-row-id="<%= item.id || '' %>"
+                        data-obus-user-row-partner-id="<%= item['partner-id'] || '' %>"
+                        data-obus-user-row-username="<%= item.username || '' %>"
+                        data-obus-user-row-code="<%= item.code || '' %>"
+                      >
                         <td class="obus-user-deactivate-checkbox-cell">
                           <input type="checkbox" data-obus-user-item="1" name="selectedUsers" value="<%= item.value %>" checked />
                         </td>
@@ -103,6 +114,7 @@
                         <td><%= item["partner-id"] %></td>
                         <td><%= item.username %></td>
                         <td><%= item.code %></td>
+                        <td class="obus-live-status pending" data-obus-user-status-cell="1">Bekliyor</td>
                       </tr>
                     <% }) %>
                   </tbody>
@@ -116,6 +128,7 @@
               <div class="obus-user-deactivate-loading-message obus-user-deactivate-delete-loading-message" hidden>
                 Seçili kullanıcılar pasife alınıyor...
               </div>
+              <div class="inline-alert obus-live-message" data-obus-user-deactivate-live-message="1" hidden></div>
             <% } %>
           </form>
 

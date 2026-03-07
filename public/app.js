@@ -893,6 +893,17 @@
     const selectedCompaniesInput = form.querySelector("#obus-user-create-selected-companies");
     const loadingMessage = form.querySelector(".obus-user-create-loading-message");
     const submitBtn = form.querySelector(".obus-user-create-actions button[type='submit']");
+    const liveMessage = form.querySelector("[data-obus-user-create-live-message='1']");
+    const liveResultsSection = document.querySelector("[data-obus-user-create-live-results='1']");
+    const liveBody = liveResultsSection?.querySelector("[data-obus-user-create-live-body='1']");
+    const liveProgress = liveResultsSection?.querySelector("[data-obus-create-live-progress='1']");
+    const liveSuccess = liveResultsSection?.querySelector("[data-obus-create-live-success='1']");
+    const liveFailure = liveResultsSection?.querySelector("[data-obus-create-live-failure='1']");
+    const fullNameInput = form.querySelector("input[name='fullName']");
+    const usernameInput = form.querySelector("input[name='username']");
+    const passwordInput = form.querySelector("input[name='password']");
+    const bulkInput = form.querySelector("input[name='bulk']");
+    const liveRowByKey = new Map();
     let typeAheadText = "";
     let typeAheadTimerId = null;
 
@@ -903,6 +914,98 @@
         return JSON.parse(text);
       } catch (err) {
         return fallback;
+      }
+    };
+    const wait = (ms) =>
+      new Promise((resolve) => {
+        window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      });
+    const setLiveMessage = (text = "", kind = "") => {
+      if (!liveMessage) return;
+      liveMessage.textContent = String(text || "").trim();
+      liveMessage.hidden = !liveMessage.textContent;
+      liveMessage.className = `obus-live-message ${kind === "success" ? "inline-success" : "inline-alert"}`.trim();
+    };
+    const setLiveCounters = ({ processed = 0, total = 0, success = 0, failure = 0 } = {}) => {
+      if (liveProgress) {
+        liveProgress.textContent = `İşlenen: ${processed}/${total}`;
+      }
+      if (liveSuccess) {
+        liveSuccess.textContent = `Başarılı: ${success}`;
+      }
+      if (liveFailure) {
+        liveFailure.textContent = `Hatalı: ${failure}`;
+      }
+    };
+    const setCreateRowStatus = (row, text, kind) => {
+      const cell = row?.querySelector("[data-obus-create-status='1']");
+      if (!cell) return;
+      cell.textContent = String(text || "").trim() || "-";
+      cell.className = `obus-live-status ${kind || "pending"}`;
+    };
+    const renderCreateLiveRows = (items) => {
+      liveRowByKey.clear();
+      if (!liveBody) return;
+      liveBody.innerHTML = "";
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const key = String(item?.key || "").trim();
+        const label = String(item?.label || key || "Firma").trim();
+        if (!key) return;
+        const row = document.createElement("tr");
+        row.setAttribute("data-obus-create-row-key", key);
+        const labelCell = document.createElement("td");
+        labelCell.textContent = label;
+        const statusCell = document.createElement("td");
+        statusCell.setAttribute("data-obus-create-status", "1");
+        statusCell.className = "obus-live-status pending";
+        statusCell.textContent = "Sırada";
+        row.appendChild(labelCell);
+        row.appendChild(statusCell);
+        liveBody.appendChild(row);
+        liveRowByKey.set(key, row);
+      });
+      if (liveResultsSection) {
+        liveResultsSection.hidden = liveRowByKey.size === 0;
+      }
+    };
+    const applyCreateEventToRow = (eventItem) => {
+      const key = String(eventItem?.key || "").trim();
+      const row = liveRowByKey.get(key);
+      if (!row) return;
+      if (eventItem?.ok === true) {
+        setCreateRowStatus(row, eventItem.message || "Kullanıcı oluşturuldu", "success");
+      } else {
+        setCreateRowStatus(row, eventItem.error || "İşlem başarısız", "failure");
+      }
+    };
+    const pollLiveJob = async (jobId, onEvent) => {
+      let cursor = 0;
+      while (true) {
+        if (!document.body.contains(form)) {
+          throw new Error("Sayfa değiştiği için canlı takip durduruldu.");
+        }
+        const response = await fetch(`/api/obus-live/${encodeURIComponent(jobId)}?cursor=${cursor}`, {
+          headers: { Accept: "application/json" }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Canlı işlem durumu okunamadı"));
+        }
+
+        const events = Array.isArray(data.events) ? data.events : [];
+        events.forEach((eventItem) => {
+          if (typeof onEvent === "function") onEvent(eventItem);
+        });
+        cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
+        setLiveCounters({
+          processed: Number(data.processedCount || 0),
+          total: Number(data.totalCount || 0),
+          success: Number(data.successCount || 0),
+          failure: Number(data.failureCount || 0)
+        });
+
+        if (data.done) return data;
+        await wait(450);
       }
     };
 
@@ -1102,11 +1205,72 @@
       submitBtn.disabled = false;
       submitBtn.textContent = defaultLabel;
       if (loadingMessage) loadingMessage.hidden = true;
-      form.addEventListener("submit", () => {
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (form.dataset.liveSubmitting === "1") return;
+        form.dataset.liveSubmitting = "1";
+        setLiveMessage("", "");
+        syncSelectedCompanies();
+
+        const selectedValues = readSelectedCompanyValues();
+        if (selectedValues.length === 0) {
+          setLiveMessage("En az bir firma seçmelisiniz.", "error");
+          form.dataset.liveSubmitting = "0";
+          return;
+        }
+
         submitBtn.disabled = true;
         submitBtn.textContent = "Oluşturuluyor...";
         form.classList.add("is-loading");
         if (loadingMessage) loadingMessage.hidden = false;
+
+        try {
+          const startResponse = await fetch("/api/obus-user-create/live/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            body: JSON.stringify({
+              selectedCompanies: selectedValues,
+              fullName: String(fullNameInput?.value || "").trim(),
+              username: String(usernameInput?.value || "").trim(),
+              password: String(passwordInput?.value || ""),
+              bulk: String(bulkInput?.value || "0").trim()
+            })
+          });
+          const startData = await parseJsonResponse(startResponse);
+          if (!startResponse.ok || !startData?.ok) {
+            throw new Error(getApiErrorMessage(startResponse, startData, "Kullanıcı oluşturma başlatılamadı"));
+          }
+
+          const items = Array.isArray(startData.items) ? startData.items : [];
+          renderCreateLiveRows(items);
+          setLiveCounters({
+            processed: 0,
+            total: Number(startData.totalCount || items.length || 0),
+            success: 0,
+            failure: 0
+          });
+
+          const finalState = await pollLiveJob(startData.jobId, applyCreateEventToRow);
+          if (finalState?.error) {
+            setLiveMessage(finalState.error, "error");
+          } else if (Number(finalState?.failureCount || 0) > 0) {
+            setLiveMessage("Canlı işlem tamamlandı. Bazı firmalarda hata oluştu.", "error");
+          } else {
+            setLiveMessage("Canlı işlem tamamlandı. Seçili firmalar için kullanıcılar oluşturuldu.", "success");
+          }
+        } catch (err) {
+          setLiveMessage(err?.message || "Kullanıcı oluşturma başlatılamadı.", "error");
+        } finally {
+          form.dataset.liveSubmitting = "0";
+          submitBtn.disabled = false;
+          submitBtn.textContent = defaultLabel;
+          form.classList.remove("is-loading");
+          if (loadingMessage) loadingMessage.hidden = true;
+        }
       });
     }
 
@@ -1142,6 +1306,78 @@
     const loadingMessage = deleteForm.querySelector(".obus-user-deactivate-delete-loading-message");
     const selectAllCheckbox = deleteForm.querySelector("[data-obus-user-select-all='1']");
     const itemCheckboxes = Array.from(deleteForm.querySelectorAll("[data-obus-user-item='1']"));
+    const liveMessage = deleteForm.querySelector("[data-obus-user-deactivate-live-message='1']");
+    const liveProgress = deleteForm.querySelector("[data-obus-live-progress='1']");
+    const liveSuccess = deleteForm.querySelector("[data-obus-live-success='1']");
+    const liveFailure = deleteForm.querySelector("[data-obus-live-failure='1']");
+    const rowByKey = new Map();
+    const wait = (ms) =>
+      new Promise((resolve) => {
+        window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      });
+    const setLiveMessage = (text = "", kind = "") => {
+      if (!liveMessage) return;
+      liveMessage.textContent = String(text || "").trim();
+      liveMessage.hidden = !liveMessage.textContent;
+      liveMessage.className = `obus-live-message ${kind === "success" ? "inline-success" : "inline-alert"}`.trim();
+    };
+    const setLiveCounters = ({ processed = 0, total = 0, success = 0, failure = 0 } = {}) => {
+      if (liveProgress) {
+        liveProgress.textContent = `İşlenen: ${processed}/${total}`;
+      }
+      if (liveSuccess) {
+        liveSuccess.textContent = `Başarılı: ${success}`;
+      }
+      if (liveFailure) {
+        liveFailure.textContent = `Hatalı: ${failure}`;
+      }
+    };
+    const setDeactivateRowStatus = (row, text, kind) => {
+      const cell = row?.querySelector("[data-obus-user-status-cell='1']");
+      if (!cell) return;
+      cell.textContent = String(text || "").trim() || "-";
+      cell.className = `obus-live-status ${kind || "pending"}`;
+    };
+    const applyDeactivateEventToRow = (eventItem) => {
+      const key = String(eventItem?.key || "").trim();
+      const row = rowByKey.get(key);
+      if (!row) return;
+      if (eventItem?.ok === true) {
+        setDeactivateRowStatus(row, eventItem.message || "Pasife alındı", "success");
+      } else {
+        setDeactivateRowStatus(row, eventItem.error || "İşlem başarısız", "failure");
+      }
+    };
+    const pollLiveJob = async (jobId, onEvent) => {
+      let cursor = 0;
+      while (true) {
+        if (!document.body.contains(deleteForm)) {
+          throw new Error("Sayfa değiştiği için canlı takip durduruldu.");
+        }
+        const response = await fetch(`/api/obus-live/${encodeURIComponent(jobId)}?cursor=${cursor}`, {
+          headers: { Accept: "application/json" }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Canlı işlem durumu okunamadı"));
+        }
+
+        const events = Array.isArray(data.events) ? data.events : [];
+        events.forEach((eventItem) => {
+          if (typeof onEvent === "function") onEvent(eventItem);
+        });
+        cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
+        setLiveCounters({
+          processed: Number(data.processedCount || 0),
+          total: Number(data.totalCount || 0),
+          success: Number(data.successCount || 0),
+          failure: Number(data.failureCount || 0)
+        });
+
+        if (data.done) return data;
+        await wait(450);
+      }
+    };
 
     const syncSelectAll = () => {
       if (!selectAllCheckbox) return;
@@ -1154,6 +1390,16 @@
       const checkedCount = enabledCheckboxes.filter((item) => item.checked).length;
       selectAllCheckbox.checked = checkedCount === enabledCheckboxes.length;
       selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < enabledCheckboxes.length;
+    };
+
+    const loadRows = () => {
+      rowByKey.clear();
+      const rows = Array.from(deleteForm.querySelectorAll("tr[data-obus-user-row-key]"));
+      rows.forEach((row) => {
+        const key = String(row.getAttribute("data-obus-user-row-key") || "").trim();
+        if (!key) return;
+        rowByKey.set(key, row);
+      });
     };
 
     if (selectAllCheckbox) {
@@ -1171,6 +1417,7 @@
         syncSelectAll();
       });
     });
+    loadRows();
     syncSelectAll();
 
     if (submitBtn) {
@@ -1179,11 +1426,107 @@
       submitBtn.disabled = false;
       submitBtn.textContent = defaultLabel;
       if (loadingMessage) loadingMessage.hidden = true;
-      deleteForm.addEventListener("submit", () => {
+
+      deleteForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (deleteForm.dataset.liveSubmitting === "1") return;
+        deleteForm.dataset.liveSubmitting = "1";
+        setLiveMessage("", "");
+        loadRows();
+
+        const selectedCheckboxes = itemCheckboxes.filter((item) => item.checked && !item.disabled);
+        if (selectedCheckboxes.length === 0) {
+          setLiveMessage("En az bir kullanıcı seçmelisiniz.", "error");
+          deleteForm.dataset.liveSubmitting = "0";
+          return;
+        }
+
+        const selectedItems = selectedCheckboxes
+          .map((checkbox) => {
+            const key = String(checkbox.value || "").trim();
+            const row = rowByKey.get(key);
+            if (!row) return null;
+            return {
+              value: key,
+              source: String(row.getAttribute("data-obus-user-row-source") || "").trim(),
+              id: String(row.getAttribute("data-obus-user-row-id") || "").trim(),
+              "partner-id": String(row.getAttribute("data-obus-user-row-partner-id") || "").trim(),
+              username: String(row.getAttribute("data-obus-user-row-username") || "").trim(),
+              code: String(row.getAttribute("data-obus-user-row-code") || "").trim()
+            };
+          })
+          .filter(Boolean);
+
+        if (selectedItems.length === 0) {
+          setLiveMessage("Seçili kullanıcı satırları okunamadı.", "error");
+          deleteForm.dataset.liveSubmitting = "0";
+          return;
+        }
+
+        selectedItems.forEach((item) => {
+          const row = rowByKey.get(String(item.value || "").trim());
+          if (row) setDeactivateRowStatus(row, "İşleniyor...", "progress");
+        });
+
         submitBtn.disabled = true;
         submitBtn.textContent = "Pasife Alınıyor...";
         deleteForm.classList.add("is-loading");
         if (loadingMessage) loadingMessage.hidden = false;
+        const prevDisabled = itemCheckboxes.map((checkbox) => checkbox.disabled);
+        itemCheckboxes.forEach((checkbox) => {
+          checkbox.disabled = true;
+        });
+        if (selectAllCheckbox) {
+          selectAllCheckbox.disabled = true;
+        }
+
+        try {
+          const startResponse = await fetch("/api/obus-user-deactivate/live/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            body: JSON.stringify({
+              selectedItems
+            })
+          });
+          const startData = await parseJsonResponse(startResponse);
+          if (!startResponse.ok || !startData?.ok) {
+            throw new Error(getApiErrorMessage(startResponse, startData, "Pasife alma işlemi başlatılamadı"));
+          }
+
+          setLiveCounters({
+            processed: 0,
+            total: Number(startData.totalCount || selectedItems.length || 0),
+            success: 0,
+            failure: 0
+          });
+
+          const finalState = await pollLiveJob(startData.jobId, applyDeactivateEventToRow);
+          if (finalState?.error) {
+            setLiveMessage(finalState.error, "error");
+          } else if (Number(finalState?.failureCount || 0) > 0) {
+            setLiveMessage("Canlı pasife alma tamamlandı. Bazı kayıtlarda hata oluştu.", "error");
+          } else {
+            setLiveMessage("Canlı pasife alma tamamlandı. Seçili kullanıcılar pasife alındı.", "success");
+          }
+        } catch (err) {
+          setLiveMessage(err?.message || "Pasife alma işlemi başlatılamadı.", "error");
+        } finally {
+          deleteForm.dataset.liveSubmitting = "0";
+          submitBtn.disabled = false;
+          submitBtn.textContent = defaultLabel;
+          deleteForm.classList.remove("is-loading");
+          if (loadingMessage) loadingMessage.hidden = true;
+          itemCheckboxes.forEach((checkbox, index) => {
+            checkbox.disabled = Boolean(prevDisabled[index]);
+          });
+          if (selectAllCheckbox) {
+            selectAllCheckbox.disabled = false;
+          }
+          syncSelectAll();
+        }
       });
     }
   };

@@ -110,7 +110,30 @@
           </div>
 
           <div class="obus-user-create-loading-message" hidden>Kullanıcı oluşturma isteği hazırlanıyor...</div>
+          <div class="inline-alert obus-live-message" data-obus-user-create-live-message="1" hidden></div>
         </form>
+      </section>
+
+      <section class="table-card panel-card obus-user-create-live-results" data-obus-user-create-live-results="1" hidden>
+        <div class="table-head">
+          <h2>Canlı İşlem Durumu</h2>
+          <div class="table-actions">
+            <span class="pill" data-obus-create-live-progress="1">İşlenen: 0/0</span>
+            <span class="pill success" data-obus-create-live-success="1">Başarılı: 0</span>
+            <span class="pill muted" data-obus-create-live-failure="1">Hatalı: 0</span>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="partners-raw-table obus-user-create-live-table">
+            <thead>
+              <tr>
+                <th>Firma</th>
+                <th>Durum</th>
+              </tr>
+            </thead>
+            <tbody data-obus-user-create-live-body="1"></tbody>
+          </table>
+        </div>
       </section>
 
       <% if (report && report.requested) { %>

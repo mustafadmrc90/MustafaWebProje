@@ -2568,6 +2568,41 @@ button.ghost {
   color: #a24a4a;
 }
 
+.obus-live-message {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.obus-user-create-live-results {
+  margin-bottom: 12px;
+}
+
+.obus-user-create-live-table {
+  min-width: 560px;
+}
+
+.obus-live-status {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.obus-live-status.pending {
+  color: #4f6176;
+}
+
+.obus-live-status.progress {
+  color: #0f6bdc;
+}
+
+.obus-live-status.success {
+  color: #246f45;
+}
+
+.obus-live-status.failure {
+  color: #a24a4a;
+}
+
 .obus-user-deactivate-section {
   margin-bottom: 12px;
 }
