@@ -7512,12 +7512,9 @@ function buildObusUserDeactivateItemLabel(item) {
 
 function normalizeObusDeleteUserIdValue(rawValue) {
   const text = String(rawValue || "").trim();
-  if (!text) return null;
-  if (/^-?\d+$/.test(text)) {
-    const parsed = Number.parseInt(text, 10);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return text;
+  if (!/^-?\d+$/.test(text)) return null;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, token, userId }) {
@@ -7527,7 +7524,7 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
   }
 
   const normalizedUserId = normalizeObusDeleteUserIdValue(userId);
-  if (normalizedUserId === null || normalizedUserId === undefined || String(normalizedUserId).trim() === "") {
+  if (!Number.isInteger(normalizedUserId)) {
     return { ok: false, error: "Silinecek kullanıcı id bilgisi boş." };
   }
 
@@ -7539,7 +7536,7 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
 
   try {
     const requestBodyObject = {
-      data: normalizedUserId,
+      data: [normalizedUserId],
       "device-session": {
         "session-id": String(sessionId || "").trim(),
         "device-id": String(deviceId || "").trim()
