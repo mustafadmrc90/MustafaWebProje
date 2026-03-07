@@ -7147,12 +7147,11 @@ function buildObusUserDeactivateScanTargets(cacheRows) {
   const seen = new Set();
 
   rows.forEach((row) => {
-    const cluster = extractClusterLabel(String(row?.source || row?.url || "").trim());
+    const cluster = extractClusterLabel(String(row?.source || "").trim());
     const partnerCode = String(row?.code || "").trim();
     const partnerId = String(row?.id || "").trim();
-    const fallbackSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
-    const sourceUrl = normalizeTargetUrl(String(row?.url || "").trim()) || fallbackSourceUrl || "";
-    const endpointUrl = buildMembershipGetUsersWithoutPermissionsUrl(sourceUrl, cluster);
+    const clusterSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
+    const endpointUrl = buildMembershipGetUsersWithoutPermissionsUrl(clusterSourceUrl, cluster);
     const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
     if (!normalizedEndpointUrl || !partnerCode) return;
     const key = `${String(normalizedEndpointUrl || "").toLowerCase()}|||${partnerCode.toLocaleLowerCase("tr")}|||${partnerId}`;
@@ -7175,7 +7174,10 @@ function buildObusUserDeactivateScanTargets(cacheRows) {
   });
 }
 
-function extractObusUsersWithoutPermissionsRows(payload, { usernameFilter = "", clusterLabel = "" } = {}) {
+function extractObusUsersWithoutPermissionsRows(
+  payload,
+  { usernameFilter = "", clusterLabel = "", fallbackPartnerId = "" } = {}
+) {
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
   const collected = [];
   const visited = new Set();
@@ -7184,9 +7186,10 @@ function extractObusUsersWithoutPermissionsRows(payload, { usernameFilter = "", 
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
 
     const id = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["id", "user-id", "user_id", "userid"]));
-    const partnerId = formatPartnerCellValue(
+    const partnerIdRaw = formatPartnerCellValue(
       readPartnerRawValueByAliases(row, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
     );
+    const partnerId = String(partnerIdRaw || "").trim() || String(fallbackPartnerId || "").trim();
     const username = formatPartnerCellValue(
       readPartnerRawValueByAliases(row, [
         "username",
@@ -7312,7 +7315,8 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
   };
   const requestCandidates = [
     { ...basePayload, data: { username: String(usernameFilter || "").trim() } },
-    { ...basePayload, data: String(usernameFilter || "").trim() }
+    { ...basePayload, data: String(usernameFilter || "").trim() },
+    { ...basePayload, data: null }
   ];
   const requestTimeoutMs = toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000);
 
@@ -7345,11 +7349,21 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         continue;
       }
 
+      const hasStatusField =
+        parsed &&
+        typeof parsed === "object" &&
+        ("status" in parsed || "success" in parsed || "status-code" in parsed);
+      if (hasStatusField && !isSuccessStatusPayload(parsed)) {
+        lastError = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
+        continue;
+      }
+
       return {
         cluster,
         rows: extractObusUsersWithoutPermissionsRows(parsed, {
           usernameFilter,
-          clusterLabel: cluster
+          clusterLabel: cluster,
+          fallbackPartnerId: partnerId
         }),
         error: null
       };
@@ -7441,7 +7455,10 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
     errorParts.push(`SQL eşleme uyarısı: ${cacheResult.error}`);
   }
   if (errors.length > 0) {
-    errorParts.push(`${errors.length}/${scanTargets.length} firma alınamadı.`);
+    const sample = errors.slice(0, 2).join(" | ");
+    errorParts.push(
+      `${errors.length}/${scanTargets.length} firma alınamadı.${sample ? ` Örnek: ${sample}` : ""}`
+    );
   }
   if (errorParts.length === 0 && items.length === 0) {
     errorParts.push("Eşleşen kullanıcı bulunamadı.");
