@@ -7358,29 +7358,42 @@ function buildPartnerCodeLookupFromAllCompaniesRows(rows) {
 
 function buildObusUserDeactivateScanTargets(cacheRows) {
   const rows = Array.isArray(cacheRows) ? cacheRows : [];
-  const targets = [];
-  const seen = new Set();
+  const byKey = new Map();
 
   rows.forEach((row) => {
     const cluster = extractClusterLabel(String(row?.source || "").trim());
     const partnerCode = String(row?.code || "").trim();
     const partnerId = String(row?.id || "").trim();
+    const obusMerkezSubeId = String(
+      row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id ?? row?.branchId ?? ""
+    ).trim();
     const clusterSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
     const endpointUrl = buildMembershipGetUsersWithoutPermissionsUrl(clusterSourceUrl, cluster);
     const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
     if (!normalizedEndpointUrl || !partnerCode) return;
     const key = `${String(normalizedEndpointUrl || "").toLowerCase()}|||${partnerCode.toLocaleLowerCase("tr")}|||${partnerId}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    targets.push({
-      cluster,
-      endpointUrl: normalizedEndpointUrl,
-      partnerCode,
-      partnerId
-    });
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        cluster,
+        endpointUrl: normalizedEndpointUrl,
+        partnerCode,
+        partnerId,
+        obusMerkezSubeId
+      });
+      return;
+    }
+
+    const current = byKey.get(key);
+    if (!current) return;
+    if (!current.obusMerkezSubeId && obusMerkezSubeId) {
+      byKey.set(key, {
+        ...current,
+        obusMerkezSubeId
+      });
+    }
   });
 
-  return targets.sort((a, b) => {
+  return Array.from(byKey.values()).sort((a, b) => {
     const byCluster = String(a.cluster || "").localeCompare(String(b.cluster || ""), "tr");
     if (byCluster !== 0) return byCluster;
     const byCode = String(a.partnerCode || "").localeCompare(String(b.partnerCode || ""), "tr");
@@ -7498,6 +7511,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
   const endpointUrl = normalizeTargetUrl(target?.endpointUrl || "");
   const partnerCode = String(target?.partnerCode || "").trim();
   const partnerId = String(target?.partnerId || "").trim();
+  const loginBranchId = String(target?.obusMerkezSubeId || "").trim();
   const companyRef = `${partnerCode || "code?"}${partnerId ? ` - ${partnerId}` : ""}`;
   if (!endpointUrl) {
     return {
@@ -7522,6 +7536,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
     password: OBUS_USER_CREATE_LOGIN_PASSWORD,
     fallbackBranchId: "",
+    loginBranchId,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
     authorization: OBUS_USER_CREATE_API_AUTH,
     allowEmptyPartnerCode: false
@@ -7777,6 +7792,7 @@ function buildObusUserDeactivateClusterContextMap(cacheRows) {
   targets.forEach((target) => {
     const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
     const partnerCode = String(target?.partnerCode || "").trim();
+    const loginBranchId = String(target?.obusMerkezSubeId || "").trim();
     const deleteEndpointUrl = normalizeTargetUrl(
       buildMembershipDeleteUserUrl(target?.endpointUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL, cluster)
     );
@@ -7786,7 +7802,8 @@ function buildObusUserDeactivateClusterContextMap(cacheRows) {
       map.set(key, {
         cluster,
         deleteEndpointUrl,
-        partnerCode
+        partnerCode,
+        loginBranchId
       });
     }
   });
@@ -7995,6 +8012,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
       const partnerCode =
         String(contextFromMap?.partnerCode || "").trim() ||
         String(contextGroup?.partnerCode || "").trim();
+      const loginBranchId = String(contextFromMap?.loginBranchId || "").trim();
 
       if (!deleteEndpointUrl) {
         clusterItems.forEach((item) => {
@@ -8013,6 +8031,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
         username: OBUS_USER_CREATE_LOGIN_USERNAME,
         password: OBUS_USER_CREATE_LOGIN_PASSWORD,
         fallbackBranchId: "",
+        loginBranchId,
         timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
         authorization: OBUS_USER_CREATE_API_AUTH,
         allowEmptyPartnerCode: false
