@@ -1959,6 +1959,63 @@ function extractTokenFromRawText(raw) {
   return "";
 }
 
+function truncateObusDebugText(value, maxLength = 220) {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function buildUserLoginTokenMissingDetail({
+  loginUrl,
+  sessionId,
+  deviceId,
+  responseStatus,
+  parsedBody,
+  responseHeaders,
+  rawBody
+}) {
+  const statusText = Number.isFinite(Number(responseStatus)) ? `HTTP ${Number(responseStatus)}` : "HTTP bilinmiyor";
+  const headerKeys = Object.keys(responseHeaders && typeof responseHeaders === "object" ? responseHeaders : {})
+    .filter((key) => /token|auth|cookie/i.test(String(key || "")))
+    .sort((a, b) => String(a).localeCompare(String(b), "tr"));
+  const rootKeys =
+    parsedBody && typeof parsedBody === "object" && !Array.isArray(parsedBody)
+      ? Object.keys(parsedBody).slice(0, 12)
+      : [];
+  const rawPreview = truncateObusDebugText(rawBody, 260);
+  const normalizedUrl = String(loginUrl || "").trim();
+  const parts = [
+    "Adım 1 tamam: Session bilgisi alındı.",
+    `session-id: ${sessionId ? "var" : "yok"}, device-id: ${deviceId ? "var" : "yok"}.`,
+    `Adım 2 tamam: Membership UserLogin yanıtı alındı (${statusText}).`,
+    "Adım 3 başarısız: token çıkarılamadı.",
+    "Kontrol edilen kaynaklar: payload token alanları, nested token alanları, response header/cookie ve ham yanıt metni."
+  ];
+
+  if (headerKeys.length > 0) {
+    parts.push(`Token ile ilişkili header anahtarları: ${headerKeys.join(", ")}.`);
+  } else {
+    parts.push("Token ile ilişkili header anahtarı bulunamadı.");
+  }
+
+  if (rootKeys.length > 0) {
+    parts.push(`Yanıt üst seviye alanları: ${rootKeys.join(", ")}.`);
+  }
+
+  if (rawPreview) {
+    parts.push(`Yanıt önizleme: ${rawPreview}.`);
+  }
+
+  if (normalizedUrl) {
+    parts.push(`UserLogin URL: ${normalizedUrl}.`);
+  }
+
+  return parts.join(" ");
+}
+
 function extractPartnerCodeFromPayload(payload) {
   if (!payload || typeof payload !== "object") return "";
 
@@ -4644,6 +4701,7 @@ function pushObusLiveJobEvent(job, event) {
     ok,
     message: String(normalizedEvent.message || "").trim(),
     error: String(normalizedEvent.error || "").trim(),
+    errorDetail: String(normalizedEvent.errorDetail || "").trim(),
     updatedAt: now
   };
 
@@ -6854,18 +6912,21 @@ async function fetchAuthorizedLinesLoginInfo({
   fallbackBranchId,
   timeoutMs = 90000,
   authorization = PARTNERS_API_AUTH,
-  allowEmptyPartnerCode = false
+  allowEmptyPartnerCode = false,
+  loginBranchId = ""
 }) {
   const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
   if (loginBaseUrls.length === 0) {
     return {
       ok: false,
       error: "Hedef URL geçersiz.",
+      errorDetail: "",
       sessionId: "",
       deviceId: "",
       branchId: "",
       token: "",
       obusMerkezBranchKey: "",
+      tokenMissingDetail: "",
       rawLoginBody: ""
     };
   }
@@ -6873,16 +6934,19 @@ async function fetchAuthorizedLinesLoginInfo({
   const normalizedPartnerCode = String(partnerCode || "").trim();
   const normalizedUsername = String(username || "").trim();
   const normalizedPassword = String(password || "");
+  const normalizedLoginBranchId = String(loginBranchId || "").trim();
 
   if ((!normalizedPartnerCode && !allowEmptyPartnerCode) || !normalizedUsername || !normalizedPassword) {
     return {
       ok: false,
       error: "Firma (partner-code), kullanıcı adı ve şifre zorunludur.",
+      errorDetail: "",
       sessionId: "",
       deviceId: "",
       branchId: "",
       token: "",
       obusMerkezBranchKey: "",
+      tokenMissingDetail: "",
       rawLoginBody: ""
     };
   }
@@ -6894,6 +6958,7 @@ async function fetchAuthorizedLinesLoginInfo({
   );
   try {
     let lastError = "UserLogin çağrısı başarısız.";
+    let lastErrorDetail = "";
     let lastSessionId = "";
     let lastDeviceId = "";
     let lastLoginUrl = "";
@@ -6904,6 +6969,7 @@ async function fetchAuthorizedLinesLoginInfo({
       const loginUrl = buildMembershipUserLoginUrl(baseUrl);
       if (!loginUrl) {
         lastError = "Membership UserLogin URL oluşturulamadı.";
+        lastErrorDetail = "";
         continue;
       }
       lastLoginUrl = loginUrl;
@@ -6911,6 +6977,7 @@ async function fetchAuthorizedLinesLoginInfo({
       const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
       if (sessionResult.error) {
         lastError = `${sessionResult.error} (URL: ${loginUrl})`;
+        lastErrorDetail = "";
         continue;
       }
 
@@ -6922,7 +6989,8 @@ async function fetchAuthorizedLinesLoginInfo({
           username: normalizedUsername,
           password: normalizedPassword,
           "remember-me": 0,
-          "partner-code": normalizedPartnerCode
+          "partner-code": normalizedPartnerCode,
+          ...(normalizedLoginBranchId ? { "branch-id": normalizedLoginBranchId } : {})
         },
         "device-session": {
           "session-id": sessionResult.sessionId,
@@ -6959,6 +7027,7 @@ async function fetchAuthorizedLinesLoginInfo({
 
       if (!response.ok) {
         lastError = `Membership UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
+        lastErrorDetail = "";
         continue;
       }
 
@@ -6975,20 +7044,32 @@ async function fetchAuthorizedLinesLoginInfo({
         "";
       const obusMerkezBranchKey = String(extractObusMerkezBranchKeyFromUserLoginPayload(parsed) || "").trim();
       if (!String(tokenValue || "").trim()) {
+        const tokenMissingDetail = buildUserLoginTokenMissingDetail({
+          loginUrl,
+          sessionId: sessionResult.sessionId,
+          deviceId: sessionResult.deviceId,
+          responseStatus: response.status,
+          parsedBody: parsed,
+          responseHeaders,
+          rawBody: raw
+        });
         if (obusMerkezBranchKey) {
           return {
             ok: true,
             error: null,
+            errorDetail: "",
             sessionId: sessionResult.sessionId,
             deviceId: sessionResult.deviceId,
             branchId: obusMerkezBranchKey,
             token: "",
             obusMerkezBranchKey,
             loginUrl,
+            tokenMissingDetail,
             rawLoginBody: raw
           };
         }
         lastError = `Membership UserLogin token bulunamadı. (URL: ${loginUrl})`;
+        lastErrorDetail = tokenMissingDetail;
         continue;
       }
       const branchId =
@@ -7004,12 +7085,14 @@ async function fetchAuthorizedLinesLoginInfo({
       return {
         ok: true,
         error: null,
+        errorDetail: "",
         sessionId: sessionResult.sessionId,
         deviceId: sessionResult.deviceId,
         branchId: String(branchId || "").trim(),
         token: String(tokenValue || "").trim(),
         obusMerkezBranchKey,
         loginUrl,
+        tokenMissingDetail: "",
         rawLoginBody: raw
       };
     }
@@ -7017,24 +7100,28 @@ async function fetchAuthorizedLinesLoginInfo({
     return {
       ok: false,
       error: lastError,
+      errorDetail: lastErrorDetail,
       sessionId: lastSessionId,
       deviceId: lastDeviceId,
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
       obusMerkezBranchKey: "",
       loginUrl: lastLoginUrl,
+      tokenMissingDetail: "",
       rawLoginBody: lastRawLoginBody
     };
   } catch (err) {
     return {
       ok: false,
       error: err?.message || "UserLogin isteği gönderilemedi.",
+      errorDetail: "",
       sessionId: "",
       deviceId: "",
       branchId: String(fallbackBranchId || "").trim(),
       token: "",
       obusMerkezBranchKey: "",
       loginUrl: "",
+      tokenMissingDetail: "",
       rawLoginBody: ""
     };
   } finally {
@@ -8031,6 +8118,15 @@ function normalizeObusPartnerIdValue(rawValue) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeObusCreateUserErrorSummary(errorText) {
+  const text = String(errorText || "").trim();
+  if (!text) return "Bilinmeyen hata";
+  if (/token bulunamad/i.test(text)) {
+    return "UserLogin token bulunamadı.";
+  }
+  return text;
+}
+
 function formatObusRequestDate(date = new Date()) {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -8232,24 +8328,34 @@ async function createObusUserForCompany({ company, formValues }) {
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
     password: OBUS_USER_CREATE_LOGIN_PASSWORD,
     fallbackBranchId: branchRaw,
+    loginBranchId: String(branchIdValue ?? "").trim(),
     timeoutMs: OBUS_USER_CREATE_TIMEOUT_MS,
     authorization: OBUS_USER_CREATE_API_AUTH
   });
 
   if (!loginResult.ok) {
+    const loginError = String(loginResult.error || "UserLogin başarısız.").trim();
+    const errorSummary = normalizeObusCreateUserErrorSummary(loginError);
+    const errorDetail = String(loginResult.errorDetail || "").trim() || (errorSummary !== loginError ? loginError : "");
     return {
       ok: false,
       label: companyLabel,
-      error: loginResult.error || "UserLogin başarısız."
+      error: errorSummary || "UserLogin başarısız.",
+      errorDetail
     };
   }
 
   const token = String(loginResult.token || "").trim();
   if (!token) {
+    const tokenDetail =
+      String(loginResult.tokenMissingDetail || "").trim() ||
+      String(loginResult.errorDetail || "").trim() ||
+      (String(loginResult.rawLoginBody || "").trim() ? `UserLogin ham yanıtı: ${truncateObusDebugText(loginResult.rawLoginBody, 260)}` : "");
     return {
       ok: false,
       label: companyLabel,
-      error: "UserLogin token bulunamadı."
+      error: "UserLogin token bulunamadı.",
+      errorDetail: tokenDetail
     };
   }
 
@@ -8360,12 +8466,15 @@ async function createObusUsersByCompanies({ companies, formValues, onItemResult 
       }
       const normalized = result && typeof result === "object" ? result : {};
       const isOk = normalized.ok === true;
+      const failureError = String(normalized.error || "Bilinmeyen hata").trim();
+      const failureErrorDetail = String(normalized.errorDetail || "").trim();
       const payload = {
         key: String(company?.value || "").trim(),
         label: String(normalized.label || companyLabel).trim() || companyLabel,
         ok: isOk,
         message: isOk ? String(normalized.message || "Kullanıcı oluşturuldu.").trim() : "",
-        error: isOk ? "" : String(normalized.error || "Bilinmeyen hata").trim()
+        error: isOk ? "" : failureError,
+        errorDetail: isOk ? "" : failureErrorDetail
       };
       if (notifyItemResult) notifyItemResult(payload);
       return payload;
@@ -8382,9 +8491,12 @@ async function createObusUsersByCompanies({ companies, formValues, onItemResult 
         message: String(normalized.message || "Kullanıcı oluşturuldu.").trim()
       });
     } else {
+      const failureError = String(normalized.error || "Bilinmeyen hata").trim();
+      const failureErrorDetail = String(normalized.errorDetail || "").trim();
       failureItems.push({
         label: String(normalized.label || fallbackLabel).trim(),
-        error: String(normalized.error || "Bilinmeyen hata").trim()
+        error: failureError,
+        errorDetail: failureErrorDetail
       });
     }
   });
@@ -8694,7 +8806,8 @@ app.post(
                 label: String(itemResult?.label || "").trim(),
                 ok: itemResult?.ok === true,
                 message: String(itemResult?.message || "").trim(),
-                error: String(itemResult?.error || "").trim()
+                error: String(itemResult?.error || "").trim(),
+                errorDetail: String(itemResult?.errorDetail || "").trim()
               });
             }
           });
@@ -8765,7 +8878,8 @@ app.post(
                 label: String(itemResult?.label || "").trim(),
                 ok: itemResult?.ok === true,
                 message: String(itemResult?.message || "").trim(),
-                error: String(itemResult?.error || "").trim()
+                error: String(itemResult?.error || "").trim(),
+                errorDetail: String(itemResult?.errorDetail || "").trim()
               });
             }
           });

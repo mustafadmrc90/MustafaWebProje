@@ -165,7 +165,9 @@
               <% report.failureItems.forEach((item) => { %>
                 <li>
                   <strong><%= item.label %></strong>
-                  <span><%= item.error %></span>
+                  <span
+                    <% if (item.errorDetail) { %>class="obus-detail-hint" title="<%= item.errorDetail %>"<% } %>
+                  ><%= item.error %></span>
                 </li>
               <% }) %>
             </ul>

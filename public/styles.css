@@ -2568,6 +2568,12 @@ button.ghost {
   color: #a24a4a;
 }
 
+.obus-detail-hint {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 .obus-live-message {
   margin-top: 4px;
   margin-bottom: 0;
@@ -2601,6 +2607,12 @@ button.ghost {
 
 .obus-live-status.failure {
   color: #a24a4a;
+}
+
+.obus-live-status.has-detail {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
 }
 
 .obus-user-deactivate-section {

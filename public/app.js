@@ -937,11 +937,19 @@
         liveFailure.textContent = `Hatalı: ${failure}`;
       }
     };
-    const setCreateRowStatus = (row, text, kind) => {
+    const setCreateRowStatus = (row, text, kind, detail = "") => {
       const cell = row?.querySelector("[data-obus-create-status='1']");
       if (!cell) return;
       cell.textContent = String(text || "").trim() || "-";
       cell.className = `obus-live-status ${kind || "pending"}`;
+      const tooltip = String(detail || "").trim();
+      if (tooltip) {
+        cell.setAttribute("title", tooltip);
+        cell.classList.add("has-detail");
+      } else {
+        cell.removeAttribute("title");
+        cell.classList.remove("has-detail");
+      }
     };
     const renderCreateLiveRows = (items) => {
       liveRowByKey.clear();
@@ -975,7 +983,12 @@
       if (eventItem?.ok === true) {
         setCreateRowStatus(row, eventItem.message || "Kullanıcı oluşturuldu", "success");
       } else {
-        setCreateRowStatus(row, eventItem.error || "İşlem başarısız", "failure");
+        setCreateRowStatus(
+          row,
+          eventItem.error || "İşlem başarısız",
+          "failure",
+          eventItem.errorDetail || ""
+        );
       }
     };
     const pollLiveJob = async (jobId, onEvent) => {
