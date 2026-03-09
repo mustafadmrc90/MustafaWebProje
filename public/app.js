@@ -903,6 +903,8 @@
     const usernameInput = form.querySelector("input[name='username']");
     const passwordInput = form.querySelector("input[name='password']");
     const bulkInput = form.querySelector("input[name='bulk']");
+    const liveStartUrl =
+      String(form.getAttribute("data-obus-live-start-url") || "").trim() || "/api/obus-user-create/live/start";
     const liveRowByKey = new Map();
     let typeAheadText = "";
     let typeAheadTimerId = null;
@@ -1239,7 +1241,7 @@
         if (loadingMessage) loadingMessage.hidden = false;
 
         try {
-          const startResponse = await fetch("/api/obus-user-create/live/start", {
+          const startResponse = await fetch(liveStartUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

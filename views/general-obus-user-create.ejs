@@ -45,7 +45,12 @@
           <h2>Kullanıcı Oluşturma Hazırlığı</h2>
         </div>
 
-        <form class="obus-user-create-form" method="post" action="/general/obus-user-create">
+        <form
+          class="obus-user-create-form"
+          method="post"
+          action="<%= formAction || '/general/obus-user-create' %>"
+          data-obus-live-start-url="<%= liveStartApiPath || '/api/obus-user-create/live/start' %>"
+        >
           <input type="hidden" name="bulk" value="<%= bulkMode ? '1' : '0' %>" />
           <input
             type="hidden"

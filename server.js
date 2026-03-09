@@ -214,7 +214,7 @@ const SIDEBAR_MENU_REGISTRY = [
     parentKey: "general",
     route: "/general/authorized-lines-upload",
     routeKey: "authorized-lines-upload",
-    sortOrder: 14,
+    sortOrder: 15,
     iconKey: "authorized-lines-upload"
   },
   {
@@ -228,13 +228,23 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "obus-user-create"
   },
   {
+    key: "obus-user-create-bulk",
+    type: "item",
+    label: "Toplu Obus Kullanıcı Oluştur",
+    parentKey: "general",
+    route: "/general/obus-user-create-bulk",
+    routeKey: "obus-user-create-bulk",
+    sortOrder: 13,
+    iconKey: "obus-user-create"
+  },
+  {
     key: "obus-user-deactivate",
     type: "item",
     label: "Obus Kullanıcı Pasife Al",
     parentKey: "general",
     route: "/general/obus-user-deactivate",
     routeKey: "obus-user-deactivate",
-    sortOrder: 13,
+    sortOrder: 14,
     iconKey: "obus-user-deactivate"
   },
   {
@@ -937,6 +947,7 @@ function ensureCriticalSidebarRows(rows) {
 
   upsertFromRegistry("general", true);
   upsertFromRegistry("obus-user-create");
+  upsertFromRegistry("obus-user-create-bulk");
   upsertFromRegistry("obus-user-deactivate");
 
   return normalizedRows;
@@ -8526,6 +8537,153 @@ async function createObusUsersByCompanies({ companies, formValues, onItemResult 
   };
 }
 
+function buildObusUserCreateScreenConfig({ bulkMode = false } = {}) {
+  const isBulk = bulkMode === true;
+  return {
+    bulkMode: isBulk,
+    activeKey: isBulk ? "obus-user-create-bulk" : "obus-user-create",
+    formAction: isBulk ? "/general/obus-user-create-bulk" : "/general/obus-user-create",
+    liveStartApiPath: isBulk ? "/api/obus-user-create-bulk/live/start" : "/api/obus-user-create/live/start"
+  };
+}
+
+function renderObusUserCreateScreen({ req, res, pageState, report, bulkMode = false }) {
+  const screenConfig = buildObusUserCreateScreenConfig({ bulkMode });
+  return res.render("general-obus-user-create", {
+    user: req.session.user,
+    active: screenConfig.activeKey,
+    bulkMode: screenConfig.bulkMode,
+    formAction: screenConfig.formAction,
+    liveStartApiPath: screenConfig.liveStartApiPath,
+    companies: pageState.companies,
+    partnerError: pageState.partnerError,
+    selectedCompanyValues: pageState.selectedCompanyValues,
+    selectedCompaniesJson: pageState.selectedCompaniesJson,
+    formValues: pageState.formValues,
+    report
+  });
+}
+
+async function buildObusUserCreatePostResult({ body }) {
+  const pageState = await loadObusUserCreatePageState({
+    selectedCompaniesInput: body?.selectedCompanies,
+    formSource: body
+  });
+  const report = buildObusUserCreateReportModel();
+  const selectedSet = new Set(pageState.selectedCompanyValues);
+  const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
+  const hasRequiredFormValues =
+    Boolean(String(pageState.formValues.fullName || "").trim()) &&
+    Boolean(String(pageState.formValues.username || "").trim()) &&
+    Boolean(String(pageState.formValues.password || "").trim());
+
+  if (selectedCompanies.length === 0) {
+    report.error = "En az bir firma seçmelisiniz.";
+  } else if (!hasRequiredFormValues) {
+    report.error = "Ad Soyad, KullanıcıAdı ve Şifre zorunludur.";
+  } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+    report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
+  } else {
+    report.requested = true;
+    report.totalCount = selectedCompanies.length;
+    const createResult = await createObusUsersByCompanies({
+      companies: selectedCompanies,
+      formValues: pageState.formValues
+    });
+    report.successItems = Array.isArray(createResult?.successItems) ? createResult.successItems : [];
+    report.failureItems = Array.isArray(createResult?.failureItems) ? createResult.failureItems : [];
+    report.successCount = report.successItems.length;
+    report.failureCount = report.failureItems.length;
+
+    if (report.successCount === 0 && report.failureCount > 0) {
+      report.error = "Seçili firmalar için kullanıcı oluşturma başarısız oldu.";
+    }
+  }
+
+  return {
+    pageState,
+    report
+  };
+}
+
+async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
+  try {
+    const selectedCompaniesInput = parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies);
+    const formSource = {
+      ...(req.body && typeof req.body === "object" ? req.body : {}),
+      bulk: bulkMode ? "1" : "0"
+    };
+    const pageState = await loadObusUserCreatePageState({
+      selectedCompaniesInput,
+      formSource
+    });
+
+    const selectedSet = new Set(pageState.selectedCompanyValues);
+    const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
+    const hasRequiredFormValues =
+      Boolean(String(pageState.formValues.fullName || "").trim()) &&
+      Boolean(String(pageState.formValues.username || "").trim()) &&
+      Boolean(String(pageState.formValues.password || "").trim());
+
+    if (selectedCompanies.length === 0) {
+      return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
+    }
+    if (!hasRequiredFormValues) {
+      return res.status(400).json({ ok: false, error: "Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
+    }
+    if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
+    }
+
+    const job = createObusLiveJob({
+      type: "obus-user-create",
+      ownerUserId: Number(req.session?.user?.id || 0),
+      totalCount: selectedCompanies.length
+    });
+    const itemMeta = selectedCompanies.map((company) => ({
+      key: String(company?.value || "").trim(),
+      label: String(company?.label || company?.value || "Firma").trim()
+    }));
+
+    res.json({
+      ok: true,
+      jobId: job.id,
+      totalCount: selectedCompanies.length,
+      items: itemMeta
+    });
+
+    setImmediate(async () => {
+      try {
+        await createObusUsersByCompanies({
+          companies: selectedCompanies,
+          formValues: pageState.formValues,
+          onItemResult: (itemResult) => {
+            pushObusLiveJobEvent(job, {
+              key: String(itemResult?.key || "").trim(),
+              label: String(itemResult?.label || "").trim(),
+              ok: itemResult?.ok === true,
+              message: String(itemResult?.message || "").trim(),
+              error: String(itemResult?.error || "").trim(),
+              errorDetail: String(itemResult?.errorDetail || "").trim()
+            });
+          }
+        });
+        finishObusLiveJob(job, null);
+      } catch (err) {
+        finishObusLiveJob(job, err?.message || "Kullanıcı oluşturma işlemi tamamlanamadı.");
+      }
+    });
+    return undefined;
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: `Canlı kullanıcı oluşturma başlatılamadı: ${err?.message || "Bilinmeyen hata"}`
+    });
+  }
+}
+
 app.get("/", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -8606,73 +8764,58 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
 });
 
 app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
-  const bulkMode = String(req.query.bulk || "").trim() === "1";
   const pageState = await loadObusUserCreatePageState({
     selectedCompaniesInput: req.query.selectedCompanies,
     formSource: req.query
   });
 
-  res.render("general-obus-user-create", {
-    user: req.session.user,
-    active: "obus-user-create",
-    bulkMode,
-    companies: pageState.companies,
-    partnerError: pageState.partnerError,
-    selectedCompanyValues: pageState.selectedCompanyValues,
-    selectedCompaniesJson: pageState.selectedCompaniesJson,
-    formValues: pageState.formValues,
-    report: buildObusUserCreateReportModel()
+  return renderObusUserCreateScreen({
+    req,
+    res,
+    pageState,
+    report: buildObusUserCreateReportModel(),
+    bulkMode: false
   });
 });
 
 app.post("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
-  const bulkMode = String(req.body.bulk || "").trim() === "1";
-  const pageState = await loadObusUserCreatePageState({
-    selectedCompaniesInput: req.body.selectedCompanies,
-    formSource: req.body
+  const submitResult = await buildObusUserCreatePostResult({
+    body: req.body
   });
-  const report = buildObusUserCreateReportModel();
+  return renderObusUserCreateScreen({
+    req,
+    res,
+    pageState: submitResult.pageState,
+    report: submitResult.report,
+    bulkMode: false
+  });
+});
 
-  const selectedSet = new Set(pageState.selectedCompanyValues);
-  const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
-  const hasRequiredFormValues =
-    Boolean(String(pageState.formValues.fullName || "").trim()) &&
-    Boolean(String(pageState.formValues.username || "").trim()) &&
-    Boolean(String(pageState.formValues.password || "").trim());
+app.get("/general/obus-user-create-bulk", requireAuth, requireMenuAccess("obus-user-create-bulk"), async (req, res) => {
+  const pageState = await loadObusUserCreatePageState({
+    selectedCompaniesInput: req.query.selectedCompanies,
+    formSource: req.query
+  });
 
-  if (selectedCompanies.length === 0) {
-    report.error = "En az bir firma seçmelisiniz.";
-  } else if (!hasRequiredFormValues) {
-    report.error = "Ad Soyad, KullanıcıAdı ve Şifre zorunludur.";
-  } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
-    report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
-  } else {
-    report.requested = true;
-    report.totalCount = selectedCompanies.length;
-    const createResult = await createObusUsersByCompanies({
-      companies: selectedCompanies,
-      formValues: pageState.formValues
-    });
-    report.successItems = Array.isArray(createResult?.successItems) ? createResult.successItems : [];
-    report.failureItems = Array.isArray(createResult?.failureItems) ? createResult.failureItems : [];
-    report.successCount = report.successItems.length;
-    report.failureCount = report.failureItems.length;
+  return renderObusUserCreateScreen({
+    req,
+    res,
+    pageState,
+    report: buildObusUserCreateReportModel(),
+    bulkMode: true
+  });
+});
 
-    if (report.successCount === 0 && report.failureCount > 0) {
-      report.error = "Seçili firmalar için kullanıcı oluşturma başarısız oldu.";
-    }
-  }
-
-  res.render("general-obus-user-create", {
-    user: req.session.user,
-    active: "obus-user-create",
-    bulkMode,
-    companies: pageState.companies,
-    partnerError: pageState.partnerError,
-    selectedCompanyValues: pageState.selectedCompanyValues,
-    selectedCompaniesJson: pageState.selectedCompaniesJson,
-    formValues: pageState.formValues,
-    report
+app.post("/general/obus-user-create-bulk", requireAuth, requireMenuAccess("obus-user-create-bulk"), async (req, res) => {
+  const submitResult = await buildObusUserCreatePostResult({
+    body: req.body
+  });
+  return renderObusUserCreateScreen({
+    req,
+    res,
+    pageState: submitResult.pageState,
+    report: submitResult.report,
+    bulkMode: true
   });
 });
 
@@ -8770,79 +8913,14 @@ app.post(
   "/api/obus-user-create/live/start",
   requireAuth,
   requireMenuAccess("obus-user-create"),
-  async (req, res) => {
-    try {
-      const selectedCompaniesInput = parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies);
-      const pageState = await loadObusUserCreatePageState({
-        selectedCompaniesInput,
-        formSource: req.body
-      });
+  async (req, res) => startObusUserCreateLiveProcess({ req, res, bulkMode: false })
+);
 
-      const selectedSet = new Set(pageState.selectedCompanyValues);
-      const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
-      const hasRequiredFormValues =
-        Boolean(String(pageState.formValues.fullName || "").trim()) &&
-        Boolean(String(pageState.formValues.username || "").trim()) &&
-        Boolean(String(pageState.formValues.password || "").trim());
-
-      if (selectedCompanies.length === 0) {
-        return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
-      }
-      if (!hasRequiredFormValues) {
-        return res.status(400).json({ ok: false, error: "Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
-      }
-      if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
-      }
-
-      const job = createObusLiveJob({
-        type: "obus-user-create",
-        ownerUserId: Number(req.session?.user?.id || 0),
-        totalCount: selectedCompanies.length
-      });
-      const itemMeta = selectedCompanies.map((company) => ({
-        key: String(company?.value || "").trim(),
-        label: String(company?.label || company?.value || "Firma").trim()
-      }));
-
-      res.json({
-        ok: true,
-        jobId: job.id,
-        totalCount: selectedCompanies.length,
-        items: itemMeta
-      });
-
-      setImmediate(async () => {
-        try {
-          await createObusUsersByCompanies({
-            companies: selectedCompanies,
-            formValues: pageState.formValues,
-            onItemResult: (itemResult) => {
-              pushObusLiveJobEvent(job, {
-                key: String(itemResult?.key || "").trim(),
-                label: String(itemResult?.label || "").trim(),
-                ok: itemResult?.ok === true,
-                message: String(itemResult?.message || "").trim(),
-                error: String(itemResult?.error || "").trim(),
-                errorDetail: String(itemResult?.errorDetail || "").trim()
-              });
-            }
-          });
-          finishObusLiveJob(job, null);
-        } catch (err) {
-          finishObusLiveJob(job, err?.message || "Kullanıcı oluşturma işlemi tamamlanamadı.");
-        }
-      });
-      return undefined;
-    } catch (err) {
-      return res.status(500).json({
-        ok: false,
-        error: `Canlı kullanıcı oluşturma başlatılamadı: ${err?.message || "Bilinmeyen hata"}`
-      });
-    }
-  }
+app.post(
+  "/api/obus-user-create-bulk/live/start",
+  requireAuth,
+  requireMenuAccess("obus-user-create-bulk"),
+  async (req, res) => startObusUserCreateLiveProcess({ req, res, bulkMode: true })
 );
 
 app.post(
