@@ -2683,7 +2683,7 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .obus-user-create-field span {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .obus-user-create-bulk-page .obus-user-create-field > input[type="text"],
@@ -2692,11 +2692,11 @@ button.ghost {
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 12px;
-  min-height: 32px;
+  min-height: 30px;
 }
 
 .obus-user-create-bulk-page .obus-company-trigger {
-  min-height: 34px;
+  min-height: 30px;
   border-radius: 8px;
   padding: 6px 30px 6px 8px;
   font-size: 12px;
@@ -2718,7 +2718,7 @@ button.ghost {
   border-radius: 7px;
   padding: 6px 8px;
   font-size: 12px;
-  min-height: 32px;
+  min-height: 30px;
 }
 
 .obus-user-create-bulk-page .obus-user-create-actions {
@@ -2726,7 +2726,7 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .obus-user-create-actions .button-link {
-  min-height: 32px;
+  min-height: 30px;
   padding: 6px 10px;
   font-size: 12px;
 }
@@ -2736,8 +2736,37 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .pill {
-  font-size: 11px;
+  font-size: 12px;
   padding: 4px 8px;
+}
+
+.obus-user-create-bulk-page .page-title h1 {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.obus-user-create-bulk-page .page-title-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.obus-user-create-bulk-page .table-head h2,
+.obus-user-create-bulk-page .page-title p,
+.obus-user-create-bulk-page .user-pill,
+.obus-user-create-bulk-page .muted,
+.obus-user-create-bulk-page .inline-alert,
+.obus-user-create-bulk-page .inline-success,
+.obus-user-create-bulk-page .obus-user-create-loading-message,
+.obus-user-create-bulk-page .obus-live-message,
+.obus-user-create-bulk-page .obus-live-status,
+.obus-user-create-bulk-page .partners-raw-table th,
+.obus-user-create-bulk-page .partners-raw-table td,
+.obus-user-create-bulk-page .obus-company-option,
+.obus-user-create-bulk-page .button-link,
+.obus-user-create-bulk-page input,
+.obus-user-create-bulk-page select,
+.obus-user-create-bulk-page small {
+  font-size: 12px !important;
 }
 
 .obus-user-deactivate-section {
