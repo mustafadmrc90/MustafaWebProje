@@ -2673,6 +2673,88 @@ button.ghost {
   cursor: help;
 }
 
+.obus-user-create-page .content {
+  padding: 18px 22px 24px;
+}
+
+.obus-user-create-page .table-card {
+  border-radius: 12px;
+  padding: 12px 14px 6px;
+}
+
+.obus-user-create-page .page-header {
+  margin-bottom: 10px;
+  gap: 10px;
+}
+
+.obus-user-create-page .page-title h1 {
+  font-size: 12px !important;
+  line-height: 1.3;
+  gap: 8px;
+}
+
+.obus-user-create-page .page-title-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+}
+
+.obus-user-create-page .page-title p,
+.obus-user-create-page .table-head h2,
+.obus-user-create-page .user-pill,
+.obus-user-create-page .muted,
+.obus-user-create-page .inline-alert,
+.obus-user-create-page .inline-success,
+.obus-user-create-page .obus-user-create-loading-message,
+.obus-user-create-page .obus-live-message,
+.obus-user-create-page .obus-live-status,
+.obus-user-create-page .partners-raw-table th,
+.obus-user-create-page .partners-raw-table td,
+.obus-user-create-page .obus-company-option,
+.obus-user-create-page .button-link,
+.obus-user-create-page input,
+.obus-user-create-page select,
+.obus-user-create-page small,
+.obus-user-create-page span,
+.obus-user-create-page label,
+.obus-user-create-page p,
+.obus-user-create-page h2,
+.obus-user-create-page h3 {
+  font-size: 12px !important;
+}
+
+.obus-user-create-page .table-head {
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.obus-user-create-page .partners-raw-table th,
+.obus-user-create-page .partners-raw-table td {
+  padding: 6px 8px;
+}
+
+.obus-user-create-page .pill {
+  font-size: 12px !important;
+  padding: 3px 8px;
+}
+
+.obus-user-create-page .button-link,
+.obus-user-create-page .ghost {
+  min-height: 30px;
+  padding: 6px 10px;
+}
+
+.obus-user-create-page .obus-user-create-field > input[type="text"],
+.obus-user-create-page .obus-user-create-field > input[type="password"],
+.obus-user-create-page .obus-user-create-field > select,
+.obus-user-create-page .obus-bulk-user-row input[type="text"],
+.obus-user-create-page .obus-bulk-user-row input[type="password"],
+.obus-user-create-page .obus-company-trigger {
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
 .obus-user-create-bulk-page .obus-user-create-grid {
   grid-template-columns: minmax(280px, 420px) minmax(150px, 220px) minmax(150px, 220px) minmax(150px, 220px);
   gap: 8px 12px;
