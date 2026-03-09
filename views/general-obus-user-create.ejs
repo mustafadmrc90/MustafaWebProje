@@ -7,7 +7,7 @@
     <link rel="icon" href="/public/favicon.png" />
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard layout">
+  <body class="dashboard layout <%= bulkMode ? 'obus-user-create-bulk-page' : '' %>">
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
@@ -21,9 +21,9 @@
                 <circle cx="12" cy="12" r="9"></circle>
               </svg>
             </span>
-            <span>Obus Kullanıcı Oluştur</span>
+            <span><%= bulkMode ? 'Toplu Obus Kullanıcıları Oluştur' : 'Obus Kullanıcı Oluştur' %></span>
           </h1>
-          <p>Firma seçimi ve kullanıcı alanları buradan hazırlanır.</p>
+          <p><%= bulkMode ? 'Firma seçimi ve çoklu kullanıcı satırları buradan hazırlanır.' : 'Firma seçimi ve kullanıcı alanları buradan hazırlanır.' %></p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -42,7 +42,7 @@
 
       <section class="table-card panel-card obus-user-create-section">
         <div class="table-head">
-          <h2>Kullanıcı Oluşturma Hazırlığı</h2>
+          <h2><%= bulkMode ? 'Toplu Kullanıcı Oluşturma Hazırlığı' : 'Kullanıcı Oluşturma Hazırlığı' %></h2>
         </div>
 
         <form
@@ -121,7 +121,7 @@
                     <button type="button" class="ghost" data-obus-bulk-remove-row="1">Sil</button>
                   </div>
                 </div>
-                <small class="muted">Önce satırları sorgula, ardından yok olanları seçip oluştur.</small>
+                <small class="muted">Sorgu sadece KullanıcıAdı ile yapılır; oluşturma için Ad Soyad ve Şifre alanlarını da doldurun.</small>
               </div>
             <% } else { %>
               <label class="obus-user-create-field">

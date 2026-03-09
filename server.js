@@ -9318,14 +9318,9 @@ app.post(
       if (userEntries.length === 0) {
         return res.status(400).json({ ok: false, error: "En az bir kullanıcı satırı girmelisiniz." });
       }
-      const hasMissingRequired = userEntries.some(
-        (entry) =>
-          !String(entry.fullName || "").trim() ||
-          !String(entry.username || "").trim() ||
-          !String(entry.password || "")
-      );
-      if (hasMissingRequired) {
-        return res.status(400).json({ ok: false, error: "Her satır için Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
+      const hasMissingUsername = userEntries.some((entry) => !String(entry.username || "").trim());
+      if (hasMissingUsername) {
+        return res.status(400).json({ ok: false, error: "Sorgu için her satırda KullanıcıAdı zorunludur." });
       }
 
       const checkResult = await checkObusBulkUsersByCompanies({

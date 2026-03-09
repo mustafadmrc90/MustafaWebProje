@@ -1588,14 +1588,9 @@
             form.dataset.liveSubmitting = "0";
             return;
           }
-          const hasMissingRowFields = userEntries.some(
-            (entry) =>
-              !String(entry.fullName || "").trim() ||
-              !String(entry.username || "").trim() ||
-              !String(entry.password || "")
-          );
-          if (hasMissingRowFields) {
-            setLiveMessage("Her satır için Ad Soyad, KullanıcıAdı ve Şifre zorunludur.", "error");
+          const hasMissingUsername = userEntries.some((entry) => !String(entry.username || "").trim());
+          if (hasMissingUsername) {
+            setLiveMessage("Sorgu için her satırda KullanıcıAdı zorunludur.", "error");
             form.dataset.liveSubmitting = "0";
             return;
           }

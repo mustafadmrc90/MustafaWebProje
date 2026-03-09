@@ -2673,6 +2673,73 @@ button.ghost {
   cursor: help;
 }
 
+.obus-user-create-bulk-page .obus-user-create-grid {
+  grid-template-columns: minmax(280px, 420px) minmax(150px, 220px) minmax(150px, 220px) minmax(150px, 220px);
+  gap: 8px 12px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-field {
+  gap: 4px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-field span {
+  font-size: 11px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-field > input[type="text"],
+.obus-user-create-bulk-page .obus-user-create-field > input[type="password"],
+.obus-user-create-bulk-page .obus-user-create-field > select {
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+.obus-user-create-bulk-page .obus-company-trigger {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 6px 30px 6px 8px;
+  font-size: 12px;
+}
+
+.obus-user-create-bulk-page .obus-bulk-user-list {
+  gap: 6px;
+}
+
+.obus-user-create-bulk-page .obus-bulk-user-row {
+  grid-template-columns: minmax(160px, 1.3fr) minmax(130px, 1fr) minmax(120px, 1fr) auto;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.obus-user-create-bulk-page .obus-bulk-user-row input[type="text"],
+.obus-user-create-bulk-page .obus-bulk-user-row input[type="password"] {
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-actions {
+  gap: 8px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-actions .button-link {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-bulk-check-table {
+  min-width: 680px;
+}
+
+.obus-user-create-bulk-page .pill {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
 .obus-user-deactivate-section {
   margin-bottom: 12px;
 }
