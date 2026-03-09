@@ -50,6 +50,7 @@
           method="post"
           action="<%= formAction || '/general/obus-user-create' %>"
           data-obus-live-start-url="<%= liveStartApiPath || '/api/obus-user-create/live/start' %>"
+          data-obus-bulk-check-url="<%= bulkCheckApiPath || '/api/obus-user-create-bulk/check' %>"
         >
           <input type="hidden" name="bulk" value="<%= bulkMode ? '1' : '0' %>" />
           <input
@@ -94,30 +95,110 @@
               <small class="muted">Varsayılan olarak Hepsi seçili gelir. Sadece işaretli firmalara istek atılacak.</small>
             </label>
 
-            <label class="obus-user-create-field">
-              <span>Ad Soyad</span>
-              <input type="text" name="fullName" value="<%= formValues?.fullName || '' %>" />
-            </label>
+            <% if (bulkMode) { %>
+              <div class="obus-user-create-field obus-user-create-field-bulk-users">
+                <span>Kullanıcı Satırları</span>
+                <div class="obus-bulk-user-list" data-obus-bulk-user-list="1">
+                  <div class="obus-bulk-user-row" data-obus-bulk-user-row="1" data-obus-bulk-entry-id="row-1">
+                    <input
+                      type="text"
+                      placeholder="Ad Soyad"
+                      data-obus-bulk-user-full-name="1"
+                      autocomplete="off"
+                    />
+                    <input
+                      type="text"
+                      placeholder="KullanıcıAdı"
+                      data-obus-bulk-user-username="1"
+                      autocomplete="off"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Şifre"
+                      data-obus-bulk-user-password="1"
+                      autocomplete="new-password"
+                    />
+                    <button type="button" class="ghost" data-obus-bulk-remove-row="1">Sil</button>
+                  </div>
+                </div>
+                <small class="muted">Önce satırları sorgula, ardından yok olanları seçip oluştur.</small>
+              </div>
+            <% } else { %>
+              <label class="obus-user-create-field">
+                <span>Ad Soyad</span>
+                <input type="text" name="fullName" value="<%= formValues?.fullName || '' %>" />
+              </label>
 
-            <label class="obus-user-create-field">
-              <span>KullanıcıAdı</span>
-              <input type="text" name="username" value="<%= formValues?.username || '' %>" />
-            </label>
+              <label class="obus-user-create-field">
+                <span>KullanıcıAdı</span>
+                <input type="text" name="username" value="<%= formValues?.username || '' %>" />
+              </label>
 
-            <label class="obus-user-create-field">
-              <span>Şifre</span>
-              <input type="password" name="password" value="<%= formValues?.password || '' %>" />
-            </label>
+              <label class="obus-user-create-field">
+                <span>Şifre</span>
+                <input type="password" name="password" value="<%= formValues?.password || '' %>" />
+              </label>
+            <% } %>
           </div>
 
           <div class="obus-user-create-actions">
-            <button class="button-link" type="submit">Kullanıcı Oluştur</button>
+            <% if (bulkMode) { %>
+              <button class="button-link ghost" type="button" data-obus-bulk-add-row="1">+ Satır Ekle</button>
+              <button class="button-link" type="submit" data-obus-bulk-check-button="1">Kullanıcıları Sorgula</button>
+              <button class="button-link" type="button" data-obus-bulk-create-button="1" disabled>Yok Olanları Oluştur</button>
+            <% } else { %>
+              <button class="button-link" type="submit">Kullanıcı Oluştur</button>
+            <% } %>
           </div>
 
           <div class="obus-user-create-loading-message" hidden>Kullanıcı oluşturma isteği hazırlanıyor...</div>
           <div class="inline-alert obus-live-message" data-obus-user-create-live-message="1" hidden></div>
         </form>
       </section>
+
+      <% if (bulkMode) { %>
+        <section class="table-card panel-card obus-user-create-bulk-check-results" data-obus-bulk-check-results="1" hidden>
+          <div class="table-head">
+            <h2>Firma Bazlı Kullanıcı Sorgu Sonucu</h2>
+            <div class="table-actions">
+              <span class="pill" data-obus-bulk-check-total="1">Toplam: 0</span>
+              <span class="pill success" data-obus-bulk-check-missing="1">Yok: 0</span>
+              <span class="pill muted" data-obus-bulk-check-existing="1">Var: 0</span>
+              <span class="pill muted" data-obus-bulk-check-error="1">Hata: 0</span>
+            </div>
+          </div>
+          <div class="table-head">
+            <div class="table-actions">
+              <label class="obus-user-create-field obus-bulk-filter-field">
+                <span>Filtre</span>
+                <select data-obus-bulk-filter="1">
+                  <option value="all">Hepsi</option>
+                  <option value="missing">Sadece Yok</option>
+                  <option value="existing">Sadece Var</option>
+                </select>
+              </label>
+              <label class="obus-user-deactivate-select-all">
+                <input type="checkbox" data-obus-bulk-select-all="1" checked />
+                <span>Yok olanların tümünü seç</span>
+              </label>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="partners-raw-table obus-user-create-bulk-check-table">
+              <thead>
+                <tr>
+                  <th>Seç</th>
+                  <th>Firma</th>
+                  <th>KullanıcıAdı</th>
+                  <th>Ad Soyad</th>
+                  <th>Durum</th>
+                </tr>
+              </thead>
+              <tbody data-obus-bulk-check-body="1"></tbody>
+            </table>
+          </div>
+        </section>
+      <% } %>
 
       <section class="table-card panel-card obus-user-create-live-results" data-obus-user-create-live-results="1" hidden>
         <div class="table-head">

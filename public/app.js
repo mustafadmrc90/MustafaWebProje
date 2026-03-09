@@ -903,9 +903,26 @@
     const usernameInput = form.querySelector("input[name='username']");
     const passwordInput = form.querySelector("input[name='password']");
     const bulkInput = form.querySelector("input[name='bulk']");
+    const isBulkMode = String(bulkInput?.value || "0").trim() === "1";
     const liveStartUrl =
       String(form.getAttribute("data-obus-live-start-url") || "").trim() || "/api/obus-user-create/live/start";
+    const bulkCheckUrl =
+      String(form.getAttribute("data-obus-bulk-check-url") || "").trim() || "/api/obus-user-create-bulk/check";
+    const bulkUserList = form.querySelector("[data-obus-bulk-user-list='1']");
+    const bulkAddRowBtn = form.querySelector("[data-obus-bulk-add-row='1']");
+    const bulkCreateBtn = form.querySelector("[data-obus-bulk-create-button='1']");
+    const bulkResultsSection = document.querySelector("[data-obus-bulk-check-results='1']");
+    const bulkResultsBody = bulkResultsSection?.querySelector("[data-obus-bulk-check-body='1']");
+    const bulkFilterSelect = bulkResultsSection?.querySelector("[data-obus-bulk-filter='1']");
+    const bulkSelectAllCheckbox = bulkResultsSection?.querySelector("[data-obus-bulk-select-all='1']");
+    const bulkTotalCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-total='1']");
+    const bulkMissingCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-missing='1']");
+    const bulkExistingCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-existing='1']");
+    const bulkErrorCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-error='1']");
     const liveRowByKey = new Map();
+    const bulkSelectedCreateKeys = new Set();
+    let bulkCheckItems = [];
+    let bulkRowCounter = 1;
     let typeAheadText = "";
     let typeAheadTimerId = null;
 
@@ -938,6 +955,182 @@
       if (liveFailure) {
         liveFailure.textContent = `Hatalı: ${failure}`;
       }
+    };
+    const getBulkRows = () =>
+      bulkUserList ? Array.from(bulkUserList.querySelectorAll("[data-obus-bulk-user-row='1']")) : [];
+    const isBulkMissingCandidate = (item) =>
+      item && item.exists === false && !String(item.error || "").trim();
+    const updateBulkCounters = () => {
+      if (!isBulkMode) return;
+      const total = bulkCheckItems.length;
+      const missing = bulkCheckItems.filter((item) => item.exists === false).length;
+      const existing = bulkCheckItems.filter((item) => item.exists === true).length;
+      const errors = bulkCheckItems.filter((item) => item.exists === null || item.error).length;
+      if (bulkTotalCounter) bulkTotalCounter.textContent = `Toplam: ${total}`;
+      if (bulkMissingCounter) bulkMissingCounter.textContent = `Yok: ${missing}`;
+      if (bulkExistingCounter) bulkExistingCounter.textContent = `Var: ${existing}`;
+      if (bulkErrorCounter) bulkErrorCounter.textContent = `Hata: ${errors}`;
+    };
+    const updateBulkCreateButtonState = () => {
+      if (!bulkCreateBtn) return;
+      bulkCreateBtn.disabled = bulkSelectedCreateKeys.size === 0;
+    };
+    const updateBulkSelectAllState = () => {
+      if (!bulkSelectAllCheckbox) return;
+      const missingKeys = bulkCheckItems.filter((item) => isBulkMissingCandidate(item)).map((item) => String(item.key || ""));
+      if (missingKeys.length === 0) {
+        bulkSelectAllCheckbox.checked = false;
+        bulkSelectAllCheckbox.disabled = true;
+        return;
+      }
+      bulkSelectAllCheckbox.disabled = false;
+      bulkSelectAllCheckbox.checked = missingKeys.every((key) => bulkSelectedCreateKeys.has(key));
+    };
+    const clearBulkCheckState = () => {
+      if (!isBulkMode) return;
+      bulkCheckItems = [];
+      bulkSelectedCreateKeys.clear();
+      if (bulkResultsBody) {
+        bulkResultsBody.innerHTML = "";
+      }
+      if (bulkResultsSection) {
+        bulkResultsSection.hidden = true;
+      }
+      updateBulkCounters();
+      updateBulkSelectAllState();
+      updateBulkCreateButtonState();
+    };
+    const readBulkUserEntries = () =>
+      getBulkRows()
+        .map((row, index) => {
+          const entryId = String(row.getAttribute("data-obus-bulk-entry-id") || `row-${index + 1}`).trim() || `row-${index + 1}`;
+          const fullName = String(row.querySelector("[data-obus-bulk-user-full-name='1']")?.value || "").trim();
+          const username = String(row.querySelector("[data-obus-bulk-user-username='1']")?.value || "").trim();
+          const password = String(row.querySelector("[data-obus-bulk-user-password='1']")?.value || "");
+          return { entryId, fullName, username, password };
+        })
+        .filter((entry) => entry.fullName || entry.username || entry.password);
+    const bindBulkUserRow = (row) => {
+      if (!row || row.dataset.bulkRowBound === "1") return;
+      row.dataset.bulkRowBound = "1";
+      if (!String(row.getAttribute("data-obus-bulk-entry-id") || "").trim()) {
+        bulkRowCounter += 1;
+        row.setAttribute("data-obus-bulk-entry-id", `row-${bulkRowCounter}`);
+      }
+      [
+        row.querySelector("[data-obus-bulk-user-full-name='1']"),
+        row.querySelector("[data-obus-bulk-user-username='1']"),
+        row.querySelector("[data-obus-bulk-user-password='1']")
+      ]
+        .filter(Boolean)
+        .forEach((inputEl) => {
+          inputEl.addEventListener("input", () => {
+            clearBulkCheckState();
+          });
+        });
+      const removeBtn = row.querySelector("[data-obus-bulk-remove-row='1']");
+      if (!removeBtn) return;
+      removeBtn.addEventListener("click", () => {
+        const rows = getBulkRows();
+        if (rows.length <= 1) {
+          const fullNameEl = row.querySelector("[data-obus-bulk-user-full-name='1']");
+          const usernameEl = row.querySelector("[data-obus-bulk-user-username='1']");
+          const passwordEl = row.querySelector("[data-obus-bulk-user-password='1']");
+          if (fullNameEl) fullNameEl.value = "";
+          if (usernameEl) usernameEl.value = "";
+          if (passwordEl) passwordEl.value = "";
+          clearBulkCheckState();
+          return;
+        }
+        row.remove();
+        clearBulkCheckState();
+      });
+    };
+    const addBulkUserRow = (entry = {}) => {
+      if (!bulkUserList) return;
+      bulkRowCounter += 1;
+      const row = document.createElement("div");
+      row.className = "obus-bulk-user-row";
+      row.setAttribute("data-obus-bulk-user-row", "1");
+      row.setAttribute("data-obus-bulk-entry-id", `row-${bulkRowCounter}`);
+      row.innerHTML = `
+        <input type="text" placeholder="Ad Soyad" data-obus-bulk-user-full-name="1" autocomplete="off" />
+        <input type="text" placeholder="KullanıcıAdı" data-obus-bulk-user-username="1" autocomplete="off" />
+        <input type="password" placeholder="Şifre" data-obus-bulk-user-password="1" autocomplete="new-password" />
+        <button type="button" class="ghost" data-obus-bulk-remove-row="1">Sil</button>
+      `;
+      const fullNameEl = row.querySelector("[data-obus-bulk-user-full-name='1']");
+      const usernameEl = row.querySelector("[data-obus-bulk-user-username='1']");
+      const passwordEl = row.querySelector("[data-obus-bulk-user-password='1']");
+      if (fullNameEl) fullNameEl.value = String(entry.fullName || "").trim();
+      if (usernameEl) usernameEl.value = String(entry.username || "").trim();
+      if (passwordEl) passwordEl.value = String(entry.password || "");
+      bulkUserList.appendChild(row);
+      bindBulkUserRow(row);
+    };
+    const renderBulkCheckRows = () => {
+      if (!bulkResultsBody) return;
+      const filterValue = String(bulkFilterSelect?.value || "all").trim();
+      bulkResultsBody.innerHTML = "";
+
+      bulkCheckItems.forEach((item) => {
+        const exists = item.exists === true;
+        const missing = item.exists === false;
+        if (filterValue === "missing" && !missing) return;
+        if (filterValue === "existing" && !exists) return;
+
+        const row = document.createElement("tr");
+        row.setAttribute("data-obus-bulk-check-key", String(item.key || ""));
+        const canCreate = isBulkMissingCandidate(item);
+        const statusText = String(item.error || "").trim() || (exists ? "Var" : "Yok");
+        const statusClass = String(item.error || "").trim() ? "failure" : exists ? "success" : "pending";
+
+        const checkboxCell = document.createElement("td");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = canCreate && bulkSelectedCreateKeys.has(String(item.key || ""));
+        checkbox.disabled = !canCreate;
+        checkbox.addEventListener("change", () => {
+          const key = String(item.key || "");
+          if (!key) return;
+          if (checkbox.checked) {
+            bulkSelectedCreateKeys.add(key);
+          } else {
+            bulkSelectedCreateKeys.delete(key);
+          }
+          updateBulkSelectAllState();
+          updateBulkCreateButtonState();
+        });
+        checkboxCell.appendChild(checkbox);
+
+        const companyCell = document.createElement("td");
+        companyCell.textContent = String(item.companyLabel || item.companyValue || "Firma");
+        const usernameCell = document.createElement("td");
+        usernameCell.textContent = String(item.username || "");
+        const fullNameCell = document.createElement("td");
+        fullNameCell.textContent = String(item.fullName || "");
+        const statusCell = document.createElement("td");
+        statusCell.className = `obus-live-status ${statusClass}`;
+        statusCell.textContent = statusText;
+        if (String(item.error || "").trim()) {
+          statusCell.title = String(item.error || "").trim();
+          statusCell.classList.add("has-detail");
+        }
+
+        row.appendChild(checkboxCell);
+        row.appendChild(companyCell);
+        row.appendChild(usernameCell);
+        row.appendChild(fullNameCell);
+        row.appendChild(statusCell);
+        bulkResultsBody.appendChild(row);
+      });
+
+      if (bulkResultsSection) {
+        bulkResultsSection.hidden = bulkCheckItems.length === 0;
+      }
+      updateBulkCounters();
+      updateBulkSelectAllState();
+      updateBulkCreateButtonState();
     };
     const setCreateRowStatus = (row, text, kind, detail = "") => {
       const cell = row?.querySelector("[data-obus-create-status='1']");
@@ -1205,14 +1398,167 @@
           item.checked = selectAllCheckbox.checked;
         });
         syncSelectedCompanies();
+        if (isBulkMode) {
+          clearBulkCheckState();
+        }
       });
     }
 
     companyCheckboxes.forEach((item) => {
       item.addEventListener("change", () => {
         syncSelectedCompanies();
+        if (isBulkMode) {
+          clearBulkCheckState();
+        }
       });
     });
+
+    if (isBulkMode) {
+      const initialRows = getBulkRows();
+      bulkRowCounter = Math.max(1, initialRows.length);
+      initialRows.forEach((row, index) => {
+        if (!String(row.getAttribute("data-obus-bulk-entry-id") || "").trim()) {
+          row.setAttribute("data-obus-bulk-entry-id", `row-${index + 1}`);
+        }
+        bindBulkUserRow(row);
+      });
+
+      if (bulkAddRowBtn) {
+        bulkAddRowBtn.addEventListener("click", () => {
+          addBulkUserRow();
+          clearBulkCheckState();
+        });
+      }
+
+      if (bulkFilterSelect) {
+        bulkFilterSelect.addEventListener("change", () => {
+          renderBulkCheckRows();
+        });
+      }
+
+      if (bulkSelectAllCheckbox) {
+        bulkSelectAllCheckbox.addEventListener("change", () => {
+          const missingKeys = bulkCheckItems
+            .filter((item) => isBulkMissingCandidate(item))
+            .map((item) => String(item.key || ""));
+          bulkSelectedCreateKeys.clear();
+          if (bulkSelectAllCheckbox.checked) {
+            missingKeys.forEach((key) => {
+              if (key) bulkSelectedCreateKeys.add(key);
+            });
+          }
+          renderBulkCheckRows();
+        });
+      }
+
+      if (bulkCreateBtn) {
+        const defaultCreateLabel = String(bulkCreateBtn.textContent || "").trim() || "Yok Olanları Oluştur";
+        bulkCreateBtn.disabled = true;
+        bulkCreateBtn.textContent = defaultCreateLabel;
+        bulkCreateBtn.addEventListener("click", async () => {
+          if (form.dataset.liveSubmitting === "1") return;
+          form.dataset.liveSubmitting = "1";
+          setLiveMessage("", "");
+          syncSelectedCompanies();
+
+          const selectedValues = readSelectedCompanyValues();
+          if (selectedValues.length === 0) {
+            setLiveMessage("En az bir firma seçmelisiniz.", "error");
+            form.dataset.liveSubmitting = "0";
+            return;
+          }
+
+          const selectedCompanySet = new Set(selectedValues.map((item) => String(item || "").trim()).filter(Boolean));
+          const selectedTargets = bulkCheckItems.filter((item) => {
+            const key = String(item?.key || "");
+            const companyValue = String(item?.companyValue || "").trim();
+            return (
+              key &&
+              companyValue &&
+              selectedCompanySet.has(companyValue) &&
+              bulkSelectedCreateKeys.has(key) &&
+              isBulkMissingCandidate(item)
+            );
+          });
+          if (selectedTargets.length === 0) {
+            setLiveMessage(
+              "Önce sorgu sonucu listesinde yok olan en az bir kullanıcı seçmelisiniz. Firma seçimi değiştiyse yeniden sorgulayın.",
+              "error"
+            );
+            form.dataset.liveSubmitting = "0";
+            return;
+          }
+
+          const defaultCheckLabel = String(submitBtn?.textContent || "").trim() || "Kullanıcıları Sorgula";
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Bekleyin...";
+          }
+          bulkCreateBtn.disabled = true;
+          bulkCreateBtn.textContent = "Oluşturuluyor...";
+          form.classList.add("is-loading");
+          if (loadingMessage) loadingMessage.hidden = false;
+
+          try {
+            const startResponse = await fetch(liveStartUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json"
+              },
+              body: JSON.stringify({
+                selectedCompanies: selectedValues,
+                targets: selectedTargets.map((item) => ({
+                  key: String(item.key || "").trim(),
+                  companyValue: String(item.companyValue || "").trim(),
+                  entryId: String(item.entryId || "").trim(),
+                  fullName: String(item.fullName || "").trim(),
+                  username: String(item.username || "").trim(),
+                  password: String(item.password || ""),
+                  bulk: String(bulkInput?.value || "1").trim()
+                })),
+                bulk: String(bulkInput?.value || "1").trim()
+              })
+            });
+            const startData = await parseJsonResponse(startResponse);
+            if (!startResponse.ok || !startData?.ok) {
+              throw new Error(getApiErrorMessage(startResponse, startData, "Toplu kullanıcı oluşturma başlatılamadı"));
+            }
+
+            const items = Array.isArray(startData.items) ? startData.items : [];
+            renderCreateLiveRows(items);
+            setLiveCounters({
+              processed: 0,
+              total: Number(startData.totalCount || items.length || 0),
+              success: 0,
+              failure: 0
+            });
+
+            const finalState = await pollLiveJob(startData.jobId, applyCreateEventToRow);
+            if (finalState?.error) {
+              setLiveMessage(finalState.error, "error");
+            } else if (Number(finalState?.failureCount || 0) > 0) {
+              setLiveMessage("Toplu oluşturma tamamlandı. Bazı kayıtlar oluşturulamadı.", "error");
+            } else {
+              setLiveMessage("Toplu oluşturma tamamlandı. Seçili yok kullanıcılar oluşturuldu.", "success");
+            }
+          } catch (err) {
+            setLiveMessage(err?.message || "Toplu kullanıcı oluşturma başlatılamadı.", "error");
+          } finally {
+            form.dataset.liveSubmitting = "0";
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = defaultCheckLabel;
+            }
+            bulkCreateBtn.disabled = false;
+            bulkCreateBtn.textContent = defaultCreateLabel;
+            form.classList.remove("is-loading");
+            if (loadingMessage) loadingMessage.hidden = true;
+            updateBulkCreateButtonState();
+          }
+        });
+      }
+    }
 
     if (submitBtn) {
       const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcı Oluştur";
@@ -1232,6 +1578,79 @@
         if (selectedValues.length === 0) {
           setLiveMessage("En az bir firma seçmelisiniz.", "error");
           form.dataset.liveSubmitting = "0";
+          return;
+        }
+
+        if (isBulkMode) {
+          const userEntries = readBulkUserEntries();
+          if (userEntries.length === 0) {
+            setLiveMessage("En az bir kullanıcı satırı girmelisiniz.", "error");
+            form.dataset.liveSubmitting = "0";
+            return;
+          }
+          const hasMissingRowFields = userEntries.some(
+            (entry) =>
+              !String(entry.fullName || "").trim() ||
+              !String(entry.username || "").trim() ||
+              !String(entry.password || "")
+          );
+          if (hasMissingRowFields) {
+            setLiveMessage("Her satır için Ad Soyad, KullanıcıAdı ve Şifre zorunludur.", "error");
+            form.dataset.liveSubmitting = "0";
+            return;
+          }
+
+          clearBulkCheckState();
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Sorgulanıyor...";
+          if (bulkCreateBtn) bulkCreateBtn.disabled = true;
+          form.classList.add("is-loading");
+          if (loadingMessage) loadingMessage.hidden = false;
+
+          try {
+            const checkResponse = await fetch(bulkCheckUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json"
+              },
+              body: JSON.stringify({
+                selectedCompanies: selectedValues,
+                userEntries,
+                bulk: String(bulkInput?.value || "1").trim()
+              })
+            });
+            const checkData = await parseJsonResponse(checkResponse);
+            if (!checkResponse.ok || !checkData?.ok) {
+              throw new Error(getApiErrorMessage(checkResponse, checkData, "Toplu kullanıcı sorgusu başlatılamadı"));
+            }
+
+            bulkCheckItems = Array.isArray(checkData.items) ? checkData.items : [];
+            bulkSelectedCreateKeys.clear();
+            bulkCheckItems.forEach((item) => {
+              if (isBulkMissingCandidate(item)) {
+                const key = String(item.key || "").trim();
+                if (key) bulkSelectedCreateKeys.add(key);
+              }
+            });
+            renderBulkCheckRows();
+
+            const errorCount = Number(checkData.errorCount || 0);
+            if (errorCount > 0) {
+              setLiveMessage("Sorgu tamamlandı. Bazı satırlarda hata var; sadece Yok olanlar oluşturulabilir.", "error");
+            } else {
+              setLiveMessage("Sorgu tamamlandı. Var/Yok durumuna göre filtreleyip yok olanları oluşturabilirsiniz.", "success");
+            }
+          } catch (err) {
+            setLiveMessage(err?.message || "Toplu kullanıcı sorgusu tamamlanamadı.", "error");
+          } finally {
+            form.dataset.liveSubmitting = "0";
+            submitBtn.disabled = false;
+            submitBtn.textContent = defaultLabel;
+            form.classList.remove("is-loading");
+            if (loadingMessage) loadingMessage.hidden = true;
+            updateBulkCreateButtonState();
+          }
           return;
         }
 

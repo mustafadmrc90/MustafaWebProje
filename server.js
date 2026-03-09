@@ -8537,13 +8537,343 @@ async function createObusUsersByCompanies({ companies, formValues, onItemResult 
   };
 }
 
+function normalizeObusBulkCreateUserEntries(rawEntries) {
+  const list = Array.isArray(rawEntries) ? rawEntries : [];
+  const normalized = [];
+  const usedEntryIds = new Set();
+
+  list.forEach((rawItem, index) => {
+    const item = rawItem && typeof rawItem === "object" ? rawItem : {};
+    const fullName = String(item.fullName || "").trim();
+    const username = String(item.username || "").trim();
+    const password = String(item.password || "");
+    if (!fullName && !username && !password) return;
+
+    let entryId = String(item.entryId || item.id || `row-${index + 1}`).trim() || `row-${index + 1}`;
+    if (usedEntryIds.has(entryId)) {
+      entryId = `${entryId}-${index + 1}`;
+    }
+    usedEntryIds.add(entryId);
+
+    normalized.push({
+      entryId,
+      fullName,
+      username,
+      password
+    });
+  });
+
+  return normalized;
+}
+
+function buildObusGetUsersWithoutPermissionsTargetForCompany(company) {
+  const source = company && typeof company === "object" ? company : {};
+  const meta = source.meta && typeof source.meta === "object" ? source.meta : {};
+  const cluster = extractClusterLabel(String(meta.cluster || "").trim());
+  const partnerCode = String(meta.code || "").trim();
+  const partnerId = String(meta.id || "").trim();
+  const companyValue = String(source.value || "").trim();
+  const companyLabel = String(source.label || companyValue || "Firma").trim();
+  const loginBranchId = String(source.obusMerkezSubeId || "").trim();
+  const clusterSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
+  const endpointUrl = normalizeTargetUrl(
+    buildMembershipGetUsersWithoutPermissionsUrl(clusterSourceUrl || OBUS_USER_DEACTIVATE_LIST_API_URL, cluster)
+  );
+
+  return {
+    cluster,
+    partnerCode,
+    partnerId,
+    endpointUrl,
+    companyValue,
+    companyLabel,
+    obusMerkezSubeId: loginBranchId
+  };
+}
+
+async function checkObusBulkUsersByCompanies({ companies, userEntries }) {
+  const selectedCompanies = Array.isArray(companies) ? companies : [];
+  const entries = Array.isArray(userEntries) ? userEntries : [];
+  const workItems = [];
+
+  selectedCompanies.forEach((company) => {
+    entries.forEach((entry) => {
+      workItems.push({
+        company,
+        entry
+      });
+    });
+  });
+
+  if (workItems.length === 0) {
+    return {
+      items: [],
+      totalCount: 0,
+      missingCount: 0,
+      existingCount: 0,
+      errorCount: 0
+    };
+  }
+
+  const workerResults = await runWithConcurrency(
+    workItems,
+    Math.max(1, Math.min(10, OBUS_USER_DEACTIVATE_CONCURRENCY)),
+    async (workItem, index) => {
+      const company = workItem?.company;
+      const entry = workItem?.entry;
+      const fullName = String(entry?.fullName || "").trim();
+      const username = String(entry?.username || "").trim();
+      const password = String(entry?.password || "");
+      const entryId = String(entry?.entryId || `row-${index + 1}`).trim() || `row-${index + 1}`;
+
+      const target = buildObusGetUsersWithoutPermissionsTargetForCompany(company);
+      const companyValue = String(target.companyValue || "").trim();
+      const companyLabel = String(target.companyLabel || companyValue || "Firma").trim();
+      const resultKey = `${companyValue}|||${entryId}`;
+
+      if (!companyValue || !target.cluster || !target.endpointUrl || !target.partnerCode) {
+        return {
+          key: resultKey,
+          companyValue,
+          companyLabel,
+          entryId,
+          fullName,
+          username,
+          password,
+          exists: null,
+          error: "Firma sorgu hedefi oluşturulamadı."
+        };
+      }
+
+      if (!username) {
+        return {
+          key: resultKey,
+          companyValue,
+          companyLabel,
+          entryId,
+          fullName,
+          username,
+          password,
+          exists: null,
+          error: "KullanıcıAdı zorunludur."
+        };
+      }
+
+      const searchResult = await fetchObusUsersWithoutPermissionsForTarget({
+        target,
+        usernameFilter: username
+      });
+      if (searchResult?.error) {
+        return {
+          key: resultKey,
+          companyValue,
+          companyLabel,
+          entryId,
+          fullName,
+          username,
+          password,
+          exists: null,
+          error: String(searchResult.error || "Sorgu başarısız.").trim()
+        };
+      }
+
+      const usernameNormalized = String(username || "").trim().toLocaleLowerCase("tr");
+      const exists = Array.isArray(searchResult?.rows)
+        ? searchResult.rows.some(
+            (row) => String(row?.username || "").trim().toLocaleLowerCase("tr") === usernameNormalized
+          )
+        : false;
+
+      return {
+        key: resultKey,
+        companyValue,
+        companyLabel,
+        entryId,
+        fullName,
+        username,
+        password,
+        exists,
+        error: ""
+      };
+    }
+  );
+
+  const items = workerResults
+    .map((result) => (result && typeof result === "object" ? result : null))
+    .filter(Boolean);
+  const existingCount = items.filter((item) => item.exists === true).length;
+  const missingCount = items.filter((item) => item.exists === false).length;
+  const errorCount = items.filter((item) => item.exists === null || item.error).length;
+
+  return {
+    items,
+    totalCount: items.length,
+    missingCount,
+    existingCount,
+    errorCount
+  };
+}
+
+function normalizeObusBulkCreateTargetItems(rawTargets) {
+  const list = Array.isArray(rawTargets) ? rawTargets : [];
+  const normalized = [];
+  const usedKeys = new Set();
+
+  list.forEach((rawItem, index) => {
+    const item = rawItem && typeof rawItem === "object" ? rawItem : {};
+    const companyValue = String(item.companyValue || "").trim();
+    const fullName = String(item.fullName || "").trim();
+    const username = String(item.username || "").trim();
+    const password = String(item.password || "");
+    if (!companyValue && !fullName && !username && !password) return;
+
+    const entryId = String(item.entryId || `row-${index + 1}`).trim() || `row-${index + 1}`;
+    let key = String(item.key || `${companyValue}|||${entryId}`).trim();
+    if (!key) key = `${companyValue}|||${entryId}`;
+    if (usedKeys.has(key)) {
+      key = `${key}-${index + 1}`;
+    }
+    usedKeys.add(key);
+
+    normalized.push({
+      key,
+      companyValue,
+      entryId,
+      fullName,
+      username,
+      password
+    });
+  });
+
+  return normalized;
+}
+
+async function createObusUsersByTargetItems({ targets, companyByValue, onItemResult }) {
+  const list = Array.isArray(targets) ? targets : [];
+  const companyMap = companyByValue instanceof Map ? companyByValue : new Map();
+  const successItems = [];
+  const failureItems = [];
+  const notifyItemResult =
+    typeof onItemResult === "function"
+      ? (payload) => {
+          try {
+            onItemResult(payload);
+          } catch (err) {
+            // Progress callback is best-effort and should never break the main flow.
+          }
+        }
+      : null;
+
+  if (list.length === 0) {
+    return {
+      successItems,
+      failureItems
+    };
+  }
+
+  const workerResults = await runWithConcurrency(
+    list,
+    Math.max(1, OBUS_USER_CREATE_CONCURRENCY),
+    async (targetItem, index) => {
+      const companyValue = String(targetItem?.companyValue || "").trim();
+      const company = companyMap.get(companyValue);
+      const username = String(targetItem?.username || "").trim();
+      const fullName = String(targetItem?.fullName || "").trim();
+      const password = String(targetItem?.password || "");
+      const key = String(targetItem?.key || `${companyValue}|||${index + 1}`).trim() || `${companyValue}|||${index + 1}`;
+      const companyLabel =
+        String(company?.label || companyValue || "Firma").trim() || "Firma";
+      const itemLabel = `${companyLabel} | ${username || "Kullanıcı?"}`;
+
+      if (!company) {
+        const payload = {
+          key,
+          label: itemLabel,
+          ok: false,
+          message: "",
+          error: "Seçili firma bulunamadı.",
+          errorDetail: ""
+        };
+        if (notifyItemResult) notifyItemResult(payload);
+        return payload;
+      }
+
+      if (!fullName || !username || !password) {
+        const payload = {
+          key,
+          label: itemLabel,
+          ok: false,
+          message: "",
+          error: "Ad Soyad, KullanıcıAdı ve Şifre zorunludur.",
+          errorDetail: ""
+        };
+        if (notifyItemResult) notifyItemResult(payload);
+        return payload;
+      }
+
+      let result;
+      try {
+        result = await createObusUserForCompany({
+          company,
+          formValues: {
+            fullName,
+            username,
+            password
+          }
+        });
+      } catch (err) {
+        result = {
+          ok: false,
+          error: err?.message || "CreateUser isteği gönderilemedi.",
+          errorDetail: ""
+        };
+      }
+      const normalizedResult = result && typeof result === "object" ? result : {};
+      const isOk = normalizedResult.ok === true;
+
+      const payload = {
+        key,
+        label: itemLabel,
+        ok: isOk,
+        message: isOk ? String(normalizedResult.message || "Kullanıcı oluşturuldu.").trim() : "",
+        error: isOk ? "" : String(normalizedResult.error || "Bilinmeyen hata").trim(),
+        errorDetail: isOk ? "" : String(normalizedResult.errorDetail || "").trim()
+      };
+      if (notifyItemResult) notifyItemResult(payload);
+      return payload;
+    }
+  );
+
+  workerResults.forEach((payload) => {
+    const normalized = payload && typeof payload === "object" ? payload : {};
+    if (normalized.ok === true) {
+      successItems.push({
+        label: String(normalized.label || "Firma").trim(),
+        message: String(normalized.message || "Kullanıcı oluşturuldu.").trim()
+      });
+    } else {
+      failureItems.push({
+        label: String(normalized.label || "Firma").trim(),
+        error: String(normalized.error || "Bilinmeyen hata").trim(),
+        errorDetail: String(normalized.errorDetail || "").trim()
+      });
+    }
+  });
+
+  return {
+    successItems,
+    failureItems
+  };
+}
+
 function buildObusUserCreateScreenConfig({ bulkMode = false } = {}) {
   const isBulk = bulkMode === true;
   return {
     bulkMode: isBulk,
     activeKey: isBulk ? "obus-user-create-bulk" : "obus-user-create",
     formAction: isBulk ? "/general/obus-user-create-bulk" : "/general/obus-user-create",
-    liveStartApiPath: isBulk ? "/api/obus-user-create-bulk/live/start" : "/api/obus-user-create/live/start"
+    liveStartApiPath: isBulk ? "/api/obus-user-create-bulk/live/start" : "/api/obus-user-create/live/start",
+    bulkCheckApiPath: "/api/obus-user-create-bulk/check"
   };
 }
 
@@ -8555,6 +8885,7 @@ function renderObusUserCreateScreen({ req, res, pageState, report, bulkMode = fa
     bulkMode: screenConfig.bulkMode,
     formAction: screenConfig.formAction,
     liveStartApiPath: screenConfig.liveStartApiPath,
+    bulkCheckApiPath: screenConfig.bulkCheckApiPath,
     companies: pageState.companies,
     partnerError: pageState.partnerError,
     selectedCompanyValues: pageState.selectedCompanyValues,
@@ -8608,7 +8939,12 @@ async function buildObusUserCreatePostResult({ body }) {
 
 async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
   try {
-    const selectedCompaniesInput = parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies);
+    const normalizedBulkTargets =
+      bulkMode === true ? normalizeObusBulkCreateTargetItems(req.body?.targets) : [];
+    const selectedCompaniesInput =
+      normalizedBulkTargets.length > 0
+        ? normalizedBulkTargets.map((item) => String(item.companyValue || "").trim())
+        : parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies);
     const formSource = {
       ...(req.body && typeof req.body === "object" ? req.body : {}),
       bulk: bulkMode ? "1" : "0"
@@ -8620,21 +8956,68 @@ async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
 
     const selectedSet = new Set(pageState.selectedCompanyValues);
     const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
-    const hasRequiredFormValues =
-      Boolean(String(pageState.formValues.fullName || "").trim()) &&
-      Boolean(String(pageState.formValues.username || "").trim()) &&
-      Boolean(String(pageState.formValues.password || "").trim());
-
     if (selectedCompanies.length === 0) {
       return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
-    }
-    if (!hasRequiredFormValues) {
-      return res.status(400).json({ ok: false, error: "Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
     }
     if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
       return res
         .status(400)
         .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
+    }
+
+    if (bulkMode === true && normalizedBulkTargets.length > 0) {
+      const companyByValue = new Map(selectedCompanies.map((item) => [String(item.value || "").trim(), item]));
+      const itemMeta = normalizedBulkTargets.map((item) => {
+        const company = companyByValue.get(String(item.companyValue || "").trim());
+        const companyLabel = String(company?.label || item.companyValue || "Firma").trim();
+        return {
+          key: String(item.key || "").trim(),
+          label: `${companyLabel} | ${String(item.username || "").trim() || "Kullanıcı?"}`
+        };
+      });
+
+      const job = createObusLiveJob({
+        type: "obus-user-create",
+        ownerUserId: Number(req.session?.user?.id || 0),
+        totalCount: normalizedBulkTargets.length
+      });
+      res.json({
+        ok: true,
+        jobId: job.id,
+        totalCount: normalizedBulkTargets.length,
+        items: itemMeta
+      });
+
+      setImmediate(async () => {
+        try {
+          await createObusUsersByTargetItems({
+            targets: normalizedBulkTargets,
+            companyByValue,
+            onItemResult: (itemResult) => {
+              pushObusLiveJobEvent(job, {
+                key: String(itemResult?.key || "").trim(),
+                label: String(itemResult?.label || "").trim(),
+                ok: itemResult?.ok === true,
+                message: String(itemResult?.message || "").trim(),
+                error: String(itemResult?.error || "").trim(),
+                errorDetail: String(itemResult?.errorDetail || "").trim()
+              });
+            }
+          });
+          finishObusLiveJob(job, null);
+        } catch (err) {
+          finishObusLiveJob(job, err?.message || "Kullanıcı oluşturma işlemi tamamlanamadı.");
+        }
+      });
+      return undefined;
+    }
+
+    const hasRequiredFormValues =
+      Boolean(String(pageState.formValues.fullName || "").trim()) &&
+      Boolean(String(pageState.formValues.username || "").trim()) &&
+      Boolean(String(pageState.formValues.password || "").trim());
+    if (!hasRequiredFormValues) {
+      return res.status(400).json({ ok: false, error: "Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
     }
 
     const job = createObusLiveJob({
@@ -8908,6 +9291,63 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
     report
   });
 });
+
+app.post(
+  "/api/obus-user-create-bulk/check",
+  requireAuth,
+  requireMenuAccess("obus-user-create-bulk"),
+  async (req, res) => {
+    try {
+      const selectedCompaniesInput = parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies);
+      const pageState = await loadObusUserCreatePageState({
+        selectedCompaniesInput,
+        formSource: req.body
+      });
+      const selectedSet = new Set(pageState.selectedCompanyValues);
+      const selectedCompanies = pageState.companies.filter((item) => selectedSet.has(item.value));
+      const userEntries = normalizeObusBulkCreateUserEntries(req.body?.userEntries);
+
+      if (selectedCompanies.length === 0) {
+        return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
+      }
+      if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
+      }
+      if (userEntries.length === 0) {
+        return res.status(400).json({ ok: false, error: "En az bir kullanıcı satırı girmelisiniz." });
+      }
+      const hasMissingRequired = userEntries.some(
+        (entry) =>
+          !String(entry.fullName || "").trim() ||
+          !String(entry.username || "").trim() ||
+          !String(entry.password || "")
+      );
+      if (hasMissingRequired) {
+        return res.status(400).json({ ok: false, error: "Her satır için Ad Soyad, KullanıcıAdı ve Şifre zorunludur." });
+      }
+
+      const checkResult = await checkObusBulkUsersByCompanies({
+        companies: selectedCompanies,
+        userEntries
+      });
+      return res.json({
+        ok: true,
+        totalCount: Number(checkResult.totalCount || 0),
+        missingCount: Number(checkResult.missingCount || 0),
+        existingCount: Number(checkResult.existingCount || 0),
+        errorCount: Number(checkResult.errorCount || 0),
+        items: Array.isArray(checkResult.items) ? checkResult.items : []
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: `Toplu kullanıcı sorgusu tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
 
 app.post(
   "/api/obus-user-create/live/start",
