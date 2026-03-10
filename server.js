@@ -2293,6 +2293,36 @@ function buildUserLoginBaseUrls(companyUrl, endpointUrl) {
   return deduped;
 }
 
+function normalizePartnerIdForRouting(partnerId) {
+  const text = String(partnerId || "").trim();
+  if (!/^-?\d+$/.test(text)) return "";
+  const parsed = Number.parseInt(text, 10);
+  return Number.isFinite(parsed) ? String(parsed) : "";
+}
+
+function shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId } = {}) {
+  if (normalizeTokenName(partnerCode) !== "corp") return false;
+  const requiredPartnerId = normalizePartnerIdForRouting(PARTNERS_REQUIRED_EXTRA_ONLY_ID);
+  const normalizedPartnerId = normalizePartnerIdForRouting(partnerId);
+  return Boolean(requiredPartnerId && normalizedPartnerId && normalizedPartnerId === requiredPartnerId);
+}
+
+function buildUserLoginBaseUrlsWithOverrides({ companyUrl, endpointUrl, partnerCode, partnerId } = {}) {
+  const baseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
+  if (!shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId })) return baseUrls;
+
+  const preprodBaseUrl = normalizeTargetUrl(PARTNERS_REQUIRED_EXTRA_API_URL);
+  if (!preprodBaseUrl) return baseUrls;
+
+  const preferredBaseUrls = [preprodBaseUrl];
+  baseUrls.forEach((item) => {
+    const normalized = normalizeTargetUrl(item);
+    if (!normalized) return;
+    if (!preferredBaseUrls.includes(normalized)) preferredBaseUrls.push(normalized);
+  });
+  return preferredBaseUrls;
+}
+
 function buildClusterPartnerUrls(baseUrl) {
   const raw = String(baseUrl || "").trim();
   if (!raw) return [];
@@ -2685,6 +2715,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
   endpointUrl,
   companyUrl,
   partnerCode,
+  partnerId,
   username,
   password,
   fallbackBranchId
@@ -2693,6 +2724,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     endpointUrl,
     companyUrl,
     partnerCode,
+    partnerId,
     username,
     password,
     fallbackBranchId
@@ -2708,6 +2740,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     endpointUrl,
     companyUrl,
     partnerCode,
+    partnerId,
     username,
     password,
     fallbackBranchId,
@@ -3101,6 +3134,7 @@ async function fetchObusMerkezBranchMapForTarget({
     endpointUrl,
     companyUrl: endpointUrl,
     partnerCode: normalizedPartnerCode,
+    partnerId: normalizedFallbackPartnerId,
     username: INVENTORY_BRANCHES_LOGIN_USERNAME,
     password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
     fallbackBranchId: normalizedFallbackPartnerId,
@@ -7277,6 +7311,7 @@ async function fetchAuthorizedLinesLoginInfo({
   endpointUrl,
   companyUrl,
   partnerCode,
+  partnerId = "",
   username,
   password,
   fallbackBranchId,
@@ -7285,7 +7320,12 @@ async function fetchAuthorizedLinesLoginInfo({
   allowEmptyPartnerCode = false,
   loginBranchId = ""
 }) {
-  const loginBaseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
+  const loginBaseUrls = buildUserLoginBaseUrlsWithOverrides({
+    companyUrl,
+    endpointUrl,
+    partnerCode,
+    partnerId
+  });
   if (loginBaseUrls.length === 0) {
     return {
       ok: false,
@@ -7903,6 +7943,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     endpointUrl,
     companyUrl: "",
     partnerCode,
+    partnerId,
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
     password: OBUS_USER_CREATE_LOGIN_PASSWORD,
     fallbackBranchId: "",
@@ -8382,6 +8423,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
       const partnerCode =
         String(contextFromMap?.partnerCode || "").trim() ||
         String(contextGroup?.partnerCode || "").trim();
+      const loginPartnerId = String(clusterItems[0]?.["partner-id"] || "").trim();
       const loginBranchId = String(contextFromMap?.loginBranchId || "").trim();
 
       if (!deleteEndpointUrl) {
@@ -8398,6 +8440,7 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
         endpointUrl: deleteEndpointUrl,
         companyUrl: "",
         partnerCode,
+        partnerId: loginPartnerId,
         username: OBUS_USER_CREATE_LOGIN_USERNAME,
         password: OBUS_USER_CREATE_LOGIN_PASSWORD,
         fallbackBranchId: "",
@@ -8714,6 +8757,7 @@ async function createObusUserForCompany({ company, formValues }) {
     endpointUrl: createUserUrl,
     companyUrl: "",
     partnerCode,
+    partnerId: partnerIdRaw,
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
     password: OBUS_USER_CREATE_LOGIN_PASSWORD,
     fallbackBranchId: branchRaw,
@@ -9862,6 +9906,7 @@ app.get(
           endpointUrl: filters.endpointUrl,
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+          partnerId,
           username: filters.username,
           password: filters.password,
           fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
@@ -9984,6 +10029,7 @@ app.post(
           endpointUrl: filters.endpointUrl,
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+          partnerId,
           username: filters.username,
           password: filters.password,
           fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
