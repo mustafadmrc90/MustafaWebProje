@@ -2349,6 +2349,21 @@ button.ghost {
   margin-bottom: 6px;
 }
 
+.allowed-lines-debug-pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid #d7e0ec;
+  background: #f7f9fc;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #1f2735;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .obus-user-create-section {
   margin-bottom: 12px;
 }

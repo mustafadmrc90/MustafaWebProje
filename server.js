@@ -2606,6 +2606,81 @@ function resolveSelectedPartnerId({ selectedCompanyMeta, selectedCompanyValue, c
   return "";
 }
 
+function buildAuthorizedLinesLoginRequestBodyPreview({
+  partnerCode = "",
+  username = "",
+  loginBranchId = ""
+} = {}) {
+  const body = {
+    data: {
+      username: String(username || "").trim(),
+      password: "***",
+      "remember-me": 0,
+      "partner-code": String(partnerCode || "").trim()
+    },
+    "device-session": {
+      "session-id": "<session-id>",
+      "device-id": "<device-id>"
+    },
+    date: "2020-02-24T18:03:00",
+    language: "tr-TR"
+  };
+  const normalizedLoginBranchId = String(loginBranchId || "").trim();
+  if (normalizedLoginBranchId) {
+    body.data["branch-id"] = normalizedLoginBranchId;
+  }
+  return JSON.stringify(body, null, 2);
+}
+
+async function loadAuthorizedLinesCompanies() {
+  const cacheResult = await fetchAllCompaniesRowsFromCache();
+  const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+  const partnerItems = normalizePartnerItems(
+    cacheRows.map((row) => ({
+      code: String(row?.code || "").trim(),
+      id: String(row?.id || "").trim(),
+      cluster: extractClusterLabel(String(row?.source || "").trim()),
+      url: normalizeTargetUrl(row?.url || ""),
+      branchId: String(row?.ObusMerkezSubeID || row?.obus_merkez_sube_id || "").trim()
+    }))
+  );
+
+  const companies = [{ value: "", label: "Firma seçiniz" }].concat(
+    partnerItems.map((item) => {
+      const idText = item.id || "N/A";
+      const clusterText = item.cluster || "cluster";
+      const obusMerkezSubeId = String(item.branchId || "").trim();
+      const label = `${item.code} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${obusMerkezSubeId || "-"}`;
+      const value = buildCompanyOptionValue(item);
+      return {
+        value,
+        label,
+        meta: item
+      };
+    })
+  );
+
+  let partnerError = cacheResult?.error || null;
+  if (!partnerError && partnerItems.length === 0) {
+    partnerError =
+      "Firma listesi SQL'de boş. Önce Tüm Firmalar ekranında 'Servisten Güncelle' ve 'SQL'e Kaydet' çalıştırın.";
+  }
+
+  if (partnerError) {
+    companies.push({
+      value: "__partner_error__",
+      label: `Hata: ${partnerError}`,
+      disabled: true
+    });
+  }
+
+  return {
+    companies,
+    partnerItems,
+    partnerError
+  };
+}
+
 async function loadPartnerCodesCache() {
   try {
     const raw = await fs.readFile(PARTNER_CODES_CACHE_FILE, "utf8");
@@ -7127,6 +7202,7 @@ function buildAuthorizedLinesReportModel() {
     requested: false,
     status: null,
     error: null,
+    errorDetail: "",
     userMessage: "",
     requestBody: "",
     responseBody: "",
@@ -9676,27 +9752,7 @@ app.get(
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
     const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
-    const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
-    const companies = [{ value: "", label: "Firma seçiniz" }].concat(
-      partnerItems.map((item) => {
-        const idText = item.id || "N/A";
-        const clusterText = item.cluster || "cluster";
-        const label = `${item.code} - ${idText} - ${clusterText}`;
-        const value = buildCompanyOptionValue(item);
-        return {
-          value,
-          label,
-          meta: item
-        };
-      })
-    );
-    if (partnerError) {
-      companies.push({
-        value: "__partner_error__",
-        label: `Hata: ${partnerError}`,
-        disabled: true
-      });
-    }
+    const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
 
     const selectedCompanyOption = companies.find(
       (item) => !item.disabled && item.value === requestedCompany && item.meta
@@ -9760,15 +9816,27 @@ app.get(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.errorDetail =
+            String(loginResult.errorDetail || "").trim() || String(loginResult.tokenMissingDetail || "").trim();
           report.userMessage = "";
-          report.requestBody = "{}";
+          report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+            partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+            username: filters.username,
+            loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
+          });
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.errorDetail =
+              String(loginResult.tokenMissingDetail || "").trim() || String(loginResult.errorDetail || "").trim();
             report.userMessage = "";
-            report.requestBody = "{}";
+            report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+              username: filters.username,
+              loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
+            });
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
@@ -9783,6 +9851,9 @@ app.get(
             report.userMessage = reportResult.userMessage || "";
             report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
+            report.errorDetail = reportResult.error
+              ? String(reportResult.responseBody || "").trim() || String(reportResult.error || "").trim()
+              : "";
             report.sessionId = reportResult.sessionId || report.sessionId;
             report.deviceId = reportResult.deviceId || report.deviceId;
           }
@@ -9807,27 +9878,7 @@ app.post(
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
     const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
-    const { partners: partnerItems, error: partnerError } = await fetchPartnerCodes();
-    const companies = [{ value: "", label: "Firma seçiniz" }].concat(
-      partnerItems.map((item) => {
-        const idText = item.id || "N/A";
-        const clusterText = item.cluster || "cluster";
-        const label = `${item.code} - ${idText} - ${clusterText}`;
-        const value = buildCompanyOptionValue(item);
-        return {
-          value,
-          label,
-          meta: item
-        };
-      })
-    );
-    if (partnerError) {
-      companies.push({
-        value: "__partner_error__",
-        label: `Hata: ${partnerError}`,
-        disabled: true
-      });
-    }
+    const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
 
     const selectedCompanyOption = companies.find(
       (item) => !item.disabled && item.value === requestedCompany && item.meta
@@ -9886,15 +9937,27 @@ app.post(
 
         if (!loginResult.ok) {
           report.error = loginResult.error || "UserLogin başarısız.";
+          report.errorDetail =
+            String(loginResult.errorDetail || "").trim() || String(loginResult.tokenMissingDetail || "").trim();
           report.userMessage = "";
-          report.requestBody = "{}";
+          report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+            partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+            username: filters.username,
+            loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
+          });
           report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
         } else {
           const effectiveToken = String(loginResult.token || "").trim();
           if (!effectiveToken) {
             report.error = "UserLogin yanıtında token bulunamadı.";
+            report.errorDetail =
+              String(loginResult.tokenMissingDetail || "").trim() || String(loginResult.errorDetail || "").trim();
             report.userMessage = "";
-            report.requestBody = "{}";
+            report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+              username: filters.username,
+              loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
+            });
             report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
           } else {
             const reportResult = await fetchAuthorizedLinesUploadReport({
@@ -9909,6 +9972,9 @@ app.post(
             report.userMessage = reportResult.userMessage || "";
             report.requestBody = reportResult.requestBody;
             report.responseBody = reportResult.responseBody;
+            report.errorDetail = reportResult.error
+              ? String(reportResult.responseBody || "").trim() || String(reportResult.error || "").trim()
+              : "";
             report.sessionId = reportResult.sessionId || report.sessionId;
             report.deviceId = reportResult.deviceId || report.deviceId;
           }

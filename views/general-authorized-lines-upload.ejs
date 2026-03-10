@@ -98,11 +98,23 @@
           <% if (report.requested && !report.error && report.userMessage) { %>
             <div class="inline-success"><%= report.userMessage %></div>
           <% } else if (report.requested && report.error) { %>
-            <div class="pill muted">İşlem tamamlanamadı.</div>
+            <div class="alert inline-alert"><%= report.error %></div>
           <% } else { %>
             <div class="pill muted">Henüz sonuç yok.</div>
           <% } %>
         </div>
+        <% if (report.requested) { %>
+          <div class="allowed-lines-result-grid">
+            <div class="allowed-lines-result-item">
+              <div class="label">İstek Body</div>
+              <pre class="allowed-lines-debug-pre"><%= report.requestBody || "{}" %></pre>
+            </div>
+            <div class="allowed-lines-result-item">
+              <div class="label"><%= report.error ? "Hata Detayı / Yanıt" : "Yanıt" %></div>
+              <pre class="allowed-lines-debug-pre"><%= report.errorDetail || report.responseBody || "-" %></pre>
+            </div>
+          </div>
+        <% } %>
       </section>
     </section>
     <script src="/public/app.js" defer></script>
