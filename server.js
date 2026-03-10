@@ -1608,6 +1608,27 @@ function shouldExcludeAllCompaniesCode(codeValue) {
   return false;
 }
 
+function isAllCompaniesObusMerkezDebugTarget(row) {
+  const code = normalizeTokenName(row?.code);
+  const idRaw = String(row?.id || "").trim();
+  const idNoLeadingZero = idRaw.replace(/^0+/, "");
+  return code === "corp" && (idRaw === "016" || idNoLeadingZero === "16");
+}
+
+function logAllCompaniesObusMerkezDebug(stage, details = {}) {
+  const normalizedStage = String(stage || "").trim() || "unknown";
+  const payload = details && typeof details === "object" ? details : { detail: String(details || "") };
+  let serialized = "";
+  try {
+    serialized = JSON.stringify(payload);
+  } catch (err) {
+    serialized = String(payload);
+  }
+  console.log(
+    `[AllCompanies][ObusMerkezSubeID][corp-016] ${normalizedStage}${serialized ? ` | ${serialized}` : ""}`
+  );
+}
+
 function normalizeAllCompaniesReportRows(rows) {
   const reportColumns = [
     "id",
@@ -3105,20 +3126,38 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const partnerCode = String(row?.code || "").trim();
       const clusterLabel = extractClusterLabel(row?.source);
       const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
+      const isDebugTarget = isAllCompaniesObusMerkezDebugTarget(row);
+      if (isDebugTarget) {
+        logAllCompaniesObusMerkezDebug("start-row", {
+          rowRef,
+          source: String(row?.source || "").trim(),
+          partnerCode,
+          partnerId
+        });
+      }
 
       if (!partnerId) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("missing-partner-id", { rowRef });
+        }
         return {
           branchId: "",
           errorMessage: `${rowRef}: partner-id boş.`
         };
       }
       if (!partnerCode) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("missing-partner-code", { rowRef });
+        }
         return {
           branchId: "",
           errorMessage: `${rowRef}: partner-code boş.`
         };
       }
       if (!clusterLabel) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("missing-cluster", { rowRef });
+        }
         return {
           branchId: "",
           errorMessage: `${rowRef}: cluster bilgisi boş.`
@@ -3131,8 +3170,23 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         fallbackPartnerId: partnerId,
         signal
       });
+      if (isDebugTarget) {
+        logAllCompaniesObusMerkezDebug("fetch-result", {
+          rowRef,
+          resultCluster: String(result?.cluster || "").trim(),
+          mapSize: result?.map instanceof Map ? result.map.size : 0,
+          rowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
+          error: String(result?.error || "").trim()
+        });
+      }
 
       if (result.error) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("fetch-error", {
+            rowRef,
+            error: compactErrorText(result.error, 320)
+          });
+        }
         return {
           branchId: "",
           errorMessage: `${rowRef}: ${compactErrorText(result.error)}`
@@ -3142,6 +3196,9 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const mapBranchId =
         result.map instanceof Map ? String(result.map.get(partnerId) || "").trim() : "";
       if (mapBranchId) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-map", { rowRef, branchId: mapBranchId });
+        }
         return {
           branchId: mapBranchId,
           errorMessage: null
@@ -3154,12 +3211,18 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           ).trim()
         : "";
       if (rowBranchId) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-rows", { rowRef, branchId: rowBranchId });
+        }
         return {
           branchId: rowBranchId,
           errorMessage: null
         };
       }
 
+      if (isDebugTarget) {
+        logAllCompaniesObusMerkezDebug("not-found-in-fetch-result", { rowRef });
+      }
       return {
         branchId: "",
         errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`
@@ -3173,12 +3236,21 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     const row = enrichedRows[index];
     if (!row) return;
     const partnerId = String(row?.id || "").trim();
+    const isDebugTarget = isAllCompaniesObusMerkezDebugTarget(row);
 
     const resolvedBranchId = String(result?.branchId || "").trim();
     if (resolvedBranchId) {
       row.ObusMerkezSubeID = resolvedBranchId;
       if (partnerId && !resolvedByPartnerId.has(partnerId)) {
         resolvedByPartnerId.set(partnerId, resolvedBranchId);
+      }
+      if (isDebugTarget) {
+        logAllCompaniesObusMerkezDebug("resolved-after-worker", {
+          source: String(row?.source || "").trim(),
+          partnerCode: String(row?.code || "").trim(),
+          partnerId,
+          branchId: resolvedBranchId
+        });
       }
       return;
     }
@@ -3187,6 +3259,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const siblingResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
       if (siblingResolvedBranchId) {
         row.ObusMerkezSubeID = siblingResolvedBranchId;
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-sibling", {
+            source: String(row?.source || "").trim(),
+            partnerCode: String(row?.code || "").trim(),
+            partnerId,
+            branchId: siblingResolvedBranchId
+          });
+        }
         return;
       }
     }
@@ -3207,7 +3287,8 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     unresolvedItems.push({
       index,
       partnerId,
-      errorMessage
+      errorMessage,
+      isDebugTarget
     });
   });
 
@@ -3216,6 +3297,12 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   );
   let fallbackErrorMessage = "";
   if (unresolvedAfterSiblingPass.length > 0 && !Boolean(signal?.aborted)) {
+    const hasDebugTarget = unresolvedAfterSiblingPass.some((item) => item.isDebugTarget === true);
+    if (hasDebugTarget) {
+      logAllCompaniesObusMerkezDebug("fallback-start", {
+        unresolvedCount: unresolvedAfterSiblingPass.length
+      });
+    }
     const fallbackResult = await collectObusMerkezBranchRowsForAllCompanies(enrichedRows);
     const fallbackRows = Array.isArray(fallbackResult?.rows) ? fallbackResult.rows : [];
     const fallbackMapByPartnerId = new Map();
@@ -3239,9 +3326,23 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       if (!resolvedByPartnerId.has(partnerId)) {
         resolvedByPartnerId.set(partnerId, fallbackBranchId);
       }
+      if (item.isDebugTarget === true) {
+        logAllCompaniesObusMerkezDebug("resolved-from-fallback", {
+          source: String(row?.source || "").trim(),
+          partnerCode: String(row?.code || "").trim(),
+          partnerId,
+          branchId: fallbackBranchId
+        });
+      }
     });
 
     fallbackErrorMessage = String(fallbackResult?.error || "").trim();
+    if (hasDebugTarget) {
+      logAllCompaniesObusMerkezDebug("fallback-result", {
+        rowCount: fallbackRows.length,
+        error: compactErrorText(fallbackErrorMessage, 320)
+      });
+    }
   }
 
   const finalUnresolvedItems = unresolvedItems.filter(
@@ -3250,6 +3351,15 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   finalUnresolvedItems.forEach((item) => {
     if (item.errorMessage) {
       errors.push(item.errorMessage);
+    }
+    if (item.isDebugTarget === true) {
+      const row = enrichedRows[item.index];
+      logAllCompaniesObusMerkezDebug("final-unresolved", {
+        source: String(row?.source || "").trim(),
+        partnerCode: String(row?.code || "").trim(),
+        partnerId: String(row?.id || "").trim(),
+        error: item.errorMessage
+      });
     }
   });
   if (fallbackErrorMessage && finalUnresolvedItems.length > 0) {
