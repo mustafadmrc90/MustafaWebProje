@@ -1597,6 +1597,17 @@ function readPartnerRawValueByAliases(row, aliases = []) {
   return undefined;
 }
 
+function shouldExcludeAllCompaniesCode(codeValue) {
+  const rawCode = String(codeValue || "").trim().toLocaleLowerCase("tr");
+  if (!rawCode) return false;
+
+  if (normalizeTokenName(rawCode) === "admin") return true;
+  if (rawCode.includes("testcluster")) return true;
+  if (rawCode.includes("_old")) return true;
+
+  return false;
+}
+
 function normalizeAllCompaniesReportRows(rows) {
   const reportColumns = [
     "id",
@@ -1611,7 +1622,10 @@ function normalizeAllCompaniesReportRows(rows) {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .filter((row) => {
       const statusRaw = readPartnerRawValueByAliases(row, ["status", "status-code", "status_code"]);
-      return Number(statusRaw) === 1;
+      if (Number(statusRaw) !== 1) return false;
+      const codeRaw = readPartnerRawValueByAliases(row, ["code"]);
+      if (shouldExcludeAllCompaniesCode(codeRaw)) return false;
+      return true;
     })
     .map((row) => ({
       id: formatPartnerCellValue(
@@ -1673,6 +1687,7 @@ function buildAllCompaniesCacheRowKey(row) {
 function normalizeAllCompaniesCacheRow(row) {
   const id = formatPartnerCellValue(row?.id);
   const code = formatPartnerCellValue(row?.code);
+  if (shouldExcludeAllCompaniesCode(code)) return null;
   const source = extractClusterLabel(formatPartnerCellValue(row?.source));
   return {
     id,
@@ -1689,6 +1704,7 @@ function normalizeAllCompaniesCacheRows(rows) {
   const deduped = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const normalized = normalizeAllCompaniesCacheRow(row);
+    if (!normalized) return;
     const key = buildAllCompaniesCacheRowKey(normalized);
     deduped.set(key, normalized);
   });
@@ -2835,10 +2851,32 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "")
     "partner_id",
     "partnerid",
     "partnerId",
-    "partnerID"
+    "partnerID",
+    "provider-id",
+    "provider_id",
+    "providerid",
+    "providerId",
+    "providerID"
   ];
-  const branchIdAliases = ["id"];
-  const branchNameAliases = ["name"];
+  const branchIdAliases = [
+    "id",
+    "branch-id",
+    "branch_id",
+    "branchid",
+    "branch-key",
+    "branch_key",
+    "branchkey"
+  ];
+  const branchNameAliases = [
+    "name",
+    "branch-name",
+    "branch_name",
+    "branchname",
+    "label",
+    "title",
+    "text",
+    "value"
+  ];
   void fallbackPartnerId;
 
   const walk = (node) => {
@@ -3039,6 +3077,13 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     ...row,
     ObusMerkezSubeID: String(row?.ObusMerkezSubeID || "").trim()
   }));
+  const resolvedByPartnerId = new Map();
+  enrichedRows.forEach((row) => {
+    const partnerId = String(row?.id || "").trim();
+    const branchId = String(row?.ObusMerkezSubeID || "").trim();
+    if (!partnerId || !branchId) return;
+    if (!resolvedByPartnerId.has(partnerId)) resolvedByPartnerId.set(partnerId, branchId);
+  });
 
   const enrichResults = await runWithConcurrency(
     enrichedRows,
@@ -3123,30 +3168,93 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     () => Boolean(signal?.aborted)
   );
 
+  const unresolvedItems = [];
   enrichResults.forEach((result, index) => {
     const row = enrichedRows[index];
     if (!row) return;
+    const partnerId = String(row?.id || "").trim();
 
     const resolvedBranchId = String(result?.branchId || "").trim();
     if (resolvedBranchId) {
       row.ObusMerkezSubeID = resolvedBranchId;
+      if (partnerId && !resolvedByPartnerId.has(partnerId)) {
+        resolvedByPartnerId.set(partnerId, resolvedBranchId);
+      }
       return;
     }
 
+    if (partnerId) {
+      const siblingResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      if (siblingResolvedBranchId) {
+        row.ObusMerkezSubeID = siblingResolvedBranchId;
+        return;
+      }
+    }
+
+    let errorMessage = "";
     if (typeof result?.errorMessage === "string" && result.errorMessage.trim()) {
-      errors.push(result.errorMessage.trim());
-      return;
+      errorMessage = result.errorMessage.trim();
+    } else {
+      const runtimeError = result?.error;
+      if (runtimeError) {
+        const partnerCode = String(row?.code || "").trim();
+        const clusterLabel = extractClusterLabel(row?.source);
+        const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
+        errorMessage = `${rowRef}: ${compactErrorText(runtimeError?.message || runtimeError)}`;
+      }
     }
 
-    const runtimeError = result?.error;
-    if (runtimeError) {
-      const partnerId = String(row?.id || "").trim();
-      const partnerCode = String(row?.code || "").trim();
-      const clusterLabel = extractClusterLabel(row?.source);
-      const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
-      errors.push(`${rowRef}: ${compactErrorText(runtimeError?.message || runtimeError)}`);
+    unresolvedItems.push({
+      index,
+      partnerId,
+      errorMessage
+    });
+  });
+
+  const unresolvedAfterSiblingPass = unresolvedItems.filter(
+    (item) => !String(enrichedRows[item.index]?.ObusMerkezSubeID || "").trim()
+  );
+  let fallbackErrorMessage = "";
+  if (unresolvedAfterSiblingPass.length > 0 && !Boolean(signal?.aborted)) {
+    const fallbackResult = await collectObusMerkezBranchRowsForAllCompanies(enrichedRows);
+    const fallbackRows = Array.isArray(fallbackResult?.rows) ? fallbackResult.rows : [];
+    const fallbackMapByPartnerId = new Map();
+    fallbackRows.forEach((row) => {
+      const partnerId = String(row?.partnerId || "").trim();
+      const branchId = String(row?.branchId || "").trim();
+      if (!partnerId || !branchId) return;
+      if (!fallbackMapByPartnerId.has(partnerId)) {
+        fallbackMapByPartnerId.set(partnerId, branchId);
+      }
+    });
+
+    unresolvedAfterSiblingPass.forEach((item) => {
+      const row = enrichedRows[item.index];
+      if (!row || String(row?.ObusMerkezSubeID || "").trim()) return;
+      const partnerId = String(item.partnerId || "").trim();
+      if (!partnerId) return;
+      const fallbackBranchId = String(fallbackMapByPartnerId.get(partnerId) || "").trim();
+      if (!fallbackBranchId) return;
+      row.ObusMerkezSubeID = fallbackBranchId;
+      if (!resolvedByPartnerId.has(partnerId)) {
+        resolvedByPartnerId.set(partnerId, fallbackBranchId);
+      }
+    });
+
+    fallbackErrorMessage = String(fallbackResult?.error || "").trim();
+  }
+
+  const finalUnresolvedItems = unresolvedItems.filter(
+    (item) => !String(enrichedRows[item.index]?.ObusMerkezSubeID || "").trim()
+  );
+  finalUnresolvedItems.forEach((item) => {
+    if (item.errorMessage) {
+      errors.push(item.errorMessage);
     }
   });
+  if (fallbackErrorMessage && finalUnresolvedItems.length > 0) {
+    errors.push(`GetBranches fallback: ${compactErrorText(fallbackErrorMessage, 240)}`);
+  }
 
   if (Boolean(signal?.aborted)) {
     errors.push("zaman aşımı nedeniyle kısmi sonuç üretildi");
