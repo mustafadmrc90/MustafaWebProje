@@ -2681,6 +2681,65 @@ async function loadAuthorizedLinesCompanies() {
   };
 }
 
+async function resolveAuthorizedLinesLoginResultWithBranchFallback({
+  endpointUrl,
+  companyUrl,
+  partnerCode,
+  username,
+  password,
+  fallbackBranchId
+}) {
+  const initialResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl,
+    partnerCode,
+    username,
+    password,
+    fallbackBranchId
+  });
+  const initialToken = String(initialResult?.token || "").trim();
+  const obusMerkezBranchKey = String(initialResult?.obusMerkezBranchKey || "").trim();
+
+  if (!(initialResult?.ok === true && !initialToken && obusMerkezBranchKey)) {
+    return initialResult;
+  }
+
+  const retryResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl,
+    partnerCode,
+    username,
+    password,
+    fallbackBranchId,
+    loginBranchId: obusMerkezBranchKey
+  });
+  const retryToken = String(retryResult?.token || "").trim();
+  if (retryResult?.ok === true && retryToken) {
+    return retryResult;
+  }
+
+  const mergedDetail = [
+    String(initialResult?.tokenMissingDetail || initialResult?.errorDetail || "").trim(),
+    String(retryResult?.tokenMissingDetail || retryResult?.errorDetail || "").trim()
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  return {
+    ok: false,
+    error: String(retryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
+    errorDetail: mergedDetail,
+    sessionId: String(retryResult?.sessionId || initialResult?.sessionId || "").trim(),
+    deviceId: String(retryResult?.deviceId || initialResult?.deviceId || "").trim(),
+    branchId: String(retryResult?.branchId || initialResult?.branchId || obusMerkezBranchKey || "").trim(),
+    token: retryToken,
+    obusMerkezBranchKey: String(retryResult?.obusMerkezBranchKey || obusMerkezBranchKey || "").trim(),
+    tokenMissingDetail: mergedDetail,
+    rawLoginBody: String(retryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
+    loginUrl: String(retryResult?.loginUrl || initialResult?.loginUrl || "").trim()
+  };
+}
+
 async function loadPartnerCodesCache() {
   try {
     const raw = await fs.readFile(PARTNER_CODES_CACHE_FILE, "utf8");
@@ -9799,7 +9858,7 @@ app.get(
         report.requested = true;
         report.error = "Kullanıcı adı ve şifre zorunludur.";
       } else {
-        const loginResult = await fetchAuthorizedLinesLoginInfo({
+        const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
           endpointUrl: filters.endpointUrl,
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
@@ -9921,7 +9980,7 @@ app.post(
       if (!partnerId) {
         report.error = "Seçilen firma için PartnerId bulunamadı.";
       } else {
-        const loginResult = await fetchAuthorizedLinesLoginInfo({
+        const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
           endpointUrl: filters.endpointUrl,
           companyUrl: String(selectedCompanyMeta?.url || "").trim(),
           partnerCode: String(selectedCompanyMeta?.code || "").trim(),
