@@ -135,8 +135,12 @@
                 <% report.rows.forEach((row) => { %>
                   <tr>
                     <% report.columns.forEach((column) => { %>
-                      <% const value = row[column]; %>
-                      <td title="<%= value ?? '' %>"><%= value === undefined || value === null ? "-" : value %></td>
+                      <% const isObusDebugColumn = column === "ObusMerkezSubeID"; %>
+                      <% const rawValue = row[column]; %>
+                      <% const debugValue = isObusDebugColumn ? String(row.ObusMerkezSubeIDDebug || "").trim() : ""; %>
+                      <% const normalizedValue = rawValue === undefined || rawValue === null ? "" : String(rawValue).trim(); %>
+                      <% const displayValue = normalizedValue || debugValue || "-"; %>
+                      <td title="<%= displayValue %>"><%= displayValue %></td>
                     <% }) %>
                   </tr>
                 <% }) %>

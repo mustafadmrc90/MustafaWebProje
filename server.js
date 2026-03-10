@@ -1610,9 +1610,9 @@ function shouldExcludeAllCompaniesCode(codeValue) {
 
 function isAllCompaniesObusMerkezDebugTarget(row) {
   const code = normalizeTokenName(row?.code);
-  const idRaw = String(row?.id || "").trim();
-  const idNoLeadingZero = idRaw.replace(/^0+/, "");
-  return code === "corp" && (idRaw === "016" || idNoLeadingZero === "16");
+  if (code === "corp") return true;
+  const url = String(row?.url || "").trim().toLocaleLowerCase("tr");
+  return url.includes("corp.obus.com.tr");
 }
 
 function logAllCompaniesObusMerkezDebug(stage, details = {}) {
@@ -1625,7 +1625,7 @@ function logAllCompaniesObusMerkezDebug(stage, details = {}) {
     serialized = String(payload);
   }
   console.log(
-    `[AllCompanies][ObusMerkezSubeID][corp-016] ${normalizedStage}${serialized ? ` | ${serialized}` : ""}`
+    `[AllCompanies][ObusMerkezSubeID][corp] ${normalizedStage}${serialized ? ` | ${serialized}` : ""}`
   );
 }
 
@@ -3241,6 +3241,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     const resolvedBranchId = String(result?.branchId || "").trim();
     if (resolvedBranchId) {
       row.ObusMerkezSubeID = resolvedBranchId;
+      row.ObusMerkezSubeIDDebug = "";
       if (partnerId && !resolvedByPartnerId.has(partnerId)) {
         resolvedByPartnerId.set(partnerId, resolvedBranchId);
       }
@@ -3259,6 +3260,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const siblingResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
       if (siblingResolvedBranchId) {
         row.ObusMerkezSubeID = siblingResolvedBranchId;
+        row.ObusMerkezSubeIDDebug = "";
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("resolved-from-sibling", {
             source: String(row?.source || "").trim(),
@@ -3323,6 +3325,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const fallbackBranchId = String(fallbackMapByPartnerId.get(partnerId) || "").trim();
       if (!fallbackBranchId) return;
       row.ObusMerkezSubeID = fallbackBranchId;
+      row.ObusMerkezSubeIDDebug = "";
       if (!resolvedByPartnerId.has(partnerId)) {
         resolvedByPartnerId.set(partnerId, fallbackBranchId);
       }
@@ -3354,11 +3357,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     }
     if (item.isDebugTarget === true) {
       const row = enrichedRows[item.index];
+      const debugText = `LOG: ${compactErrorText(item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata", 320)}`;
+      row.ObusMerkezSubeIDDebug = debugText;
       logAllCompaniesObusMerkezDebug("final-unresolved", {
         source: String(row?.source || "").trim(),
         partnerCode: String(row?.code || "").trim(),
         partnerId: String(row?.id || "").trim(),
-        error: item.errorMessage
+        error: item.errorMessage,
+        debugText
       });
     }
   });
