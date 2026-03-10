@@ -3034,6 +3034,7 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
 
 function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "") {
   const rows = [];
+  const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
   const partnerIdAliases = [
     "partner-id",
     "partner_id",
@@ -3065,7 +3066,6 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "")
     "text",
     "value"
   ];
-  void fallbackPartnerId;
 
   const walk = (node) => {
     if (node === null || node === undefined) return;
@@ -3086,7 +3086,8 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "")
 
     const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
     if (normalizeTokenName(branchName) === "obusmerkez") {
-      const partnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+      const partnerId =
+        formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases)) || normalizedFallbackPartnerId;
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
       if (partnerId && branchId) {
         rows.push({
@@ -3389,7 +3390,51 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       }
 
       if (isDebugTarget) {
-        logAllCompaniesObusMerkezDebug("not-found-in-fetch-result", { rowRef });
+        const mapKeys =
+          result?.map instanceof Map
+            ? Array.from(result.map.keys())
+                .map((item) => String(item || "").trim())
+                .filter(Boolean)
+            : [];
+        const rowPartnerIds = Array.isArray(result?.rows)
+          ? Array.from(
+              new Set(
+                result.rows
+                  .map((item) => String(item?.partnerId || "").trim())
+                  .filter(Boolean)
+              )
+            )
+          : [];
+        const rowBranchIds = Array.isArray(result?.rows)
+          ? Array.from(
+              new Set(
+                result.rows
+                  .map((item) => String(item?.branchId || "").trim())
+                  .filter(Boolean)
+              )
+            )
+          : [];
+        logAllCompaniesObusMerkezDebug("not-found-in-fetch-result", {
+          rowRef,
+          mapSize: result?.map instanceof Map ? result.map.size : 0,
+          mapKeys: mapKeys.slice(0, 10),
+          rowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
+          rowPartnerIds: rowPartnerIds.slice(0, 10),
+          rowBranchIds: rowBranchIds.slice(0, 10)
+        });
+        const debugDetail = [
+          "Eşleşen OBUSMERKEZ kaydı bulunamadı.",
+          `mapSize=${result?.map instanceof Map ? result.map.size : 0}`,
+          `mapKeys=${mapKeys.slice(0, 5).join(",") || "-"}`,
+          `rowCount=${Array.isArray(result?.rows) ? result.rows.length : 0}`,
+          `rowPartnerIds=${rowPartnerIds.slice(0, 5).join(",") || "-"}`,
+          `rowBranchIds=${rowBranchIds.slice(0, 5).join(",") || "-"}`
+        ].join(" | ");
+        return {
+          branchId: "",
+          errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`,
+          debugDetail
+        };
       }
       return {
         branchId: "",
@@ -3458,7 +3503,8 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       index,
       partnerId,
       errorMessage,
-      isDebugTarget
+      isDebugTarget,
+      debugDetail: String(result?.debugDetail || "").trim()
     });
   });
 
@@ -3525,13 +3571,17 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     }
     if (item.isDebugTarget === true) {
       const row = enrichedRows[item.index];
-      const debugText = `LOG: ${compactErrorText(item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata", 320)}`;
+      const debugText = `LOG: ${compactErrorText(
+        item.debugDetail || item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata",
+        520
+      )}`;
       row.ObusMerkezSubeIDDebug = debugText;
       logAllCompaniesObusMerkezDebug("final-unresolved", {
         source: String(row?.source || "").trim(),
         partnerCode: String(row?.code || "").trim(),
         partnerId: String(row?.id || "").trim(),
         error: item.errorMessage,
+        debugDetail: item.debugDetail,
         debugText
       });
     }
