@@ -1993,6 +1993,60 @@
     });
   };
 
+  const initAllCompaniesObusJobMonitor = () => {
+    const statusBoxes = Array.from(document.querySelectorAll("[data-all-companies-job='1']"));
+    if (statusBoxes.length === 0) return;
+
+    statusBoxes.forEach((statusBox) => {
+      if (statusBox.dataset.jobMonitorBound === "1") return;
+      statusBox.dataset.jobMonitorBound = "1";
+
+      const jobId = String(statusBox.getAttribute("data-job-id") || "").trim();
+      const jobDone = String(statusBox.getAttribute("data-job-done") || "").trim() === "1";
+      const refreshUrl =
+        String(statusBox.getAttribute("data-refresh-url") || "").trim() || window.location.pathname + window.location.search;
+      const runningMessage = String(statusBox.getAttribute("data-running-message") || "").trim();
+      const showCounts = String(statusBox.getAttribute("data-show-counts") || "").trim() === "1";
+      if (!jobId || jobDone) return;
+
+      let cursor = 0;
+
+      const poll = async () => {
+        try {
+          const response = await fetch(`/api/obus-live/${encodeURIComponent(jobId)}?cursor=${cursor}`, {
+            headers: {
+              Accept: "application/json"
+            }
+          });
+          const data = await parseJsonResponse(response);
+          if (!response.ok || !data?.ok) {
+            throw new Error(getApiErrorMessage(response, data, "İş durumu alınamadı"));
+          }
+
+          cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
+          const processed = Number(data.processedCount || 0);
+          const total = Number(data.totalCount || 0);
+          const success = Number(data.successCount || 0);
+          const failure = Number(data.failureCount || 0);
+          statusBox.textContent = showCounts
+            ? `${runningMessage || "İşlem sürüyor."} İşlenen: ${processed}/${total} | Başarılı: ${success} | Hatalı: ${failure}`
+            : runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
+
+          if (data.done) {
+            window.location.href = refreshUrl;
+            return;
+          }
+        } catch (err) {
+          statusBox.textContent = err?.message || "İş durumu okunamadı.";
+        }
+
+        window.setTimeout(poll, 2500);
+      };
+
+      window.setTimeout(poll, 1000);
+    });
+  };
+
   const initPermissionsBulkForm = () => {
     const form = document.querySelector("form[action^='/permissions/']");
     if (!form) return;
@@ -2043,6 +2097,7 @@
     initObusUserCreateBuilder();
     initObusUserDeactivateForm();
     initAllCompaniesLoading();
+    initAllCompaniesObusJobMonitor();
     initPermissionsBulkForm();
 
     const modal = document.querySelector("#endpoint-modal");
