@@ -2024,10 +2024,10 @@
           const data = await parseJsonResponse(response);
           const isLoginRedirect = response.status === 401 || (response.redirected && /\/login(?:$|[?#])/.test(response.url || ""));
           const isTransientStatus = [502, 503, 504].includes(Number(response.status || 0));
-          if (isLoginRedirect) {
-            throw new Error("__AUTH__");
-          }
           if (isTransientStatus) {
+            throw new Error("__TRANSIENT__");
+          }
+          if (isLoginRedirect) {
             throw new Error("__TRANSIENT__");
           }
           if (!response.ok || !data?.ok) {
@@ -2045,19 +2045,11 @@
             : runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
 
           if (data.done) {
-            window.location.href = refreshUrl;
+            navigate(refreshUrl, { push: true });
             return;
           }
         } catch (err) {
           const errorCode = String(err?.message || "").trim();
-          if (errorCode === "__AUTH__") {
-            statusBox.textContent = runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
-            window.setTimeout(() => {
-              window.location.href = refreshUrl;
-            }, 2000);
-            return;
-          }
-
           if (errorCode === "__TRANSIENT__" || !errorCode || /Failed to fetch/i.test(errorCode)) {
             transientFailureCount += 1;
             statusBox.textContent = runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
