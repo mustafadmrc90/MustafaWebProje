@@ -2010,19 +2010,31 @@
       if (!jobId || jobDone) return;
 
       let cursor = 0;
+      let transientFailureCount = 0;
 
       const poll = async () => {
         try {
           const response = await fetch(`/api/obus-live/${encodeURIComponent(jobId)}?cursor=${cursor}`, {
             headers: {
               Accept: "application/json"
-            }
+            },
+            cache: "no-store",
+            credentials: "same-origin"
           });
           const data = await parseJsonResponse(response);
+          const isLoginRedirect = response.status === 401 || (response.redirected && /\/login(?:$|[?#])/.test(response.url || ""));
+          const isTransientStatus = [502, 503, 504].includes(Number(response.status || 0));
+          if (isLoginRedirect) {
+            throw new Error("__AUTH__");
+          }
+          if (isTransientStatus) {
+            throw new Error("__TRANSIENT__");
+          }
           if (!response.ok || !data?.ok) {
             throw new Error(getApiErrorMessage(response, data, "İş durumu alınamadı"));
           }
 
+          transientFailureCount = 0;
           cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
           const processed = Number(data.processedCount || 0);
           const total = Number(data.totalCount || 0);
@@ -2037,6 +2049,22 @@
             return;
           }
         } catch (err) {
+          const errorCode = String(err?.message || "").trim();
+          if (errorCode === "__AUTH__") {
+            statusBox.textContent = runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
+            window.setTimeout(() => {
+              window.location.href = refreshUrl;
+            }, 2000);
+            return;
+          }
+
+          if (errorCode === "__TRANSIENT__" || !errorCode || /Failed to fetch/i.test(errorCode)) {
+            transientFailureCount += 1;
+            statusBox.textContent = runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
+            window.setTimeout(poll, transientFailureCount >= 3 ? 5000 : 2500);
+            return;
+          }
+
           statusBox.textContent = err?.message || "İş durumu okunamadı.";
         }
 

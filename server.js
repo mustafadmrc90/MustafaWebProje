@@ -4423,21 +4423,12 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
       return;
     }
 
-    finalRows.forEach((row) => {
-      const branchId = String(row?.ObusMerkezSubeID || "").trim();
-      const debugDetail = String(row?.ObusMerkezSubeIDDebug || "").trim();
-      pushObusLiveJobEvent(job, {
-        key: buildAllCompaniesCacheRowKey(row),
-        label: buildAllCompaniesObusUpdateRowLabel(row),
-        ok: Boolean(branchId),
-        message: branchId ? `ObusMerkezSubeID: ${branchId}` : "",
-        error: branchId ? "" : "ObusMerkezSubeID bulunamadı.",
-        errorDetail: branchId ? "" : debugDetail
-      });
-    });
-
     const filledCount = finalRows.reduce((sum, row) => sum + (String(row?.ObusMerkezSubeID || "").trim() ? 1 : 0), 0);
     const remainingCount = Math.max(0, normalizedTargetRows.length - filledCount);
+    job.successCount = filledCount;
+    job.failureCount = remainingCount;
+    job.processedCount = normalizedTargetRows.length;
+    job.updatedAt = Date.now();
     job.summary = {
       scanned: normalizedTargetRows.length,
       filled: filledCount,
@@ -10831,11 +10822,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         }
       }
     } else {
-      obusMessage = `ObusMerkezSubeID güncellemesi sürüyor. İşlenen: ${Number(
-        obusJob.processedCount || 0
-      )}/${Number(obusJob.totalCount || 0)} | Başarılı: ${Number(obusJob.successCount || 0)} | Hatalı: ${Number(
-        obusJob.failureCount || 0
-      )}`;
+      obusMessage = "ObusMerkezSubeID güncellemesi sürüyor. Sayfa otomatik yenilenecek...";
       obusMessageKind = "progress";
     }
   }
