@@ -2016,6 +2016,120 @@ function truncateObusDebugText(value, maxLength = 220) {
   return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
+function isSensitiveObusDebugKey(key) {
+  return /password|token|authorization|cookie|secret/i.test(String(key || "").trim());
+}
+
+function sanitizeObusDebugStructure(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeObusDebugStructure(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const output = {};
+  Object.entries(value).forEach(([key, itemValue]) => {
+    output[key] = isSensitiveObusDebugKey(key) ? "***" : sanitizeObusDebugStructure(itemValue);
+  });
+  return output;
+}
+
+function maskSensitiveObusDebugText(value) {
+  let text = String(value || "");
+  if (!text.trim()) return "";
+
+  text = text.replace(/("password"\s*:\s*")([^"]*)(")/gi, '$1***$3');
+  text = text.replace(
+    /("(?:token|access[_-]?token|authorization[_-]?token|cookie|authorization|secret)"\s*:\s*")([^"]*)(")/gi,
+    '$1***$3'
+  );
+  text = text.replace(/(Bearer\s+)([A-Za-z0-9\-._~+/=]+)/gi, "$1***");
+  text = text.replace(/((?:token|access[_-]?token|authorization|cookie)=)([^;,\s]+)/gi, "$1***");
+  return text;
+}
+
+function normalizeObusDebugPayload(value) {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const parsed = parseJsonSafe(trimmed);
+    if (parsed !== null && typeof parsed === "object") {
+      try {
+        return JSON.stringify(sanitizeObusDebugStructure(parsed));
+      } catch (err) {
+        return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), 1200);
+      }
+    }
+    return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), 1200);
+  }
+
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(sanitizeObusDebugStructure(value));
+    } catch (err) {
+      return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), 1200);
+    }
+  }
+
+  return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), 1200);
+}
+
+function buildObusServiceTraceEntry({
+  service = "",
+  url = "",
+  status = null,
+  requestBody = "",
+  responseBody = "",
+  error = "",
+  note = ""
+} = {}) {
+  const parsedStatus =
+    typeof status === "number" ? status : Number.parseInt(String(status ?? "").trim(), 10);
+  const normalizedStatus = Number.isFinite(parsedStatus) ? parsedStatus : null;
+  return {
+    service: String(service || "").trim() || "UnknownService",
+    url: String(url || "").trim(),
+    status: normalizedStatus,
+    requestBody: normalizeObusDebugPayload(requestBody),
+    responseBody: normalizeObusDebugPayload(responseBody),
+    error: truncateObusDebugText(error, 260),
+    note: truncateObusDebugText(note, 260)
+  };
+}
+
+function getLastObusServiceTrace(serviceLogs) {
+  const logs = Array.isArray(serviceLogs)
+    ? serviceLogs.filter((item) => item && typeof item === "object")
+    : [];
+  if (logs.length === 0) return null;
+  return logs[logs.length - 1];
+}
+
+function buildObusServiceTraceText(trace, fallbackError = "", { bodyMaxLen = 160, responseMaxLen = 220 } = {}) {
+  const entry = trace && typeof trace === "object" ? trace : null;
+  const parts = [];
+
+  if (entry) {
+    parts.push(`servis=${String(entry.service || "").trim() || "-"}`);
+    if (entry.status !== null) parts.push(`status=${entry.status}`);
+    if (entry.url) parts.push(`url=${truncateObusDebugText(entry.url, 120)}`);
+    if (entry.note) parts.push(`not=${entry.note}`);
+    if (entry.error) parts.push(`hata=${entry.error}`);
+    if (entry.requestBody) parts.push(`body=${truncateObusDebugText(entry.requestBody, bodyMaxLen)}`);
+    if (entry.responseBody) parts.push(`response=${truncateObusDebugText(entry.responseBody, responseMaxLen)}`);
+  }
+
+  const normalizedFallbackError = truncateObusDebugText(fallbackError, 220);
+  if (normalizedFallbackError && !parts.some((item) => item.startsWith("hata="))) {
+    parts.push(`hata=${normalizedFallbackError}`);
+  }
+
+  return parts.join(" | ");
+}
+
 function buildUserLoginTokenMissingDetail({
   loginUrl,
   sessionId,
@@ -2834,62 +2948,89 @@ async function fetchPartnerSessionCredentials(
     }
   };
 
-  const response = await fetch(sessionUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: authorization || PARTNERS_API_AUTH
-    },
-    body: JSON.stringify(payload),
-    signal
-  });
+  try {
+    const response = await fetch(sessionUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization || PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(payload),
+      signal
+    });
 
-  const raw = await response.text();
-  const parsed = parseJsonSafe(raw);
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const debug = buildObusServiceTraceEntry({
+      service: "GetSession",
+      url: sessionUrl,
+      status: response.status,
+      requestBody: payload,
+      responseBody: parsed ?? raw
+    });
 
-  if (!response.ok) {
-    const reason =
-      (parsed && typeof parsed === "object" && String(parsed.message || parsed.error || "").trim()) ||
-      response.statusText ||
-      "Bilinmeyen hata";
-    return {
-      sessionId: "",
-      deviceId: "",
-      error: `GetSession HTTP ${response.status}: ${reason}`
-    };
-  }
+    if (!response.ok) {
+      const reason =
+        (parsed && typeof parsed === "object" && String(parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        sessionId: "",
+        deviceId: "",
+        error: `GetSession HTTP ${response.status}: ${reason}`,
+        debug
+      };
+    }
 
-  if (!parsed) {
-    return {
-      sessionId: "",
-      deviceId: "",
-      error: "GetSession JSON parse edilemedi."
-    };
-  }
+    if (!parsed) {
+      return {
+        sessionId: "",
+        deviceId: "",
+        error: "GetSession JSON parse edilemedi.",
+        debug
+      };
+    }
 
-  const sessionId =
-    findNestedValue(parsed, new Set(["sessionid"])) ||
-    findNestedValue(parsed, new Set(["sessionid", "session"])) ||
-    "";
-  const deviceId =
-    findNestedValue(parsed, new Set(["deviceid"])) ||
-    findNestedValue(parsed, new Set(["deviceid", "device"])) ||
-    "";
+    const sessionId =
+      findNestedValue(parsed, new Set(["sessionid"])) ||
+      findNestedValue(parsed, new Set(["sessionid", "session"])) ||
+      "";
+    const deviceId =
+      findNestedValue(parsed, new Set(["deviceid"])) ||
+      findNestedValue(parsed, new Set(["deviceid", "device"])) ||
+      "";
 
-  if (!sessionId || !deviceId) {
+    if (!sessionId || !deviceId) {
+      return {
+        sessionId,
+        deviceId,
+        error: "GetSession yanıtında session-id veya device-id bulunamadı.",
+        debug
+      };
+    }
+
     return {
       sessionId,
       deviceId,
-      error: "GetSession yanıtında session-id veya device-id bulunamadı."
+      error: null,
+      debug
+    };
+  } catch (err) {
+    const debug = buildObusServiceTraceEntry({
+      service: "GetSession",
+      url: sessionUrl,
+      requestBody: payload,
+      responseBody: "",
+      error: err?.message || "GetSession isteği başarısız."
+    });
+    return {
+      sessionId: "",
+      deviceId: "",
+      error: err?.message || "GetSession isteği başarısız.",
+      debug
     };
   }
-
-  return {
-    sessionId,
-    deviceId,
-    error: null
-  };
 }
 
 async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
@@ -3128,7 +3269,14 @@ async function fetchObusMerkezBranchMapForTarget({
   const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
 
   if (!endpointUrl) {
-    return { cluster, map: new Map(), rows: [], error: "GetBranches endpoint URL geçersiz." };
+    return {
+      cluster,
+      map: new Map(),
+      rows: [],
+      error: "GetBranches endpoint URL geçersiz.",
+      serviceLogs: [],
+      failedServiceLog: null
+    };
   }
 
   const loginResult = await fetchAuthorizedLinesLoginInfo({
@@ -3143,13 +3291,16 @@ async function fetchObusMerkezBranchMapForTarget({
     authorization: INVENTORY_BRANCHES_API_AUTH,
     allowEmptyPartnerCode: false
   });
+  const serviceLogs = Array.isArray(loginResult?.serviceLogs) ? [...loginResult.serviceLogs] : [];
 
   if (!loginResult.ok) {
     return {
       cluster,
       map: new Map(),
       rows: [],
-      error: `UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`
+      error: `UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`,
+      serviceLogs,
+      failedServiceLog: loginResult?.failedServiceLog || getLastObusServiceTrace(serviceLogs)
     };
   }
 
@@ -3174,7 +3325,7 @@ async function fetchObusMerkezBranchMapForTarget({
         branchId: loginObusMerkezBranchKey
       });
     }
-    return { cluster, map, rows, error: null };
+    return { cluster, map, rows, error: null, serviceLogs, failedServiceLog: null };
   }
 
   const missingFields = [];
@@ -3186,7 +3337,9 @@ async function fetchObusMerkezBranchMapForTarget({
       cluster,
       map: new Map(),
       rows: [],
-      error: `UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`
+      error: `UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`,
+      serviceLogs,
+      failedServiceLog: getLastObusServiceTrace(serviceLogs)
     };
   }
 
@@ -3215,6 +3368,14 @@ async function fetchObusMerkezBranchMapForTarget({
 
     const raw = await response.text();
     const parsed = parseJsonSafe(raw);
+    const getBranchesTrace = buildObusServiceTraceEntry({
+      service: "GetBranches",
+      url: endpointUrl,
+      status: response.status,
+      requestBody: body,
+      responseBody: parsed ?? raw
+    });
+    serviceLogs.push(getBranchesTrace);
     if (!response.ok) {
       const reason =
         (parsed &&
@@ -3226,19 +3387,38 @@ async function fetchObusMerkezBranchMapForTarget({
         cluster,
         map: new Map(),
         rows: [],
-        error: `GetBranches HTTP ${response.status}: ${reason}`
+        error: `GetBranches HTTP ${response.status}: ${reason}`,
+        serviceLogs,
+        failedServiceLog: getBranchesTrace
       };
     }
 
     const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId);
     const map = extractObusMerkezBranchMapFromRows(rows);
-    return { cluster, map, rows, error: null };
+    return {
+      cluster,
+      map,
+      rows,
+      error: null,
+      serviceLogs,
+      failedServiceLog: rows.length > 0 ? null : getBranchesTrace
+    };
   } catch (err) {
+    const getBranchesTrace = buildObusServiceTraceEntry({
+      service: "GetBranches",
+      url: endpointUrl,
+      requestBody: body,
+      responseBody: "",
+      error: err?.message || "GetBranches isteği başarısız."
+    });
+    serviceLogs.push(getBranchesTrace);
     return {
       cluster,
       map: new Map(),
       rows: [],
-      error: err?.message || "GetBranches isteği başarısız."
+      error: err?.message || "GetBranches isteği başarısız.",
+      serviceLogs,
+      failedServiceLog: getBranchesTrace
     };
   }
 }
@@ -3339,13 +3519,18 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         fallbackPartnerId: partnerId,
         signal
       });
+      const resultTraceText = buildObusServiceTraceText(
+        result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
+        result?.error || ""
+      );
       if (isDebugTarget) {
         logAllCompaniesObusMerkezDebug("fetch-result", {
           rowRef,
           resultCluster: String(result?.cluster || "").trim(),
           mapSize: result?.map instanceof Map ? result.map.size : 0,
           rowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
-          error: String(result?.error || "").trim()
+          error: String(result?.error || "").trim(),
+          trace: resultTraceText
         });
       }
 
@@ -3353,12 +3538,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("fetch-error", {
             rowRef,
-            error: compactErrorText(result.error, 320)
+            error: compactErrorText(result.error, 320),
+            trace: resultTraceText
           });
         }
         return {
           branchId: "",
-          errorMessage: `${rowRef}: ${compactErrorText(result.error)}`
+          errorMessage: `${rowRef}: ${compactErrorText(result.error)}`,
+          debugDetail: resultTraceText || compactErrorText(result.error, 520)
         };
       }
 
@@ -3388,6 +3575,12 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           errorMessage: null
         };
       }
+
+      const notFoundDebugDetail =
+        buildObusServiceTraceText(
+          result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
+          "Eşleşen OBUSMERKEZ kaydı bulunamadı."
+        ) || "Eşleşen OBUSMERKEZ kaydı bulunamadı.";
 
       if (isDebugTarget) {
         const mapKeys =
@@ -3420,25 +3613,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           mapKeys: mapKeys.slice(0, 10),
           rowCount: Array.isArray(result?.rows) ? result.rows.length : 0,
           rowPartnerIds: rowPartnerIds.slice(0, 10),
-          rowBranchIds: rowBranchIds.slice(0, 10)
+          rowBranchIds: rowBranchIds.slice(0, 10),
+          trace: notFoundDebugDetail
         });
-        const debugDetail = [
-          "Eşleşen OBUSMERKEZ kaydı bulunamadı.",
-          `mapSize=${result?.map instanceof Map ? result.map.size : 0}`,
-          `mapKeys=${mapKeys.slice(0, 5).join(",") || "-"}`,
-          `rowCount=${Array.isArray(result?.rows) ? result.rows.length : 0}`,
-          `rowPartnerIds=${rowPartnerIds.slice(0, 5).join(",") || "-"}`,
-          `rowBranchIds=${rowBranchIds.slice(0, 5).join(",") || "-"}`
-        ].join(" | ");
-        return {
-          branchId: "",
-          errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`,
-          debugDetail
-        };
       }
       return {
         branchId: "",
-        errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`
+        errorMessage: `${rowRef}: Eşleşen OBUSMERKEZ kaydı bulunamadı.`,
+        debugDetail: notFoundDebugDetail
       };
     },
     () => Boolean(signal?.aborted)
@@ -3512,6 +3694,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     (item) => !String(enrichedRows[item.index]?.ObusMerkezSubeID || "").trim()
   );
   let fallbackErrorMessage = "";
+  let fallbackDebugDetail = "";
   if (unresolvedAfterSiblingPass.length > 0 && !Boolean(signal?.aborted)) {
     const hasDebugTarget = unresolvedAfterSiblingPass.some((item) => item.isDebugTarget === true);
     if (hasDebugTarget) {
@@ -3554,10 +3737,12 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     });
 
     fallbackErrorMessage = String(fallbackResult?.error || "").trim();
+    fallbackDebugDetail = String(fallbackResult?.debugDetail || "").trim();
     if (hasDebugTarget) {
       logAllCompaniesObusMerkezDebug("fallback-result", {
         rowCount: fallbackRows.length,
-        error: compactErrorText(fallbackErrorMessage, 320)
+        error: compactErrorText(fallbackErrorMessage, 320),
+        trace: fallbackDebugDetail
       });
     }
   }
@@ -3569,19 +3754,25 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     if (item.errorMessage) {
       errors.push(item.errorMessage);
     }
+    const row = enrichedRows[item.index];
+    if (!row) return;
+    const debugSource = [item.debugDetail, fallbackDebugDetail]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" || fallback=");
+    const debugText = `LOG: ${compactErrorText(
+      debugSource || item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata",
+      760
+    )}`;
+    row.ObusMerkezSubeIDDebug = debugText;
     if (item.isDebugTarget === true) {
-      const row = enrichedRows[item.index];
-      const debugText = `LOG: ${compactErrorText(
-        item.debugDetail || item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata",
-        520
-      )}`;
-      row.ObusMerkezSubeIDDebug = debugText;
       logAllCompaniesObusMerkezDebug("final-unresolved", {
         source: String(row?.source || "").trim(),
         partnerCode: String(row?.code || "").trim(),
         partnerId: String(row?.id || "").trim(),
         error: item.errorMessage,
         debugDetail: item.debugDetail,
+        fallbackDebugDetail,
         debugText
       });
     }
@@ -4156,7 +4347,8 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       sourceRowCount: 0,
       clusterCount: 1,
       error: String(baseError || "").trim() || "GetBranches için firma listesi boş.",
-      failures: []
+      failures: [],
+      debugDetail: ""
     };
   }
 
@@ -4189,6 +4381,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
 
     const collectedRows = [];
     const errors = [];
+    let lastDebugDetail = "";
 
     for (const target of clusterTargets) {
       if (Boolean(controller.signal.aborted)) break;
@@ -4213,6 +4406,13 @@ async function collectObusMerkezBranchRowsForAllCompanies(
           partnerCode,
           signal: controller.signal
         });
+        const traceText = buildObusServiceTraceText(
+          result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
+          result?.error || ""
+        );
+        if (traceText) {
+          lastDebugDetail = traceText;
+        }
 
         if (result.error) {
           attemptErrors.push(`${partnerCodeLabel}: ${compactErrorText(result.error)}`);
@@ -4236,6 +4436,12 @@ async function collectObusMerkezBranchRowsForAllCompanies(
         }
 
         const rowSize = Array.isArray(result.rows) ? result.rows.length : 0;
+        if (rowSize === 0 && traceText) {
+          lastDebugDetail = buildObusServiceTraceText(
+            result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
+            "Eşleşen OBUSMERKEZ kaydı bulunamadı."
+          );
+        }
         if (rowSize > 0) {
           resolvedWithMatch = true;
           break;
@@ -4274,7 +4480,8 @@ async function collectObusMerkezBranchRowsForAllCompanies(
       sourceRowCount: sourceRows.length,
       clusterCount: 1,
       error: warningParts.length > 0 ? warningParts.join(" | ") : null,
-      failures: uniqueErrors
+      failures: uniqueErrors,
+      debugDetail: lastDebugDetail
     };
   } finally {
     clearTimeout(timeout);
@@ -7387,7 +7594,9 @@ async function fetchAuthorizedLinesLoginInfo({
       token: "",
       obusMerkezBranchKey: "",
       tokenMissingDetail: "",
-      rawLoginBody: ""
+      rawLoginBody: "",
+      serviceLogs: [],
+      failedServiceLog: null
     };
   }
 
@@ -7407,7 +7616,9 @@ async function fetchAuthorizedLinesLoginInfo({
       token: "",
       obusMerkezBranchKey: "",
       tokenMissingDetail: "",
-      rawLoginBody: ""
+      rawLoginBody: "",
+      serviceLogs: [],
+      failedServiceLog: null
     };
   }
 
@@ -7417,12 +7628,14 @@ async function fetchAuthorizedLinesLoginInfo({
     toBoundedInt(timeoutMs, 90000, 5000, 180000)
   );
   try {
+    const allServiceLogs = [];
     let lastError = "UserLogin çağrısı başarısız.";
     let lastErrorDetail = "";
     let lastSessionId = "";
     let lastDeviceId = "";
     let lastLoginUrl = "";
     let lastRawLoginBody = "";
+    let lastFailedServiceLog = null;
 
     for (const baseUrl of loginBaseUrls) {
       const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
@@ -7435,9 +7648,13 @@ async function fetchAuthorizedLinesLoginInfo({
       lastLoginUrl = loginUrl;
 
       const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
+      if (sessionResult?.debug) {
+        allServiceLogs.push(sessionResult.debug);
+      }
       if (sessionResult.error) {
         lastError = `${sessionResult.error} (URL: ${loginUrl})`;
         lastErrorDetail = "";
+        lastFailedServiceLog = sessionResult?.debug || lastFailedServiceLog;
         continue;
       }
 
@@ -7460,101 +7677,129 @@ async function fetchAuthorizedLinesLoginInfo({
         language: "tr-TR"
       };
 
-      const response = await fetch(loginUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: authorization
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-
-      const raw = await response.text();
-      lastRawLoginBody = raw;
-      const parsed = parseJsonSafe(raw);
-      const responseHeaders = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[String(key || "").toLowerCase()] = String(value || "");
-      });
-      const errorMessage =
-        (parsed &&
-          typeof parsed === "object" &&
-          String(parsed.message || parsed.error || "").trim()) ||
-        response.statusText ||
-        "";
-
-      if (!response.ok) {
-        lastError = `Membership UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
-        lastErrorDetail = "";
-        continue;
-      }
-
-      const tokenValue =
-        String(parsed?.token?.data || "").trim() ||
-        String(parsed?.token?.token || "").trim() ||
-        String(parsed?.token || "").trim() ||
-        String(parsed?.data?.token?.data || "").trim() ||
-        extractMembershipTokenDataFromPayload(parsed) ||
-        extractTokenFromHeaders(responseHeaders) ||
-        extractTokenFromRawText(raw) ||
-        findNestedValue(parsed, new Set(["accesstoken"])) ||
-        findNestedValue(parsed, new Set(["authorizationtoken"])) ||
-        "";
-      const obusMerkezBranchKey = String(extractObusMerkezBranchKeyFromUserLoginPayload(parsed) || "").trim();
-      if (!String(tokenValue || "").trim()) {
-        const tokenMissingDetail = buildUserLoginTokenMissingDetail({
-          loginUrl,
-          sessionId: sessionResult.sessionId,
-          deviceId: sessionResult.deviceId,
-          responseStatus: response.status,
-          parsedBody: parsed,
-          responseHeaders,
-          rawBody: raw
+      try {
+        const response = await fetch(loginUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: authorization
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
-        if (obusMerkezBranchKey) {
-          return {
-            ok: true,
-            error: null,
-            errorDetail: "",
+
+        const raw = await response.text();
+        lastRawLoginBody = raw;
+        const parsed = parseJsonSafe(raw);
+        const loginTrace = buildObusServiceTraceEntry({
+          service: "Membership UserLogin",
+          url: loginUrl,
+          status: response.status,
+          requestBody: payload,
+          responseBody: parsed ?? raw
+        });
+        allServiceLogs.push(loginTrace);
+        const responseHeaders = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[String(key || "").toLowerCase()] = String(value || "");
+        });
+        const errorMessage =
+          (parsed &&
+            typeof parsed === "object" &&
+            String(parsed.message || parsed.error || "").trim()) ||
+          response.statusText ||
+          "";
+
+        if (!response.ok) {
+          lastError = `Membership UserLogin HTTP ${response.status}: ${errorMessage || "Bilinmeyen hata"} (URL: ${loginUrl})`;
+          lastErrorDetail = "";
+          lastFailedServiceLog = loginTrace;
+          continue;
+        }
+
+        const tokenValue =
+          String(parsed?.token?.data || "").trim() ||
+          String(parsed?.token?.token || "").trim() ||
+          String(parsed?.token || "").trim() ||
+          String(parsed?.data?.token?.data || "").trim() ||
+          extractMembershipTokenDataFromPayload(parsed) ||
+          extractTokenFromHeaders(responseHeaders) ||
+          extractTokenFromRawText(raw) ||
+          findNestedValue(parsed, new Set(["accesstoken"])) ||
+          findNestedValue(parsed, new Set(["authorizationtoken"])) ||
+          "";
+        const obusMerkezBranchKey = String(extractObusMerkezBranchKeyFromUserLoginPayload(parsed) || "").trim();
+        if (!String(tokenValue || "").trim()) {
+          const tokenMissingDetail = buildUserLoginTokenMissingDetail({
+            loginUrl,
             sessionId: sessionResult.sessionId,
             deviceId: sessionResult.deviceId,
-            branchId: obusMerkezBranchKey,
-            token: "",
-            obusMerkezBranchKey,
-            loginUrl,
-            tokenMissingDetail,
-            rawLoginBody: raw
-          };
+            responseStatus: response.status,
+            parsedBody: parsed,
+            responseHeaders,
+            rawBody: raw
+          });
+          if (obusMerkezBranchKey) {
+            return {
+              ok: true,
+              error: null,
+              errorDetail: "",
+              sessionId: sessionResult.sessionId,
+              deviceId: sessionResult.deviceId,
+              branchId: obusMerkezBranchKey,
+              token: "",
+              obusMerkezBranchKey,
+              loginUrl,
+              tokenMissingDetail,
+              rawLoginBody: raw,
+              serviceLogs: allServiceLogs,
+              failedServiceLog: null
+            };
+          }
+          lastError = `Membership UserLogin token bulunamadı. (URL: ${loginUrl})`;
+          lastErrorDetail = tokenMissingDetail;
+          lastFailedServiceLog = loginTrace;
+          continue;
         }
-        lastError = `Membership UserLogin token bulunamadı. (URL: ${loginUrl})`;
-        lastErrorDetail = tokenMissingDetail;
-        continue;
-      }
-      const branchId =
-        obusMerkezBranchKey ||
-        extractBranchIdFromUserLoginPayload(parsed) ||
-        findNestedValue(parsed, new Set(["branchid", "branch"])) ||
-        extractBranchIdFromToken(tokenValue) ||
-        extractBranchIdFromHeaders(responseHeaders) ||
-        extractBranchIdFromText(raw) ||
-        String(fallbackBranchId || "").trim() ||
-        "";
+        const branchId =
+          obusMerkezBranchKey ||
+          extractBranchIdFromUserLoginPayload(parsed) ||
+          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
+          extractBranchIdFromToken(tokenValue) ||
+          extractBranchIdFromHeaders(responseHeaders) ||
+          extractBranchIdFromText(raw) ||
+          String(fallbackBranchId || "").trim() ||
+          "";
 
-      return {
-        ok: true,
-        error: null,
-        errorDetail: "",
-        sessionId: sessionResult.sessionId,
-        deviceId: sessionResult.deviceId,
-        branchId: String(branchId || "").trim(),
-        token: String(tokenValue || "").trim(),
-        obusMerkezBranchKey,
-        loginUrl,
-        tokenMissingDetail: "",
-        rawLoginBody: raw
-      };
+        return {
+          ok: true,
+          error: null,
+          errorDetail: "",
+          sessionId: sessionResult.sessionId,
+          deviceId: sessionResult.deviceId,
+          branchId: String(branchId || "").trim(),
+          token: String(tokenValue || "").trim(),
+          obusMerkezBranchKey,
+          loginUrl,
+          tokenMissingDetail: "",
+          rawLoginBody: raw,
+          serviceLogs: allServiceLogs,
+          failedServiceLog: null
+        };
+      } catch (err) {
+        const loginTrace = buildObusServiceTraceEntry({
+          service: "Membership UserLogin",
+          url: loginUrl,
+          requestBody: payload,
+          responseBody: "",
+          error: err?.message || "Membership UserLogin isteği başarısız."
+        });
+        allServiceLogs.push(loginTrace);
+        lastError = `${err?.message || "Membership UserLogin isteği başarısız."} (URL: ${loginUrl})`;
+        lastErrorDetail = "";
+        lastFailedServiceLog = loginTrace;
+      }
     }
 
     return {
@@ -7568,7 +7813,9 @@ async function fetchAuthorizedLinesLoginInfo({
       obusMerkezBranchKey: "",
       loginUrl: lastLoginUrl,
       tokenMissingDetail: "",
-      rawLoginBody: lastRawLoginBody
+      rawLoginBody: lastRawLoginBody,
+      serviceLogs: allServiceLogs,
+      failedServiceLog: lastFailedServiceLog
     };
   } catch (err) {
     return {
@@ -7582,7 +7829,9 @@ async function fetchAuthorizedLinesLoginInfo({
       obusMerkezBranchKey: "",
       loginUrl: "",
       tokenMissingDetail: "",
-      rawLoginBody: ""
+      rawLoginBody: "",
+      serviceLogs: [],
+      failedServiceLog: null
     };
   } finally {
     clearTimeout(timeout);
