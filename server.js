@@ -3257,6 +3257,28 @@ function extractObusMerkezBranchMapFromRows(rows) {
   return map;
 }
 
+function rememberResolvedObusMerkezBranchIds(targetMap, payload) {
+  if (!(targetMap instanceof Map) || !payload || typeof payload !== "object") return;
+
+  if (payload.map instanceof Map) {
+    payload.map.forEach((branchIdValue, partnerIdValue) => {
+      const partnerId = String(partnerIdValue || "").trim();
+      const branchId = String(branchIdValue || "").trim();
+      if (!partnerId || !branchId || targetMap.has(partnerId)) return;
+      targetMap.set(partnerId, branchId);
+    });
+  }
+
+  if (Array.isArray(payload.rows)) {
+    payload.rows.forEach((row) => {
+      const partnerId = String(row?.partnerId || "").trim();
+      const branchId = String(row?.branchId || "").trim();
+      if (!partnerId || !branchId || targetMap.has(partnerId)) return;
+      targetMap.set(partnerId, branchId);
+    });
+  }
+}
+
 async function fetchObusMerkezBranchMapForTarget({
   clusterLabel,
   partnerCode,
@@ -3454,6 +3476,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     if (!partnerId || !branchId) return;
     if (!resolvedByPartnerId.has(partnerId)) resolvedByPartnerId.set(partnerId, branchId);
   });
+  const fetchResultPromiseCache = new Map();
 
   const enrichResults = await runWithConcurrency(
     enrichedRows,
@@ -3494,6 +3517,19 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           errorMessage: `${rowRef}: partner-id boş.`
         };
       }
+      const preResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      if (preResolvedBranchId) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-shared-cache-before-fetch", {
+            rowRef,
+            branchId: preResolvedBranchId
+          });
+        }
+        return {
+          branchId: preResolvedBranchId,
+          errorMessage: null
+        };
+      }
       if (!partnerCode) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("missing-partner-code", { rowRef });
@@ -3513,12 +3549,20 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         };
       }
 
-      const result = await fetchObusMerkezBranchMapForTarget({
-        clusterLabel,
-        partnerCode,
-        fallbackPartnerId: partnerId,
-        signal
-      });
+      const fetchCacheKey = `${clusterLabel}|||${partnerCode}|||${partnerId}`;
+      if (!fetchResultPromiseCache.has(fetchCacheKey)) {
+        fetchResultPromiseCache.set(
+          fetchCacheKey,
+          fetchObusMerkezBranchMapForTarget({
+            clusterLabel,
+            partnerCode,
+            fallbackPartnerId: partnerId,
+            signal
+          })
+        );
+      }
+      const result = await fetchResultPromiseCache.get(fetchCacheKey);
+      rememberResolvedObusMerkezBranchIds(resolvedByPartnerId, result);
       const resultTraceText = buildObusServiceTraceText(
         result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
         result?.error || ""
@@ -3546,6 +3590,20 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           branchId: "",
           errorMessage: `${rowRef}: ${compactErrorText(result.error)}`,
           debugDetail: resultTraceText || compactErrorText(result.error, 520)
+        };
+      }
+
+      const sharedResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      if (sharedResolvedBranchId) {
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-shared-cache-after-fetch", {
+            rowRef,
+            branchId: sharedResolvedBranchId
+          });
+        }
+        return {
+          branchId: sharedResolvedBranchId,
+          errorMessage: null
         };
       }
 
@@ -4386,8 +4444,8 @@ async function collectObusMerkezBranchRowsForAllCompanies(
     for (const target of clusterTargets) {
       if (Boolean(controller.signal.aborted)) break;
       const attemptCodes = Array.from(
-        new Set(["", ...(Array.isArray(target.partnerCodes) ? target.partnerCodes : [])].map((code) => String(code || "")))
-      );
+        new Set((Array.isArray(target.partnerCodes) ? target.partnerCodes : []).map((code) => String(code || "").trim()))
+      ).filter(Boolean);
       if (attemptCodes.length === 0) {
         errors.push(`${target.clusterLabel}: Kullanılabilir partner-code bulunamadı.`);
         continue;
@@ -10684,12 +10742,33 @@ app.post(
       }
 
       const cacheRows = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
-      const targetRows = cacheRows.filter((row) => !String(row?.ObusMerkezSubeID || "").trim());
+      const knownBranchIdByPartnerId = new Map();
+      cacheRows.forEach((row) => {
+        const partnerId = String(row?.id || "").trim();
+        const branchId = String(row?.ObusMerkezSubeID || "").trim();
+        if (!partnerId || !branchId || knownBranchIdByPartnerId.has(partnerId)) return;
+        knownBranchIdByPartnerId.set(partnerId, branchId);
+      });
+      const targetRows = cacheRows
+        .filter((row) => !String(row?.ObusMerkezSubeID || "").trim())
+        .map((row) => {
+          const partnerId = String(row?.id || "").trim();
+          const cachedBranchId = String(knownBranchIdByPartnerId.get(partnerId) || "").trim();
+          if (!partnerId || !cachedBranchId) return row;
+          return {
+            ...row,
+            ObusMerkezSubeID: cachedBranchId
+          };
+        });
       if (targetRows.length === 0) {
         return res.redirect("/reports/all-companies?cache=1&obusUpdated=1&obusScanned=0&obusFilled=0&obusRemaining=0");
       }
 
-      const enriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(targetRows);
+      const rowsNeedingService = targetRows.filter((row) => !String(row?.ObusMerkezSubeID || "").trim());
+      const enriched =
+        rowsNeedingService.length > 0
+          ? await enrichAllCompaniesRowsWithObusMerkezSubeId(targetRows)
+          : { rows: targetRows, notice: null };
       const saveResult = await upsertAllCompaniesCacheRows(enriched.rows || []);
       if (saveResult.error) {
         console.error("All companies ObusMerkezSubeID update save error:", saveResult.error);
