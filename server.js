@@ -326,6 +326,16 @@ const SIDEBAR_MENU_REGISTRY = [
     routeKey: "password",
     sortOrder: 32,
     iconKey: "password"
+  },
+  {
+    key: "menti",
+    type: "item",
+    label: "Menti",
+    parentKey: "management",
+    route: "/menti",
+    routeKey: "menti",
+    sortOrder: 33,
+    iconKey: "menti"
   }
 ];
 const slackReplyReportCache = new Map();
@@ -10571,6 +10581,14 @@ app.get("/change-password", requireAuth, requireMenuAccess("password"), (req, re
     error: null,
     ok: req.query.ok === "1",
     active: "password"
+  });
+});
+
+app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
+  res.render("menti", {
+    user: req.session.user,
+    active: "menti",
+    mentiUrl: "https://www.menti.com/"
   });
 });
 

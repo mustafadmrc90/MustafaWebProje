@@ -2095,6 +2095,67 @@ button.ghost {
   letter-spacing: 0.01em;
 }
 
+.menti-browser-card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.menti-browser-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.menti-browser-address {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #d6dde7;
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #526173;
+  font-weight: 500;
+}
+
+.menti-browser-address span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menti-browser-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: none;
+  background: linear-gradient(135deg, #0f6bdc 0%, #3db9ff 100%);
+  box-shadow: 0 0 0 4px rgba(15, 107, 220, 0.12);
+}
+
+.menti-browser-frame-wrap {
+  min-height: 78vh;
+  overflow: hidden;
+  border: 1px solid #d6dde7;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.menti-browser-frame {
+  display: block;
+  width: 100%;
+  height: 78vh;
+  border: 0;
+  background: #ffffff;
+}
+
 .slack-filter-section {
   margin-bottom: 12px;
 }
@@ -3567,5 +3628,16 @@ button.ghost {
 
   .allowed-lines-result-grid {
     grid-template-columns: 1fr;
+  }
+
+  .menti-browser-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .menti-browser-frame-wrap,
+  .menti-browser-frame {
+    min-height: 68vh;
+    height: 68vh;
   }
 }

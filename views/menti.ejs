@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M5 12a7 7 0 0 1 7-7h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5a7 7 0 0 1-7-7z"></path>
+                <path d="M9 10h6"></path>
+                <path d="M9 14h4"></path>
+              </svg>
+            </span>
+            <span>Menti</span>
+          </h1>
+          <p>Menti ekranini uygulama icinde tarayici gorunumunde ac.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <section class="table-card panel-card menti-browser-card">
+        <div class="menti-browser-toolbar">
+          <div class="menti-browser-address" aria-label="Menti adresi">
+            <span class="menti-browser-dot" aria-hidden="true"></span>
+            <span><%= mentiUrl %></span>
+          </div>
+          <a class="button-link ghost" href="<%= mentiUrl %>" target="_blank" rel="noopener noreferrer">
+            Yeni Sekmede Ac
+          </a>
+        </div>
+
+        <div class="menti-browser-frame-wrap">
+          <iframe
+            class="menti-browser-frame"
+            src="<%= mentiUrl %>"
+            title="Menti"
+            referrerpolicy="strict-origin-when-cross-origin"
+            loading="eager"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
+        </div>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>
