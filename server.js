@@ -10588,7 +10588,8 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
   res.render("menti", {
     user: req.session.user,
     active: "menti",
-    mentiUrl: "https://www.menti.com/"
+    mentiUrl: "https://www.menti.com/",
+    chatgptUrl: "https://chatgpt.com/"
   });
 });
 

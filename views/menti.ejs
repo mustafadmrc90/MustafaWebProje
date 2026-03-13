@@ -10,7 +10,7 @@
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
 
-    <section class="content" data-menti-text-panel="1">
+    <section class="content">
       <header class="page-header">
         <div class="page-title">
           <h1>
@@ -23,7 +23,7 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti ekranini uygulama icinde ac. Soruyu sagdaki metin paneline yapistirip duzenli gorunumde takip et.</p>
+          <p>Menti ve ChatGPT ekranlarini ayni sayfada yan yana ac.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -42,9 +42,7 @@
             </a>
           </div>
 
-          <div class="menti-frame-note inline-alert">
-            Soru metnini kopyalayip sagdaki panele yapistirin. Bu ekran sadece metni duzenleyip not tutar.
-          </div>
+          <div class="menti-frame-note inline-alert">Menti burada acik kalir.</div>
 
           <div class="menti-browser-frame-wrap">
             <iframe
@@ -59,68 +57,31 @@
           </div>
         </section>
 
-        <aside class="table-card panel-card menti-text-card">
-          <div class="menti-text-header">
+        <aside class="table-card panel-card menti-chatgpt-card">
+          <div class="menti-browser-toolbar">
             <div>
-              <h2>Metin Paneli</h2>
-              <p class="muted">Soru ve secenekleri yapistirin. Panel metni ayiklayip duzenli halde gostersin.</p>
+              <h2>ChatGPT</h2>
+              <p class="muted">ChatGPT ekranini bu panelde ac.</p>
             </div>
-            <span class="pill muted" data-menti-text-status-pill="1">Hazir</span>
+            <a class="button-link ghost" href="<%= chatgptUrl %>" target="_blank" rel="noopener noreferrer">
+              Yeni Sekmede Ac
+            </a>
           </div>
 
           <div class="menti-frame-note inline-alert">
-            Bu panel cevap uretmez. Yapisik metni ayirir, okunur hale getirir, not tutar ve kopyalar.
+            ChatGPT iframe engeline takilirse ayni panelden yeni sekmede acabilirsiniz.
           </div>
 
-          <label class="menti-notes-field">
-            <span>Ham Metin</span>
-            <textarea
-              rows="8"
-              data-menti-text-input="1"
-              placeholder="Soru ve secenekleri buraya yapistirin"
-            ></textarea>
-          </label>
-
-          <div class="menti-text-actions">
-            <button type="button" data-menti-text-parse="1">Metni Ayristir</button>
-            <button type="button" class="ghost" data-menti-text-copy="1" disabled>Duzenlenmis Metni Kopyala</button>
-            <button type="button" class="ghost" data-menti-text-clear="1" disabled>Temizle</button>
+          <div class="menti-browser-frame-wrap">
+            <iframe
+              class="menti-browser-frame"
+              src="<%= chatgptUrl %>"
+              title="ChatGPT"
+              referrerpolicy="strict-origin-when-cross-origin"
+              loading="eager"
+              allow="clipboard-read; clipboard-write"
+            ></iframe>
           </div>
-
-          <div class="menti-text-status" data-menti-text-status="1">
-            Metin bekleniyor.
-          </div>
-
-          <div class="menti-text-preview">
-            <section class="menti-text-section">
-              <span class="menti-text-section-label">Algilanan Soru</span>
-              <div class="menti-text-question" data-menti-text-question="1">-</div>
-            </section>
-
-            <section class="menti-text-section">
-              <span class="menti-text-section-label">Algilanan Secenekler</span>
-              <div class="menti-text-options-empty" data-menti-text-options-empty="1">Henuz secenek ayiklanmadi.</div>
-              <ol class="menti-text-options" data-menti-text-options="1" hidden></ol>
-            </section>
-          </div>
-
-          <label class="menti-notes-field">
-            <span>Duzenlenmis Metin</span>
-            <textarea
-              rows="10"
-              data-menti-text-output="1"
-              placeholder="Ayristirilmis sonuc burada gorunecek"
-            ></textarea>
-          </label>
-
-          <label class="menti-notes-field">
-            <span>Notlar</span>
-            <textarea
-              rows="5"
-              data-menti-text-notes="1"
-              placeholder="Kendi notlariniz"
-            ></textarea>
-          </label>
         </aside>
       </section>
     </section>

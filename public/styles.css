@@ -2097,37 +2097,21 @@ button.ghost {
 
 .menti-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   align-items: start;
 }
 
 .menti-browser-card,
-.menti-text-card {
+.menti-chatgpt-card {
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.menti-text-card {
-  position: sticky;
-  top: 20px;
-}
-
-.menti-text-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.menti-text-header h2 {
+.menti-chatgpt-card h2 {
   margin: 0;
-}
-
-.menti-text-header p {
-  margin: 6px 0 0;
 }
 
 .menti-text-actions {
@@ -3651,10 +3635,6 @@ button.ghost {
     grid-template-columns: 1fr;
   }
 
-  .menti-text-card {
-    position: static;
-  }
-
   .topbar {
     flex-direction: column;
     align-items: flex-start;
@@ -3762,14 +3742,6 @@ button.ghost {
   .menti-browser-toolbar {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .menti-text-actions {
-    flex-direction: column;
-  }
-
-  .menti-text-actions button {
-    width: 100%;
   }
 
   .menti-browser-frame-wrap,
