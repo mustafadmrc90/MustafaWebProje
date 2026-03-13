@@ -2110,125 +2110,105 @@ button.ghost {
   gap: 16px;
 }
 
-.menti-gemini-card h2 {
-  margin: 0;
-}
-
-.menti-launch-card {
-  min-height: 78vh;
+.menti-gemini-messages {
+  min-height: 52vh;
+  max-height: 52vh;
+  overflow: auto;
   display: grid;
-  align-content: center;
-  justify-items: start;
-  gap: 18px;
-  padding: 28px;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
   border: 1px solid #d6dde7;
-  border-radius: 20px;
   background:
-    radial-gradient(circle at top right, rgba(61, 185, 255, 0.16), transparent 38%),
+    radial-gradient(circle at top right, rgba(61, 185, 255, 0.1), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.menti-launch-copy {
-  display: grid;
-  gap: 8px;
-  max-width: 320px;
-  color: #4f6176;
+.menti-gemini-empty {
+  color: #5f7388;
+  font-size: 14px;
   line-height: 1.6;
 }
 
-.menti-launch-copy strong {
-  color: #1f2735;
-  font-size: 22px;
+.menti-gemini-message {
+  display: grid;
+  gap: 6px;
+  max-width: 92%;
 }
 
-.menti-launch-button {
-  min-width: 240px;
-  justify-content: center;
-  text-align: center;
+.menti-gemini-message.user {
+  justify-self: end;
 }
 
-.menti-text-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.menti-gemini-message.assistant {
+  justify-self: start;
 }
 
-.menti-text-status {
-  min-height: 46px;
+.menti-gemini-message-meta {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #71859b;
+}
+
+.menti-gemini-message-body {
   padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid #d6dde7;
+  border-radius: 16px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #1f2735;
   background: #f7f9fc;
-  color: #4f6176;
-  font-size: 13px;
-  line-height: 1.5;
+  border: 1px solid #d6dde7;
 }
 
-.menti-notes-field {
+.menti-gemini-message.user .menti-gemini-message-body {
+  background: linear-gradient(180deg, #0f6bdc 0%, #3a8ff0 100%);
+  border-color: #0f6bdc;
+  color: #ffffff;
+}
+
+.menti-gemini-form {
+  display: grid;
+  gap: 12px;
+}
+
+.menti-gemini-input-wrap {
   display: grid;
   gap: 6px;
   color: #526173;
   font-size: 13px;
 }
 
-.menti-notes-field textarea {
+.menti-gemini-input-wrap textarea {
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid #d6dde7;
-  background: #ffffff;
-  padding: 11px 12px;
-  font: inherit;
-  color: #1f2735;
-}
-
-.menti-notes-field textarea {
-  min-height: 220px;
+  min-height: 132px;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  line-height: 1.5;
-}
-
-.menti-text-preview {
-  display: grid;
-  gap: 12px;
-}
-
-.menti-text-section {
-  display: grid;
-  gap: 8px;
-  padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid #d6dde7;
-  background: #f7f9fc;
-}
-
-.menti-text-section-label {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #5f7388;
-}
-
-.menti-text-question,
-.menti-text-options-empty {
+  background: #ffffff;
+  padding: 12px 14px;
+  font: inherit;
   color: #1f2735;
-  font-size: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
 }
 
-.menti-text-options {
-  margin: 0;
-  padding-left: 18px;
-  color: #1f2735;
-  display: grid;
+.menti-gemini-input-wrap textarea:disabled {
+  background: #f3f6fa;
+}
+
+.menti-gemini-actions {
+  display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.menti-text-options li {
-  line-height: 1.5;
+.menti-frame-note.is-error {
+  border-color: #e3b0b0;
+  background: #fff4f4;
+  color: #9c2f2f;
 }
 
 .menti-browser-toolbar {
@@ -3779,9 +3759,13 @@ button.ghost {
   }
 
   .menti-browser-frame-wrap,
-  .menti-browser-frame,
-  .menti-launch-card {
+  .menti-browser-frame {
     min-height: 68vh;
     height: 68vh;
+  }
+
+  .menti-gemini-messages {
+    min-height: 34vh;
+    max-height: 34vh;
   }
 }

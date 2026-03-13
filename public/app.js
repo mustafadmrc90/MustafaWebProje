@@ -303,10 +303,9 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
-  const mentiTextPanelStorageKey = "menti_text_panel_state_v1";
-  const mentiTextPanelRuntime = {
-    cleanup: null,
-    disposed: false
+  const mentiGeminiChatStorageKey = "menti_gemini_chat_state_v1";
+  const mentiGeminiChatRuntime = {
+    cleanup: null
   };
 
   const loadLoginProfilesFromStorage = () => {
@@ -2168,236 +2167,220 @@
     });
   };
 
-  const loadMentiTextPanelStateFromStorage = () => {
+  const loadMentiGeminiChatStateFromStorage = () => {
     try {
-      const raw = window.localStorage.getItem(mentiTextPanelStorageKey);
-      if (!raw) return { inputText: "", outputText: "", notes: "" };
+      const raw = window.localStorage.getItem(mentiGeminiChatStorageKey);
+      if (!raw) return { draft: "", messages: [] };
       const parsed = JSON.parse(raw);
+      const messages = Array.isArray(parsed?.messages)
+        ? parsed.messages
+            .map((item) => ({
+              role: String(item?.role || "").trim().toLowerCase() === "assistant" ? "assistant" : "user",
+              text: String(item?.text || "").trim()
+            }))
+            .filter((item) => item.text)
+            .slice(-20)
+        : [];
       return {
-        inputText: String(parsed?.inputText || ""),
-        outputText: String(parsed?.outputText || ""),
-        notes: String(parsed?.notes || "")
+        draft: String(parsed?.draft || ""),
+        messages
       };
     } catch (err) {
-      return { inputText: "", outputText: "", notes: "" };
+      return { draft: "", messages: [] };
     }
   };
 
-  const saveMentiTextPanelStateToStorage = (state) => {
+  const saveMentiGeminiChatStateToStorage = (state) => {
     try {
-      window.localStorage.setItem(mentiTextPanelStorageKey, JSON.stringify(state));
+      window.localStorage.setItem(mentiGeminiChatStorageKey, JSON.stringify(state));
       return true;
     } catch (err) {
       return false;
     }
   };
 
-  const parseMentiTextBlock = (rawValue) => {
-    const normalizedText = String(rawValue || "").replace(/\r/g, "").trim();
-    const lines = normalizedText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const optionRegex = /^(?:(?:[A-Za-z]|[0-9]{1,2})\s*[\)\.\:\-]|[-*•])\s*(.+)$/;
-    const questionLines = [];
-    const options = [];
-
-    lines.forEach((line) => {
-      const match = line.match(optionRegex);
-      if (match?.[1]) {
-        options.push(String(match[1]).trim());
-        return;
-      }
-      if (options.length) {
-        options[options.length - 1] = `${options[options.length - 1]} ${line}`.trim();
-        return;
-      }
-      questionLines.push(line);
-    });
-
-    const question = questionLines.join(" ").trim() || (options.length ? "" : lines.join(" ").trim());
-    const parts = [];
-    if (question) {
-      parts.push(`Soru:\n${question}`);
-    }
-    if (options.length) {
-      parts.push(`Secenekler:\n${options.map((option, index) => `${String.fromCharCode(65 + index)}. ${option}`).join("\n")}`);
-    }
-    if (!parts.length && normalizedText) {
-      parts.push(normalizedText);
-    }
-
-    return {
-      question: question || "-",
-      options,
-      outputText: parts.join("\n\n").trim()
-    };
-  };
-
   const initMentiHelper = () => {
-    if (typeof mentiTextPanelRuntime.cleanup === "function") {
-      mentiTextPanelRuntime.cleanup();
-      mentiTextPanelRuntime.cleanup = null;
+    if (typeof mentiGeminiChatRuntime.cleanup === "function") {
+      mentiGeminiChatRuntime.cleanup();
+      mentiGeminiChatRuntime.cleanup = null;
     }
-    mentiTextPanelRuntime.disposed = false;
 
-    const root = document.querySelector("[data-menti-text-panel='1']");
+    const root = document.querySelector("[data-menti-gemini-chat='1']");
     if (!root) return;
 
-    const inputEl = root.querySelector("[data-menti-text-input='1']");
-    const outputEl = root.querySelector("[data-menti-text-output='1']");
-    const notesEl = root.querySelector("[data-menti-text-notes='1']");
-    const questionEl = root.querySelector("[data-menti-text-question='1']");
-    const optionsListEl = root.querySelector("[data-menti-text-options='1']");
-    const optionsEmptyEl = root.querySelector("[data-menti-text-options-empty='1']");
-    const statusEl = root.querySelector("[data-menti-text-status='1']");
-    const statusPill = root.querySelector("[data-menti-text-status-pill='1']");
-    const parseBtn = root.querySelector("[data-menti-text-parse='1']");
-    const copyBtn = root.querySelector("[data-menti-text-copy='1']");
-    const clearBtn = root.querySelector("[data-menti-text-clear='1']");
+    const form = root.querySelector("[data-menti-gemini-form='1']");
+    const inputEl = root.querySelector("[data-menti-gemini-input='1']");
+    const sendBtn = root.querySelector("[data-menti-gemini-send='1']");
+    const clearBtn = root.querySelector("[data-menti-gemini-clear='1']");
+    const messagesEl = root.querySelector("[data-menti-gemini-messages='1']");
+    const emptyEl = root.querySelector("[data-menti-gemini-empty='1']");
+    const statusEl = root.querySelector("[data-menti-gemini-status='1']");
 
-    if (
-      !inputEl ||
-      !outputEl ||
-      !notesEl ||
-      !questionEl ||
-      !optionsListEl ||
-      !optionsEmptyEl ||
-      !statusEl ||
-      !statusPill ||
-      !parseBtn ||
-      !copyBtn ||
-      !clearBtn
-    ) {
+    if (!form || !inputEl || !sendBtn || !clearBtn || !messagesEl || !emptyEl || !statusEl) {
       return;
     }
 
-    const state = loadMentiTextPanelStateFromStorage();
+    const state = loadMentiGeminiChatStateFromStorage();
+    let messages = Array.isArray(state.messages) ? state.messages.slice(-20) : [];
+    let isBusy = false;
+    let isActive = true;
+    let requestController = null;
 
     const persistState = () => {
-      saveMentiTextPanelStateToStorage({
-        inputText: String(inputEl.value || ""),
-        outputText: String(outputEl.value || ""),
-        notes: String(notesEl.value || "")
+      if (!isActive) return;
+      saveMentiGeminiChatStateToStorage({
+        draft: String(inputEl.value || ""),
+        messages
       });
     };
 
-    const setStatus = (message, variant = "idle") => {
+    const setStatus = (message, isError = false) => {
+      if (!isActive) return;
       statusEl.textContent = message;
-      statusPill.textContent = variant === "success" ? "Hazir" : "Beklemede";
-      statusPill.classList.toggle("success", variant === "success");
-      statusPill.classList.toggle("muted", variant !== "success");
-    };
-
-    const renderOptions = (options) => {
-      optionsListEl.innerHTML = "";
-      if (!Array.isArray(options) || !options.length) {
-        optionsListEl.hidden = true;
-        optionsEmptyEl.hidden = false;
-        return;
-      }
-      options.forEach((option) => {
-        const item = document.createElement("li");
-        item.textContent = option;
-        optionsListEl.appendChild(item);
-      });
-      optionsListEl.hidden = false;
-      optionsEmptyEl.hidden = true;
+      statusEl.classList.toggle("is-error", Boolean(isError));
     };
 
     const syncButtons = () => {
-      const hasInput = Boolean(String(inputEl.value || "").trim());
-      const hasOutput = Boolean(String(outputEl.value || "").trim());
-      const hasNotes = Boolean(String(notesEl.value || "").trim());
-      parseBtn.disabled = !hasInput;
-      copyBtn.disabled = !hasOutput;
-      clearBtn.disabled = !hasInput && !hasOutput && !hasNotes;
+      if (!isActive) return;
+      const hasDraft = Boolean(String(inputEl.value || "").trim());
+      sendBtn.disabled = !hasDraft || isBusy;
+      clearBtn.disabled = (!messages.length && !hasDraft) || isBusy;
+      inputEl.disabled = isBusy;
     };
 
-    const applyParsedState = (parsed, message = "Metin ayristirildi.") => {
-      questionEl.textContent = parsed.question || "-";
-      renderOptions(parsed.options);
-      outputEl.value = parsed.outputText || "";
-      syncButtons();
+    const renderMessages = () => {
+      if (!isActive) return;
+      const messageNodes = Array.from(messagesEl.querySelectorAll("[data-menti-gemini-message='1']"));
+      messageNodes.forEach((node) => node.remove());
+      emptyEl.hidden = messages.length > 0;
+
+      messages.forEach((message) => {
+        const article = document.createElement("article");
+        article.setAttribute("data-menti-gemini-message", "1");
+        article.className = `menti-gemini-message ${message.role === "assistant" ? "assistant" : "user"}`;
+
+        const meta = document.createElement("div");
+        meta.className = "menti-gemini-message-meta";
+        meta.textContent = message.role === "assistant" ? "Gemini" : "Siz";
+
+        const body = document.createElement("div");
+        body.className = "menti-gemini-message-body";
+        body.textContent = message.text;
+
+        article.appendChild(meta);
+        article.appendChild(body);
+        messagesEl.appendChild(article);
+      });
+
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
+    const appendMessage = (role, text) => {
+      const normalizedText = String(text || "").trim();
+      if (!normalizedText) return;
+      messages.push({ role, text: normalizedText });
+      messages = messages.slice(-20);
+      renderMessages();
       persistState();
-      setStatus(parsed.outputText ? message : "Metin duzenlenemedi.", parsed.outputText ? "success" : "idle");
+      syncButtons();
     };
 
-    const runParse = () => {
-      const rawText = String(inputEl.value || "").trim();
-      if (!rawText) {
-        questionEl.textContent = "-";
-        renderOptions([]);
-        outputEl.value = "";
+    const clearChat = () => {
+      messages = [];
+      inputEl.value = "";
+      renderMessages();
+      persistState();
+      syncButtons();
+      setStatus("Sohbet temizlendi.");
+    };
+
+    const sendMessage = async () => {
+      const prompt = String(inputEl.value || "").trim();
+      if (!prompt || isBusy) return;
+
+      appendMessage("user", prompt);
+      inputEl.value = "";
+      isBusy = true;
+      requestController = new AbortController();
+      persistState();
+      syncButtons();
+      setStatus("Gemini yanit hazirliyor...");
+
+      try {
+        const response = await fetch("/api/menti/gemini-chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            prompt,
+            history: messages.slice(0, -1)
+          }),
+          signal: requestController.signal
+        });
+        if (!isActive) return;
+        const data = await parseJsonResponse(response);
+        if (!response.ok || data?.ok === false || !String(data?.reply || "").trim()) {
+          throw new Error(getApiErrorMessage(response, data, "Gemini yanit veremedi"));
+        }
+        appendMessage("assistant", data.reply);
+        setStatus(`Yanıt alindi${data?.model ? ` (${data.model})` : ""}.`);
+      } catch (err) {
+        if (!isActive) return;
+        if (err?.name === "AbortError") {
+          setStatus("Gemini istegi iptal edildi.", true);
+          return;
+        }
+        appendMessage("assistant", `Hata: ${err.message || "Gemini istegi basarisiz."}`);
+        setStatus(err.message || "Gemini istegi basarisiz.", true);
+      } finally {
+        requestController = null;
+        if (!isActive) return;
+        isBusy = false;
         syncButtons();
         persistState();
-        setStatus("Metin bekleniyor.", "idle");
-        return;
-      }
-      applyParsedState(parseMentiTextBlock(rawText));
-    };
-
-    const copyOutput = async () => {
-      const text = String(outputEl.value || "").trim();
-      if (!text) return;
-      if (!navigator.clipboard?.writeText) {
-        setStatus("Panoya kopyalama bu tarayicida desteklenmiyor.", "idle");
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Duzenlenmis metin panoya kopyalandi.", "success");
-      } catch (err) {
-        setStatus("Metin kopyalanamadi.", "idle");
       }
     };
 
-    const clearAll = () => {
-      inputEl.value = "";
-      outputEl.value = "";
-      notesEl.value = "";
-      questionEl.textContent = "-";
-      renderOptions([]);
-      syncButtons();
-      persistState();
-      setStatus("Metin bekleniyor.", "idle");
-    };
-
-    inputEl.value = state.inputText;
-    outputEl.value = state.outputText;
-    notesEl.value = state.notes;
-
-    if (String(state.outputText || "").trim()) {
-      const parsed = parseMentiTextBlock(state.inputText || state.outputText || "");
-      questionEl.textContent = parsed.question || "-";
-      renderOptions(parsed.options);
-      setStatus("Kaydedilen metin yuklendi.", "success");
-    } else {
-      questionEl.textContent = "-";
-      renderOptions([]);
-      setStatus(String(state.inputText || "").trim() ? "Metin hazir. Ayristir butonuna basin." : "Metin bekleniyor.", "idle");
-    }
+    inputEl.value = state.draft || "";
+    renderMessages();
     syncButtons();
+    setStatus(messages.length ? "Kaydedilen sohbet yuklendi." : "Sorunuzu yazin. Yanit bu panelde gelecektir.");
 
-    parseBtn.addEventListener("click", runParse);
-    copyBtn.addEventListener("click", copyOutput);
-    clearBtn.addEventListener("click", clearAll);
-    inputEl.addEventListener("input", () => {
-      syncButtons();
+    const handleSubmit = (event) => {
+      event.preventDefault();
+      sendMessage();
+    };
+    const handleClear = () => {
+      clearChat();
+    };
+    const handleInput = () => {
       persistState();
-      setStatus(String(inputEl.value || "").trim() ? "Metin guncellendi. Ayristir butonuna basin." : "Metin bekleniyor.", "idle");
-    });
-    outputEl.addEventListener("input", () => {
       syncButtons();
-      persistState();
-    });
-    notesEl.addEventListener("input", () => {
-      syncButtons();
-      persistState();
-    });
+    };
+    const handleKeydown = (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    };
 
-    mentiTextPanelRuntime.cleanup = () => {
-      mentiTextPanelRuntime.disposed = true;
+    form.addEventListener("submit", handleSubmit);
+    clearBtn.addEventListener("click", handleClear);
+    inputEl.addEventListener("input", handleInput);
+    inputEl.addEventListener("keydown", handleKeydown);
+
+    mentiGeminiChatRuntime.cleanup = () => {
+      isActive = false;
+      if (requestController) {
+        requestController.abort();
+        requestController = null;
+      }
+      form.removeEventListener("submit", handleSubmit);
+      clearBtn.removeEventListener("click", handleClear);
+      inputEl.removeEventListener("input", handleInput);
+      inputEl.removeEventListener("keydown", handleKeydown);
     };
   };
 
