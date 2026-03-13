@@ -2647,6 +2647,18 @@ button.ghost {
   grid-column: 1 / -1;
 }
 
+.obus-bulk-users-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.obus-bulk-users-head .muted {
+  margin: 0;
+  text-align: right;
+}
+
 .obus-bulk-user-list {
   display: grid;
   gap: 8px;
@@ -2686,6 +2698,21 @@ button.ghost {
 
 .obus-bulk-filter-field {
   min-width: 180px;
+}
+
+.obus-bulk-check-head {
+  align-items: flex-end;
+}
+
+.obus-bulk-check-title {
+  display: grid;
+  gap: 6px;
+}
+
+.obus-bulk-check-controls {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .obus-user-create-actions {
@@ -2987,16 +3014,27 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .obus-user-create-grid {
-  grid-template-columns: minmax(280px, 420px) minmax(150px, 220px) minmax(150px, 220px) minmax(150px, 220px);
-  gap: 8px 12px;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: start;
 }
 
 .obus-user-create-bulk-page .obus-user-create-field {
   gap: 4px;
 }
 
+.obus-user-create-bulk-page .obus-user-create-field-company {
+  grid-column: 1;
+}
+
 .obus-user-create-bulk-page .obus-user-create-field span {
   font-size: 12px;
+}
+
+.obus-user-create-bulk-page .obus-user-create-field-bulk-users {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
 }
 
 .obus-user-create-bulk-page .obus-user-create-field > input[type="text"],
@@ -3016,26 +3054,36 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .obus-bulk-user-list {
-  gap: 6px;
+  gap: 5px;
+  max-height: min(42vh, 360px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .obus-user-create-bulk-page .obus-bulk-user-row {
-  grid-template-columns: minmax(160px, 1.3fr) minmax(130px, 1fr) minmax(120px, 1fr) auto;
-  gap: 6px;
-  padding: 6px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(110px, 0.85fr) minmax(105px, 0.85fr) 52px;
+  gap: 5px;
+  padding: 5px;
   border-radius: 8px;
 }
 
 .obus-user-create-bulk-page .obus-bulk-user-row input[type="text"],
 .obus-user-create-bulk-page .obus-bulk-user-row input[type="password"] {
   border-radius: 7px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   font-size: 12px;
-  min-height: 30px;
+  min-height: 28px;
+}
+
+.obus-user-create-bulk-page .obus-bulk-user-row .button-link,
+.obus-user-create-bulk-page .obus-bulk-user-row .ghost {
+  min-height: 28px;
+  padding: 5px 7px;
 }
 
 .obus-user-create-bulk-page .obus-user-create-actions {
   gap: 8px;
+  justify-content: flex-start;
 }
 
 .obus-user-create-bulk-page .obus-user-create-actions .button-link {
@@ -3064,7 +3112,6 @@ button.ghost {
 }
 
 .obus-user-create-bulk-page .table-head h2,
-.obus-user-create-bulk-page .page-title p,
 .obus-user-create-bulk-page .user-pill,
 .obus-user-create-bulk-page .muted,
 .obus-user-create-bulk-page .inline-alert,
@@ -3743,6 +3790,36 @@ button.ghost {
 
   .obus-bulk-user-row {
     grid-template-columns: 1fr;
+  }
+
+  .obus-user-create-bulk-page .obus-user-create-field-company,
+  .obus-user-create-bulk-page .obus-user-create-field-bulk-users {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .obus-user-create-bulk-page .obus-bulk-users-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .obus-user-create-bulk-page .obus-bulk-users-head .muted {
+    text-align: left;
+  }
+
+  .obus-user-create-bulk-page .obus-bulk-user-list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .obus-user-create-bulk-page .obus-bulk-check-head {
+    align-items: flex-start;
+  }
+
+  .obus-user-create-bulk-page .obus-bulk-check-controls {
+    margin-left: 0;
+    justify-content: flex-start;
+    width: 100%;
   }
 
   .allowed-lines-actions {
