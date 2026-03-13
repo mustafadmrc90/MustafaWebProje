@@ -4157,6 +4157,48 @@ async function fetchAllCompaniesObusMerkezSubeIdMap() {
   }
 }
 
+function mergeKnownObusMerkezSubeIdsIntoAllCompaniesRows(rows, obusMerkezSubeIdByKey) {
+  const normalizedRows = normalizeAllCompaniesCacheRows(rows);
+  if (normalizedRows.length === 0 || !(obusMerkezSubeIdByKey instanceof Map) || obusMerkezSubeIdByKey.size === 0) {
+    return normalizedRows;
+  }
+
+  return normalizedRows.map((row) => {
+    const existingBranchId = String(row?.ObusMerkezSubeID || "").trim();
+    if (existingBranchId) return row;
+
+    const knownBranchId = String(obusMerkezSubeIdByKey.get(buildAllCompaniesCacheRowKey(row)) || "").trim();
+    if (!knownBranchId) return row;
+
+    return {
+      ...row,
+      ObusMerkezSubeID: knownBranchId
+    };
+  });
+}
+
+async function attachKnownObusMerkezSubeIdsToAllCompaniesReport(report = {}) {
+  const normalizedRows = normalizeAllCompaniesCacheRows(report.rows || []);
+  if (normalizedRows.length === 0) {
+    return {
+      report: {
+        ...report,
+        rows: normalizedRows
+      },
+      obusCacheError: null
+    };
+  }
+
+  const { map, error } = await fetchAllCompaniesObusMerkezSubeIdMap();
+  return {
+    report: {
+      ...report,
+      rows: mergeKnownObusMerkezSubeIdsIntoAllCompaniesRows(normalizedRows, map)
+    },
+    obusCacheError: error
+  };
+}
+
 async function upsertAllCompaniesCacheRows(rows, options = {}) {
   const pruneMissing = options?.pruneMissing === true;
   const normalizedRows = normalizeAllCompaniesCacheRows(rows).filter((row) => {
@@ -4307,18 +4349,9 @@ async function syncAllCompaniesCacheFromService() {
   const liveRows = normalizeAllCompaniesCacheRows(liveResult.rows || []);
   const newRows = liveRows.filter((row) => !existingKeySet.has(buildAllCompaniesCacheRowKey(row)));
 
-  let rowsToSave = newRows;
-  let obusNotice = null;
-  if (newRows.length > 0) {
-    const enriched = await enrichAllCompaniesRowsWithObusMerkezSubeId(newRows);
-    rowsToSave = normalizeAllCompaniesCacheRows(enriched.rows || []);
-    obusNotice = enriched.notice || null;
-  }
-
-  const saveResult = await upsertAllCompaniesCacheRows(rowsToSave);
+  const saveResult = await upsertAllCompaniesCacheRows(newRows);
   const errorParts = [];
   if (liveResult.error) errorParts.push(liveResult.error);
-  if (obusNotice) errorParts.push(obusNotice);
   if (saveResult.error) errorParts.push(saveResult.error);
 
   return {
@@ -4410,7 +4443,13 @@ async function runAllCompaniesServiceSyncJob(job, ownerUserId) {
   if (!job || typeof job !== "object") return;
 
   try {
-    const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
+    const fetchedResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: false });
+    const { report: liveResult, obusCacheError } = await attachKnownObusMerkezSubeIdsToAllCompaniesReport(
+      fetchedResult
+    );
+    if (obusCacheError) {
+      console.error("All companies service sync ObusMerkezSubeID cache read error:", obusCacheError);
+    }
     setAllCompaniesServicePreviewForUser(ownerUserId, liveResult);
 
     const rowCount = Array.isArray(liveResult?.rows) ? liveResult.rows.length : 0;
@@ -10778,7 +10817,10 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
       `[AllCompanies] Service refresh started user=${Number.isInteger(currentUserId) ? currentUserId : "unknown"}`
     );
 
-    const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: true });
+    const fetchedResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: false });
+    const { report: liveResult, obusCacheError } = await attachKnownObusMerkezSubeIdsToAllCompaniesReport(
+      fetchedResult
+    );
     result = {
       columns: liveResult.columns || [],
       rows: liveResult.rows || [],
@@ -10797,6 +10839,9 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         liveResult.error ? " | status=partial" : " | status=ok"
       }`
     );
+    if (obusCacheError) {
+      console.error("All companies page ObusMerkezSubeID cache read error:", obusCacheError);
+    }
 
     if (liveResult.error) {
       errorParts.push(liveResult.error);
@@ -10821,7 +10866,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   }
 
   let syncMessage = shouldSync
-    ? `Servisten ${result.rows?.length || 0} kayıt getirildi. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`
+    ? `Servisten ${result.rows?.length || 0} kayıt getirildi. Boş ObusMerkezSubeID kayıtları için 'ObusMerkezSubeID Güncelle' butonunu kullanın. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`
     : hasServicePreview
       ? `Servisten alınan son veri hazır (${previewSnapshot.rows.length} kayıt).`
       : "";
@@ -10835,7 +10880,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         errorParts.push(syncJob.error);
       } else {
         const syncRowCount = Number(syncJob?.summary?.rowCount || previewSnapshot?.rows?.length || 0);
-        syncMessage = `Servisten ${syncRowCount} kayıt getirildi. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`;
+        syncMessage = `Servisten ${syncRowCount} kayıt getirildi. Boş ObusMerkezSubeID kayıtları için 'ObusMerkezSubeID Güncelle' butonunu kullanın. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`;
         const syncError = String(syncJob?.summary?.error || "").trim();
         if (syncError) {
           syncMessageKind = "warning";
