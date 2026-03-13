@@ -303,12 +303,10 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
-  const mentiHelperStorageKey = "menti_helper_state_v1";
-  const mentiHelperRuntime = {
-    intervalId: null,
-    restartTimeoutId: null,
-    audioContext: null,
-    cleanup: null
+  const mentiOcrStorageKey = "menti_ocr_state_v1";
+  const mentiOcrRuntime = {
+    cleanup: null,
+    scriptPromise: null
   };
 
   const loadLoginProfilesFromStorage = () => {
@@ -2170,315 +2168,278 @@
     });
   };
 
-  const loadMentiHelperStateFromStorage = () => {
+  const loadMentiOcrStateFromStorage = () => {
     try {
-      const raw = window.localStorage.getItem(mentiHelperStorageKey);
-      if (!raw) {
-        return {
-          optionLabels: ["Secenek 1", "Secenek 2", "Secenek 3", "Secenek 4", "Secenek 5"],
-          notes: "",
-          repeat: true,
-          sound: true,
-          lastSelected: -1
-        };
-      }
+      const raw = window.localStorage.getItem(mentiOcrStorageKey);
+      if (!raw) return { outputText: "" };
       const parsed = JSON.parse(raw);
-      const optionLabels = Array.isArray(parsed?.optionLabels) ? parsed.optionLabels : [];
       return {
-        optionLabels: Array.from({ length: 5 }, (_, index) => {
-          const value = String(optionLabels[index] || "").trim();
-          return value || `Secenek ${index + 1}`;
-        }),
-        notes: String(parsed?.notes || ""),
-        repeat: parsed?.repeat !== false,
-        sound: parsed?.sound !== false,
-        lastSelected: Number.isInteger(parsed?.lastSelected) ? parsed.lastSelected : -1
+        outputText: String(parsed?.outputText || "")
       };
     } catch (err) {
-      return {
-        optionLabels: ["Secenek 1", "Secenek 2", "Secenek 3", "Secenek 4", "Secenek 5"],
-        notes: "",
-        repeat: true,
-        sound: true,
-        lastSelected: -1
-      };
+      return { outputText: "" };
     }
   };
 
-  const saveMentiHelperStateToStorage = (state) => {
+  const saveMentiOcrStateToStorage = (state) => {
     try {
-      window.localStorage.setItem(mentiHelperStorageKey, JSON.stringify(state));
+      window.localStorage.setItem(mentiOcrStorageKey, JSON.stringify(state));
       return true;
     } catch (err) {
       return false;
     }
   };
 
+  const loadMentiOcrLibrary = async () => {
+    if (window.Tesseract?.recognize) return window.Tesseract;
+    if (mentiOcrRuntime.scriptPromise) return mentiOcrRuntime.scriptPromise;
+
+    mentiOcrRuntime.scriptPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector("script[data-menti-ocr-lib='1']");
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.Tesseract), { once: true });
+        existing.addEventListener(
+          "error",
+          () => {
+            mentiOcrRuntime.scriptPromise = null;
+            reject(new Error("OCR kutuphanesi yuklenemedi."));
+          },
+          { once: true }
+        );
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      script.async = true;
+      script.dataset.mentiOcrLib = "1";
+      script.addEventListener("load", () => {
+        if (window.Tesseract?.recognize) {
+          resolve(window.Tesseract);
+        } else {
+          mentiOcrRuntime.scriptPromise = null;
+          reject(new Error("OCR kutuphanesi hazir degil."));
+        }
+      });
+      script.addEventListener("error", () => {
+        mentiOcrRuntime.scriptPromise = null;
+        reject(new Error("OCR kutuphanesi yuklenemedi."));
+      });
+      document.head.appendChild(script);
+    });
+
+    return mentiOcrRuntime.scriptPromise;
+  };
+
   const initMentiHelper = () => {
-    if (typeof mentiHelperRuntime.cleanup === "function") {
-      mentiHelperRuntime.cleanup();
-      mentiHelperRuntime.cleanup = null;
+    if (typeof mentiOcrRuntime.cleanup === "function") {
+      mentiOcrRuntime.cleanup();
+      mentiOcrRuntime.cleanup = null;
     }
 
-    const root = document.querySelector("[data-menti-helper='1']");
+    const root = document.querySelector("[data-menti-ocr='1']");
     if (!root) return;
 
-    const helperCard = root.querySelector(".menti-helper-card");
-    const countdownEl = root.querySelector("[data-menti-countdown-value='1']");
-    const statusEl = root.querySelector("[data-menti-status='1']");
-    const statusPill = root.querySelector("[data-menti-status-pill='1']");
-    const startBtn = root.querySelector("[data-menti-start='1']");
-    const restartBtn = root.querySelector("[data-menti-restart='1']");
-    const stopBtn = root.querySelector("[data-menti-stop='1']");
-    const repeatCheckbox = root.querySelector("[data-menti-repeat='1']");
-    const soundCheckbox = root.querySelector("[data-menti-sound='1']");
-    const notesField = root.querySelector("[data-menti-notes='1']");
-    const lastSelectionEl = root.querySelector("[data-menti-last-selection='1']");
-    const optionInputs = Array.from(root.querySelectorAll("[data-menti-option-input]"));
-    const optionButtons = Array.from(root.querySelectorAll("[data-menti-option-button]"));
+    const statusPill = root.querySelector("[data-menti-ocr-status-pill='1']");
+    const statusEl = root.querySelector("[data-menti-ocr-status='1']");
+    const fileInput = root.querySelector("[data-menti-ocr-input='1']");
+    const dropzone = root.querySelector("[data-menti-ocr-dropzone='1']");
+    const previewWrap = root.querySelector("[data-menti-ocr-preview-wrap='1']");
+    const previewEl = root.querySelector("[data-menti-ocr-preview='1']");
+    const runBtn = root.querySelector("[data-menti-ocr-run='1']");
+    const copyBtn = root.querySelector("[data-menti-ocr-copy='1']");
+    const clearBtn = root.querySelector("[data-menti-ocr-clear='1']");
+    const outputEl = root.querySelector("[data-menti-ocr-output='1']");
 
     if (
-      !helperCard ||
-      !countdownEl ||
-      !statusEl ||
       !statusPill ||
-      !startBtn ||
-      !restartBtn ||
-      !stopBtn ||
-      !repeatCheckbox ||
-      !soundCheckbox ||
-      !notesField ||
-      !lastSelectionEl ||
-      optionInputs.length !== 5 ||
-      optionButtons.length !== 5
+      !statusEl ||
+      !fileInput ||
+      !dropzone ||
+      !previewWrap ||
+      !previewEl ||
+      !runBtn ||
+      !copyBtn ||
+      !clearBtn ||
+      !outputEl
     ) {
       return;
     }
 
-    const state = loadMentiHelperStateFromStorage();
-    let remainingSeconds = 5;
-    let isRunning = false;
-    let lastSelected = state.lastSelected >= 0 && state.lastSelected < 5 ? state.lastSelected : -1;
+    const state = loadMentiOcrStateFromStorage();
+    let currentImageUrl = "";
+    let isBusy = false;
+    let currentRunId = 0;
+    let isDisposed = false;
 
     const persistState = () => {
-      const nextState = {
-        optionLabels: optionInputs.map((input, index) => {
-          const value = String(input.value || "").trim();
-          return value || `Secenek ${index + 1}`;
-        }),
-        notes: String(notesField.value || ""),
-        repeat: repeatCheckbox.checked,
-        sound: soundCheckbox.checked,
-        lastSelected
-      };
-      saveMentiHelperStateToStorage(nextState);
+      saveMentiOcrStateToStorage({
+        outputText: String(outputEl.value || "")
+      });
+    };
+
+    const updateButtons = () => {
+      const hasImage = Boolean(currentImageUrl);
+      const hasText = Boolean(String(outputEl.value || "").trim());
+      runBtn.disabled = !hasImage || isBusy;
+      copyBtn.disabled = !hasText || isBusy;
+      clearBtn.disabled = (!hasImage && !hasText) || isBusy;
+      dropzone.classList.toggle("is-ready", hasImage);
+      dropzone.classList.toggle("is-busy", isBusy);
     };
 
     const setStatus = (message, variant = "idle") => {
       statusEl.textContent = message;
-      statusPill.textContent =
-        variant === "running" ? "Calisiyor" : variant === "selected" ? "Secim Hazir" : "Beklemede";
-      statusPill.classList.toggle("success", variant === "selected");
-      statusPill.classList.toggle("muted", variant !== "selected");
+      statusPill.textContent = variant === "busy" ? "Calisiyor" : variant === "success" ? "Hazir" : "Beklemede";
+      statusPill.classList.toggle("success", variant === "success");
+      statusPill.classList.toggle("muted", variant !== "success");
     };
 
-    const renderCountdown = () => {
-      countdownEl.textContent = String(Math.max(0, remainingSeconds)).padStart(2, "0");
-      helperCard.classList.toggle("is-running", isRunning);
-      startBtn.disabled = isRunning;
-      stopBtn.disabled = !isRunning;
-    };
-
-    const renderOptionButtons = () => {
-      optionButtons.forEach((button, index) => {
-        const labelEl = button.querySelector(`[data-menti-option-label="${index}"]`);
-        const input = optionInputs[index];
-        const label = String(input?.value || "").trim() || `Secenek ${index + 1}`;
-        if (labelEl) labelEl.textContent = label;
-        const selected = index === lastSelected;
-        button.classList.toggle("is-selected", selected);
-        button.setAttribute("aria-pressed", selected ? "true" : "false");
-      });
-
-      if (lastSelected >= 0) {
-        const label = String(optionInputs[lastSelected]?.value || "").trim() || `Secenek ${lastSelected + 1}`;
-        lastSelectionEl.textContent = `Son secim: ${lastSelected + 1} - ${label}`;
-      } else {
-        lastSelectionEl.textContent = "Son secim yapilmadi.";
+    const revokeCurrentImage = () => {
+      if (currentImageUrl && currentImageUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(currentImageUrl);
       }
+      currentImageUrl = "";
     };
 
-    const ensureAudioContext = async () => {
-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextCtor) return null;
-      if (!mentiHelperRuntime.audioContext) {
-        mentiHelperRuntime.audioContext = new AudioContextCtor();
-      }
-      if (mentiHelperRuntime.audioContext.state === "suspended") {
-        await mentiHelperRuntime.audioContext.resume();
-      }
-      return mentiHelperRuntime.audioContext;
-    };
-
-    const playCompletionTone = async () => {
-      if (!soundCheckbox.checked) return;
-      try {
-        const audioContext = await ensureAudioContext();
-        if (!audioContext) return;
-        const now = audioContext.currentTime;
-        [880, 660].forEach((frequency, index) => {
-          const oscillator = audioContext.createOscillator();
-          const gainNode = audioContext.createGain();
-          const startAt = now + index * 0.18;
-          oscillator.type = "sine";
-          oscillator.frequency.setValueAtTime(frequency, startAt);
-          gainNode.gain.setValueAtTime(0.0001, startAt);
-          gainNode.gain.exponentialRampToValueAtTime(0.08, startAt + 0.02);
-          gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.16);
-          oscillator.connect(gainNode);
-          gainNode.connect(audioContext.destination);
-          oscillator.start(startAt);
-          oscillator.stop(startAt + 0.18);
-        });
-      } catch (err) {
-        // Ignore audio errors; helper remains usable without sound.
-      }
-    };
-
-    const clearTimers = () => {
-      if (mentiHelperRuntime.intervalId) {
-        window.clearInterval(mentiHelperRuntime.intervalId);
-        mentiHelperRuntime.intervalId = null;
-      }
-      if (mentiHelperRuntime.restartTimeoutId) {
-        window.clearTimeout(mentiHelperRuntime.restartTimeoutId);
-        mentiHelperRuntime.restartTimeoutId = null;
-      }
-    };
-
-    const stopCountdown = (message = "Sayac durduruldu.") => {
-      clearTimers();
-      isRunning = false;
-      renderCountdown();
-      setStatus(message, lastSelected >= 0 ? "selected" : "idle");
-    };
-
-    const startCountdown = async () => {
-      clearTimers();
-      remainingSeconds = 5;
-      isRunning = true;
-      renderCountdown();
-      setStatus("5 saniyelik tur basladi. Ekrani takip edin.", "running");
-      if (soundCheckbox.checked) {
-        ensureAudioContext().catch(() => {});
-      }
-
-      mentiHelperRuntime.intervalId = window.setInterval(() => {
-        remainingSeconds -= 1;
-        renderCountdown();
-        if (remainingSeconds > 0) return;
-
-        clearTimers();
-        isRunning = false;
-        renderCountdown();
-        playCompletionTone();
-
-        if (repeatCheckbox.checked) {
-          setStatus("Sure doldu. Yeni tur 1 saniye sonra baslayacak.", "running");
-          mentiHelperRuntime.restartTimeoutId = window.setTimeout(() => {
-            startCountdown();
-          }, 1000);
-          return;
-        }
-
-        setStatus("Sure doldu. Sonraki soru icin hazir.", lastSelected >= 0 ? "selected" : "idle");
-      }, 1000);
-    };
-
-    const selectOption = async (index) => {
-      if (index < 0 || index >= optionInputs.length) return;
-      lastSelected = index;
-      renderOptionButtons();
-      persistState();
-      const label = String(optionInputs[index]?.value || "").trim() || `Secenek ${index + 1}`;
-      let copiedSuffix = "";
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(label);
-          copiedSuffix = " Panoya kopyalandi.";
-        } catch (err) {
-          copiedSuffix = "";
-        }
-      }
-      setStatus(`Hazir secim: ${index + 1} - ${label}.${copiedSuffix}`, "selected");
-    };
-
-    state.optionLabels.forEach((label, index) => {
-      if (optionInputs[index]) optionInputs[index].value = label;
-    });
-    notesField.value = state.notes;
-    repeatCheckbox.checked = state.repeat;
-    soundCheckbox.checked = state.sound;
-
-    optionInputs.forEach((input) => {
-      input.addEventListener("input", () => {
-        renderOptionButtons();
+    const clearSelectedImage = ({ preserveText = false } = {}) => {
+      revokeCurrentImage();
+      previewEl.removeAttribute("src");
+      previewWrap.hidden = true;
+      fileInput.value = "";
+      if (!preserveText) {
+        outputEl.value = "";
         persistState();
-      });
-    });
+      }
+      isBusy = false;
+      updateButtons();
+      setStatus("Gorsel bekleniyor.", "idle");
+    };
 
-    optionButtons.forEach((button, index) => {
-      button.addEventListener("click", () => {
-        selectOption(index);
-      });
-    });
+    const useImageFile = (file) => {
+      if (!file || !String(file.type || "").startsWith("image/")) {
+        setStatus("Gecerli bir gorsel secin.", "idle");
+        return;
+      }
+      revokeCurrentImage();
+      currentImageUrl = URL.createObjectURL(file);
+      previewEl.src = currentImageUrl;
+      previewWrap.hidden = false;
+      isBusy = false;
+      updateButtons();
+      setStatus(`Gorsel hazir: ${file.name || "clipboard-image"}`, "success");
+    };
 
-    notesField.addEventListener("input", persistState);
-    repeatCheckbox.addEventListener("change", persistState);
-    soundCheckbox.addEventListener("change", persistState);
-    startBtn.addEventListener("click", () => {
-      startCountdown();
-    });
-    restartBtn.addEventListener("click", () => {
-      startCountdown();
-    });
-    stopBtn.addEventListener("click", () => {
-      stopCountdown();
-    });
+    const extractText = async () => {
+      if (!currentImageUrl || isBusy) return;
+      const runId = currentRunId + 1;
+      currentRunId = runId;
+      isBusy = true;
+      updateButtons();
+      setStatus("OCR kutuphanesi yukleniyor...", "busy");
 
-    const handleKeydown = (event) => {
-      if (!document.body.contains(root)) return;
-      const target = event.target;
-      const tagName = String(target?.tagName || "").toLowerCase();
-      const isTypingTarget = tagName === "input" || tagName === "textarea" || target?.isContentEditable;
-      if (!isTypingTarget) {
-        const optionIndex = ["1", "2", "3", "4", "5"].indexOf(event.key);
-        if (optionIndex >= 0) {
-          event.preventDefault();
-          selectOption(optionIndex);
-          return;
-        }
-        if (event.key === "r" || event.key === "R") {
-          event.preventDefault();
-          startCountdown();
-          return;
-        }
-        if (event.key === "s" || event.key === "S") {
-          event.preventDefault();
-          stopCountdown();
-        }
+      try {
+        const Tesseract = await loadMentiOcrLibrary();
+        if (isDisposed || runId !== currentRunId) return;
+        setStatus("Metin cikariliyor...", "busy");
+        const result = await Tesseract.recognize(currentImageUrl, "tur+eng", {
+          logger: (event) => {
+            if (isDisposed || runId !== currentRunId) return;
+            if (!event?.status) return;
+            const ratio = Number.isFinite(event.progress) ? Math.round(event.progress * 100) : null;
+            const progressText = ratio === null ? "" : ` %${ratio}`;
+            statusEl.textContent = `${event.status}${progressText}`;
+          }
+        });
+        if (isDisposed || runId !== currentRunId) return;
+        outputEl.value = String(result?.data?.text || "").trim();
+        persistState();
+        const hasText = Boolean(outputEl.value);
+        setStatus(hasText ? "Metin cikarildi." : "Metin bulunamadi.", hasText ? "success" : "idle");
+      } catch (err) {
+        if (isDisposed || runId !== currentRunId) return;
+        setStatus(err?.message || "OCR islemi basarisiz.", "idle");
+      } finally {
+        if (isDisposed || runId !== currentRunId) return;
+        isBusy = false;
+        updateButtons();
       }
     };
 
-    window.addEventListener("keydown", handleKeydown);
-    renderOptionButtons();
-    renderCountdown();
-    setStatus("Sayac hazir. Baslat ile 5 saniyelik turu acabilirsiniz.", lastSelected >= 0 ? "selected" : "idle");
+    const copyOutput = async () => {
+      const text = String(outputEl.value || "").trim();
+      if (!text) return;
+      if (!navigator.clipboard?.writeText) {
+        setStatus("Panoya kopyalama bu tarayicida desteklenmiyor.", "idle");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Metin panoya kopyalandi.", "success");
+      } catch (err) {
+        setStatus("Metin kopyalanamadi.", "idle");
+      }
+    };
 
-    mentiHelperRuntime.cleanup = () => {
-      clearTimers();
-      window.removeEventListener("keydown", handleKeydown);
-      isRunning = false;
+    const handlePaste = (event) => {
+      if (isDisposed) return;
+      const items = Array.from(event.clipboardData?.items || []);
+      const imageItem = items.find((item) => String(item.type || "").startsWith("image/"));
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      useImageFile(file);
+    };
+
+    const handleDrop = (event) => {
+      event.preventDefault();
+      if (isDisposed) return;
+      const files = Array.from(event.dataTransfer?.files || []);
+      const imageFile = files.find((file) => String(file.type || "").startsWith("image/"));
+      if (!imageFile) {
+        setStatus("Bir gorsel dosyasi birakin.", "idle");
+        return;
+      }
+      useImageFile(imageFile);
+    };
+
+    outputEl.value = state.outputText;
+    updateButtons();
+    setStatus(state.outputText ? "Hazir. Yeni gorsel secip tekrar OCR calistirabilirsiniz." : "Gorsel bekleniyor.", state.outputText ? "success" : "idle");
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      useImageFile(file);
+    });
+    runBtn.addEventListener("click", extractText);
+    copyBtn.addEventListener("click", copyOutput);
+    clearBtn.addEventListener("click", () => {
+      clearSelectedImage();
+    });
+    outputEl.addEventListener("input", () => {
+      persistState();
+      updateButtons();
+    });
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("is-dragover");
+    });
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("is-dragover");
+    });
+    dropzone.addEventListener("drop", (event) => {
+      dropzone.classList.remove("is-dragover");
+      handleDrop(event);
+    });
+    window.addEventListener("paste", handlePaste);
+
+    mentiOcrRuntime.cleanup = () => {
+      isDisposed = true;
+      currentRunId += 1;
+      window.removeEventListener("paste", handlePaste);
+      revokeCurrentImage();
     };
   };
 

@@ -10,7 +10,7 @@
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
 
-    <section class="content" data-menti-helper="1">
+    <section class="content" data-menti-ocr="1">
       <header class="page-header">
         <div class="page-title">
           <h1>
@@ -23,7 +23,7 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti ekranini uygulama icinde ac. Sol panelde manuel hizli kullanim yardimcisi bulunur.</p>
+          <p>Menti ekranini uygulama icinde ac. Sol panelden ekran goruntusu yukleyip OCR ile metin cikar.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -31,79 +31,51 @@
       </header>
 
       <section class="menti-layout">
-        <aside class="table-card panel-card menti-helper-card">
-          <div class="menti-helper-header">
+        <aside class="table-card panel-card menti-ocr-card">
+          <div class="menti-ocr-header">
             <div>
-              <h2>Menti Yardimcisi</h2>
-              <p class="muted">5 saniyelik tekrarli sayac, hizli secim ve notlar burada tutulur.</p>
+              <h2>OCR Araci</h2>
+              <p class="muted">Ekran goruntusu secin veya bu sayfaya yapistirin. Metin bu panelde cikarilir.</p>
             </div>
-            <span class="pill muted" data-menti-status-pill="1">Beklemede</span>
+            <span class="pill muted" data-menti-ocr-status-pill="1">Hazir</span>
           </div>
 
-          <div class="menti-helper-countdown-wrap">
-            <div class="menti-helper-countdown" data-menti-countdown-value="1">05</div>
-            <div class="menti-helper-status" data-menti-status="1">
-              Sayac hazir. Baslat ile 5 saniyelik turu acabilirsiniz.
-            </div>
+          <div class="menti-frame-note inline-alert">
+            Menti iframe icerigi dogrudan okunamaz. Bu yuzden ekran goruntusu yukleyip OCR calistirabilirsiniz.
           </div>
 
-          <div class="menti-helper-controls">
-            <button type="button" data-menti-start="1">5 sn Baslat</button>
-            <button type="button" class="ghost" data-menti-restart="1">Yeniden Baslat</button>
-            <button type="button" class="ghost" data-menti-stop="1" disabled>Durdur</button>
+          <label class="menti-ocr-dropzone" data-menti-ocr-dropzone="1">
+            <input type="file" accept="image/*" data-menti-ocr-input="1" hidden />
+            <span class="menti-ocr-dropzone-title">Gorsel Sec veya Ctrl+V ile Yapistir</span>
+            <span class="menti-ocr-dropzone-subtitle">PNG, JPG, WEBP veya ekran goruntusu kabul edilir.</span>
+          </label>
+
+          <div class="menti-ocr-actions">
+            <button type="button" data-menti-ocr-run="1" disabled>Metni Cikar</button>
+            <button type="button" class="ghost" data-menti-ocr-copy="1" disabled>Metni Kopyala</button>
+            <button type="button" class="ghost" data-menti-ocr-clear="1" disabled>Temizle</button>
           </div>
 
-          <div class="menti-helper-toggles">
-            <label class="menti-helper-toggle">
-              <input type="checkbox" data-menti-repeat="1" checked />
-              <span>Tekrarli mod</span>
-            </label>
-            <label class="menti-helper-toggle">
-              <input type="checkbox" data-menti-sound="1" checked />
-              <span>Sesli uyari</span>
-            </label>
+          <div class="menti-ocr-status" data-menti-ocr-status="1">
+            Gorsel bekleniyor.
           </div>
 
-          <section class="menti-answer-section">
-            <div class="table-head">
-              <h2>Hizli Secim</h2>
-              <span class="muted">Kisayol: 1-5, R baslat, S durdur</span>
-            </div>
-
-            <div class="menti-answer-grid">
-              <% for (let i = 1; i <= 5; i += 1) { %>
-                <button type="button" class="menti-answer-button" data-menti-option-button="<%= i - 1 %>">
-                  <span class="menti-answer-key"><%= i %></span>
-                  <span class="menti-answer-label" data-menti-option-label="<%= i - 1 %>">Secenek <%= i %></span>
-                </button>
-              <% } %>
-            </div>
-
-            <div class="menti-option-editor">
-              <% for (let i = 1; i <= 5; i += 1) { %>
-                <label>
-                  <span>Secenek <%= i %></span>
-                  <input
-                    type="text"
-                    autocomplete="off"
-                    data-menti-option-input="<%= i - 1 %>"
-                    placeholder="Secenek <%= i %> etiketi"
-                  />
-                </label>
-              <% } %>
-            </div>
-
-            <div class="menti-last-selection" data-menti-last-selection="1">Son secim yapilmadi.</div>
-          </section>
+          <div class="menti-ocr-preview-wrap" data-menti-ocr-preview-wrap="1" hidden>
+            <img class="menti-ocr-preview" data-menti-ocr-preview="1" alt="OCR gorsel onizleme" />
+          </div>
 
           <label class="menti-notes-field">
-            <span>Notlar</span>
+            <span>Cikarilan Metin</span>
             <textarea
-              rows="8"
-              data-menti-notes="1"
-              placeholder="Dogru cevap ipuclari, soru notlari veya operator notlari"
+              rows="12"
+              data-menti-ocr-output="1"
+              placeholder="OCR sonucu burada gorunecek"
             ></textarea>
           </label>
+
+          <div class="menti-ocr-hint">
+            <strong>Ipucu:</strong> Soruyu daha net almak icin ekran goruntusunu crop edip tekrar yukleyin.
+          </div>
         </aside>
 
         <section class="table-card panel-card menti-browser-card">
@@ -118,7 +90,7 @@
           </div>
 
           <div class="menti-frame-note inline-alert">
-            Menti farkli domaine ait oldugu icin ic ekrana otomatik tiklama yapilmaz. Bu panel manuel kullanim yardimcisidir.
+            Gorsel yakalamak icin Menti ekranindan ekran goruntusu alip soldaki OCR aracina yukleyin.
           </div>
 
           <div class="menti-browser-frame-wrap">
