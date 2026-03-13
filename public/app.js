@@ -303,10 +303,10 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
-  const mentiOcrStorageKey = "menti_ocr_state_v1";
-  const mentiOcrRuntime = {
+  const mentiTextPanelStorageKey = "menti_text_panel_state_v1";
+  const mentiTextPanelRuntime = {
     cleanup: null,
-    scriptPromise: null
+    disposed: false
   };
 
   const loadLoginProfilesFromStorage = () => {
@@ -2168,202 +2168,173 @@
     });
   };
 
-  const loadMentiOcrStateFromStorage = () => {
+  const loadMentiTextPanelStateFromStorage = () => {
     try {
-      const raw = window.localStorage.getItem(mentiOcrStorageKey);
-      if (!raw) return { outputText: "" };
+      const raw = window.localStorage.getItem(mentiTextPanelStorageKey);
+      if (!raw) return { inputText: "", outputText: "", notes: "" };
       const parsed = JSON.parse(raw);
       return {
-        outputText: String(parsed?.outputText || "")
+        inputText: String(parsed?.inputText || ""),
+        outputText: String(parsed?.outputText || ""),
+        notes: String(parsed?.notes || "")
       };
     } catch (err) {
-      return { outputText: "" };
+      return { inputText: "", outputText: "", notes: "" };
     }
   };
 
-  const saveMentiOcrStateToStorage = (state) => {
+  const saveMentiTextPanelStateToStorage = (state) => {
     try {
-      window.localStorage.setItem(mentiOcrStorageKey, JSON.stringify(state));
+      window.localStorage.setItem(mentiTextPanelStorageKey, JSON.stringify(state));
       return true;
     } catch (err) {
       return false;
     }
   };
 
-  const loadMentiOcrLibrary = async () => {
-    if (window.Tesseract?.recognize) return window.Tesseract;
-    if (mentiOcrRuntime.scriptPromise) return mentiOcrRuntime.scriptPromise;
+  const parseMentiTextBlock = (rawValue) => {
+    const normalizedText = String(rawValue || "").replace(/\r/g, "").trim();
+    const lines = normalizedText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const optionRegex = /^(?:(?:[A-Za-z]|[0-9]{1,2})\s*[\)\.\:\-]|[-*•])\s*(.+)$/;
+    const questionLines = [];
+    const options = [];
 
-    mentiOcrRuntime.scriptPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector("script[data-menti-ocr-lib='1']");
-      if (existing) {
-        existing.addEventListener("load", () => resolve(window.Tesseract), { once: true });
-        existing.addEventListener(
-          "error",
-          () => {
-            mentiOcrRuntime.scriptPromise = null;
-            reject(new Error("OCR kutuphanesi yuklenemedi."));
-          },
-          { once: true }
-        );
+    lines.forEach((line) => {
+      const match = line.match(optionRegex);
+      if (match?.[1]) {
+        options.push(String(match[1]).trim());
         return;
       }
-
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-      script.async = true;
-      script.dataset.mentiOcrLib = "1";
-      script.addEventListener("load", () => {
-        if (window.Tesseract?.recognize) {
-          resolve(window.Tesseract);
-        } else {
-          mentiOcrRuntime.scriptPromise = null;
-          reject(new Error("OCR kutuphanesi hazir degil."));
-        }
-      });
-      script.addEventListener("error", () => {
-        mentiOcrRuntime.scriptPromise = null;
-        reject(new Error("OCR kutuphanesi yuklenemedi."));
-      });
-      document.head.appendChild(script);
+      if (options.length) {
+        options[options.length - 1] = `${options[options.length - 1]} ${line}`.trim();
+        return;
+      }
+      questionLines.push(line);
     });
 
-    return mentiOcrRuntime.scriptPromise;
+    const question = questionLines.join(" ").trim() || (options.length ? "" : lines.join(" ").trim());
+    const parts = [];
+    if (question) {
+      parts.push(`Soru:\n${question}`);
+    }
+    if (options.length) {
+      parts.push(`Secenekler:\n${options.map((option, index) => `${String.fromCharCode(65 + index)}. ${option}`).join("\n")}`);
+    }
+    if (!parts.length && normalizedText) {
+      parts.push(normalizedText);
+    }
+
+    return {
+      question: question || "-",
+      options,
+      outputText: parts.join("\n\n").trim()
+    };
   };
 
   const initMentiHelper = () => {
-    if (typeof mentiOcrRuntime.cleanup === "function") {
-      mentiOcrRuntime.cleanup();
-      mentiOcrRuntime.cleanup = null;
+    if (typeof mentiTextPanelRuntime.cleanup === "function") {
+      mentiTextPanelRuntime.cleanup();
+      mentiTextPanelRuntime.cleanup = null;
     }
+    mentiTextPanelRuntime.disposed = false;
 
-    const root = document.querySelector("[data-menti-ocr='1']");
+    const root = document.querySelector("[data-menti-text-panel='1']");
     if (!root) return;
 
-    const statusPill = root.querySelector("[data-menti-ocr-status-pill='1']");
-    const statusEl = root.querySelector("[data-menti-ocr-status='1']");
-    const fileInput = root.querySelector("[data-menti-ocr-input='1']");
-    const dropzone = root.querySelector("[data-menti-ocr-dropzone='1']");
-    const previewWrap = root.querySelector("[data-menti-ocr-preview-wrap='1']");
-    const previewEl = root.querySelector("[data-menti-ocr-preview='1']");
-    const runBtn = root.querySelector("[data-menti-ocr-run='1']");
-    const copyBtn = root.querySelector("[data-menti-ocr-copy='1']");
-    const clearBtn = root.querySelector("[data-menti-ocr-clear='1']");
-    const outputEl = root.querySelector("[data-menti-ocr-output='1']");
+    const inputEl = root.querySelector("[data-menti-text-input='1']");
+    const outputEl = root.querySelector("[data-menti-text-output='1']");
+    const notesEl = root.querySelector("[data-menti-text-notes='1']");
+    const questionEl = root.querySelector("[data-menti-text-question='1']");
+    const optionsListEl = root.querySelector("[data-menti-text-options='1']");
+    const optionsEmptyEl = root.querySelector("[data-menti-text-options-empty='1']");
+    const statusEl = root.querySelector("[data-menti-text-status='1']");
+    const statusPill = root.querySelector("[data-menti-text-status-pill='1']");
+    const parseBtn = root.querySelector("[data-menti-text-parse='1']");
+    const copyBtn = root.querySelector("[data-menti-text-copy='1']");
+    const clearBtn = root.querySelector("[data-menti-text-clear='1']");
 
     if (
-      !statusPill ||
+      !inputEl ||
+      !outputEl ||
+      !notesEl ||
+      !questionEl ||
+      !optionsListEl ||
+      !optionsEmptyEl ||
       !statusEl ||
-      !fileInput ||
-      !dropzone ||
-      !previewWrap ||
-      !previewEl ||
-      !runBtn ||
+      !statusPill ||
+      !parseBtn ||
       !copyBtn ||
-      !clearBtn ||
-      !outputEl
+      !clearBtn
     ) {
       return;
     }
 
-    const state = loadMentiOcrStateFromStorage();
-    let currentImageUrl = "";
-    let isBusy = false;
-    let currentRunId = 0;
-    let isDisposed = false;
+    const state = loadMentiTextPanelStateFromStorage();
 
     const persistState = () => {
-      saveMentiOcrStateToStorage({
-        outputText: String(outputEl.value || "")
+      saveMentiTextPanelStateToStorage({
+        inputText: String(inputEl.value || ""),
+        outputText: String(outputEl.value || ""),
+        notes: String(notesEl.value || "")
       });
-    };
-
-    const updateButtons = () => {
-      const hasImage = Boolean(currentImageUrl);
-      const hasText = Boolean(String(outputEl.value || "").trim());
-      runBtn.disabled = !hasImage || isBusy;
-      copyBtn.disabled = !hasText || isBusy;
-      clearBtn.disabled = (!hasImage && !hasText) || isBusy;
-      dropzone.classList.toggle("is-ready", hasImage);
-      dropzone.classList.toggle("is-busy", isBusy);
     };
 
     const setStatus = (message, variant = "idle") => {
       statusEl.textContent = message;
-      statusPill.textContent = variant === "busy" ? "Calisiyor" : variant === "success" ? "Hazir" : "Beklemede";
+      statusPill.textContent = variant === "success" ? "Hazir" : "Beklemede";
       statusPill.classList.toggle("success", variant === "success");
       statusPill.classList.toggle("muted", variant !== "success");
     };
 
-    const revokeCurrentImage = () => {
-      if (currentImageUrl && currentImageUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(currentImageUrl);
-      }
-      currentImageUrl = "";
-    };
-
-    const clearSelectedImage = ({ preserveText = false } = {}) => {
-      revokeCurrentImage();
-      previewEl.removeAttribute("src");
-      previewWrap.hidden = true;
-      fileInput.value = "";
-      if (!preserveText) {
-        outputEl.value = "";
-        persistState();
-      }
-      isBusy = false;
-      updateButtons();
-      setStatus("Gorsel bekleniyor.", "idle");
-    };
-
-    const useImageFile = (file) => {
-      if (!file || !String(file.type || "").startsWith("image/")) {
-        setStatus("Gecerli bir gorsel secin.", "idle");
+    const renderOptions = (options) => {
+      optionsListEl.innerHTML = "";
+      if (!Array.isArray(options) || !options.length) {
+        optionsListEl.hidden = true;
+        optionsEmptyEl.hidden = false;
         return;
       }
-      revokeCurrentImage();
-      currentImageUrl = URL.createObjectURL(file);
-      previewEl.src = currentImageUrl;
-      previewWrap.hidden = false;
-      isBusy = false;
-      updateButtons();
-      setStatus(`Gorsel hazir: ${file.name || "clipboard-image"}`, "success");
+      options.forEach((option) => {
+        const item = document.createElement("li");
+        item.textContent = option;
+        optionsListEl.appendChild(item);
+      });
+      optionsListEl.hidden = false;
+      optionsEmptyEl.hidden = true;
     };
 
-    const extractText = async () => {
-      if (!currentImageUrl || isBusy) return;
-      const runId = currentRunId + 1;
-      currentRunId = runId;
-      isBusy = true;
-      updateButtons();
-      setStatus("OCR kutuphanesi yukleniyor...", "busy");
+    const syncButtons = () => {
+      const hasInput = Boolean(String(inputEl.value || "").trim());
+      const hasOutput = Boolean(String(outputEl.value || "").trim());
+      const hasNotes = Boolean(String(notesEl.value || "").trim());
+      parseBtn.disabled = !hasInput;
+      copyBtn.disabled = !hasOutput;
+      clearBtn.disabled = !hasInput && !hasOutput && !hasNotes;
+    };
 
-      try {
-        const Tesseract = await loadMentiOcrLibrary();
-        if (isDisposed || runId !== currentRunId) return;
-        setStatus("Metin cikariliyor...", "busy");
-        const result = await Tesseract.recognize(currentImageUrl, "tur+eng", {
-          logger: (event) => {
-            if (isDisposed || runId !== currentRunId) return;
-            if (!event?.status) return;
-            const ratio = Number.isFinite(event.progress) ? Math.round(event.progress * 100) : null;
-            const progressText = ratio === null ? "" : ` %${ratio}`;
-            statusEl.textContent = `${event.status}${progressText}`;
-          }
-        });
-        if (isDisposed || runId !== currentRunId) return;
-        outputEl.value = String(result?.data?.text || "").trim();
+    const applyParsedState = (parsed, message = "Metin ayristirildi.") => {
+      questionEl.textContent = parsed.question || "-";
+      renderOptions(parsed.options);
+      outputEl.value = parsed.outputText || "";
+      syncButtons();
+      persistState();
+      setStatus(parsed.outputText ? message : "Metin duzenlenemedi.", parsed.outputText ? "success" : "idle");
+    };
+
+    const runParse = () => {
+      const rawText = String(inputEl.value || "").trim();
+      if (!rawText) {
+        questionEl.textContent = "-";
+        renderOptions([]);
+        outputEl.value = "";
+        syncButtons();
         persistState();
-        const hasText = Boolean(outputEl.value);
-        setStatus(hasText ? "Metin cikarildi." : "Metin bulunamadi.", hasText ? "success" : "idle");
-      } catch (err) {
-        if (isDisposed || runId !== currentRunId) return;
-        setStatus(err?.message || "OCR islemi basarisiz.", "idle");
-      } finally {
-        if (isDisposed || runId !== currentRunId) return;
-        isBusy = false;
-        updateButtons();
+        setStatus("Metin bekleniyor.", "idle");
+        return;
       }
+      applyParsedState(parseMentiTextBlock(rawText));
     };
 
     const copyOutput = async () => {
@@ -2375,71 +2346,58 @@
       }
       try {
         await navigator.clipboard.writeText(text);
-        setStatus("Metin panoya kopyalandi.", "success");
+        setStatus("Duzenlenmis metin panoya kopyalandi.", "success");
       } catch (err) {
         setStatus("Metin kopyalanamadi.", "idle");
       }
     };
 
-    const handlePaste = (event) => {
-      if (isDisposed) return;
-      const items = Array.from(event.clipboardData?.items || []);
-      const imageItem = items.find((item) => String(item.type || "").startsWith("image/"));
-      if (!imageItem) return;
-      const file = imageItem.getAsFile();
-      if (!file) return;
-      event.preventDefault();
-      useImageFile(file);
+    const clearAll = () => {
+      inputEl.value = "";
+      outputEl.value = "";
+      notesEl.value = "";
+      questionEl.textContent = "-";
+      renderOptions([]);
+      syncButtons();
+      persistState();
+      setStatus("Metin bekleniyor.", "idle");
     };
 
-    const handleDrop = (event) => {
-      event.preventDefault();
-      if (isDisposed) return;
-      const files = Array.from(event.dataTransfer?.files || []);
-      const imageFile = files.find((file) => String(file.type || "").startsWith("image/"));
-      if (!imageFile) {
-        setStatus("Bir gorsel dosyasi birakin.", "idle");
-        return;
-      }
-      useImageFile(imageFile);
-    };
-
+    inputEl.value = state.inputText;
     outputEl.value = state.outputText;
-    updateButtons();
-    setStatus(state.outputText ? "Hazir. Yeni gorsel secip tekrar OCR calistirabilirsiniz." : "Gorsel bekleniyor.", state.outputText ? "success" : "idle");
+    notesEl.value = state.notes;
 
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files?.[0];
-      if (!file) return;
-      useImageFile(file);
-    });
-    runBtn.addEventListener("click", extractText);
+    if (String(state.outputText || "").trim()) {
+      const parsed = parseMentiTextBlock(state.inputText || state.outputText || "");
+      questionEl.textContent = parsed.question || "-";
+      renderOptions(parsed.options);
+      setStatus("Kaydedilen metin yuklendi.", "success");
+    } else {
+      questionEl.textContent = "-";
+      renderOptions([]);
+      setStatus(String(state.inputText || "").trim() ? "Metin hazir. Ayristir butonuna basin." : "Metin bekleniyor.", "idle");
+    }
+    syncButtons();
+
+    parseBtn.addEventListener("click", runParse);
     copyBtn.addEventListener("click", copyOutput);
-    clearBtn.addEventListener("click", () => {
-      clearSelectedImage();
+    clearBtn.addEventListener("click", clearAll);
+    inputEl.addEventListener("input", () => {
+      syncButtons();
+      persistState();
+      setStatus(String(inputEl.value || "").trim() ? "Metin guncellendi. Ayristir butonuna basin." : "Metin bekleniyor.", "idle");
     });
     outputEl.addEventListener("input", () => {
+      syncButtons();
       persistState();
-      updateButtons();
     });
-    dropzone.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      dropzone.classList.add("is-dragover");
+    notesEl.addEventListener("input", () => {
+      syncButtons();
+      persistState();
     });
-    dropzone.addEventListener("dragleave", () => {
-      dropzone.classList.remove("is-dragover");
-    });
-    dropzone.addEventListener("drop", (event) => {
-      dropzone.classList.remove("is-dragover");
-      handleDrop(event);
-    });
-    window.addEventListener("paste", handlePaste);
 
-    mentiOcrRuntime.cleanup = () => {
-      isDisposed = true;
-      currentRunId += 1;
-      window.removeEventListener("paste", handlePaste);
-      revokeCurrentImage();
+    mentiTextPanelRuntime.cleanup = () => {
+      mentiTextPanelRuntime.disposed = true;
     };
   };
 
