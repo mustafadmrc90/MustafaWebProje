@@ -10589,7 +10589,7 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
     user: req.session.user,
     active: "menti",
     mentiUrl: "https://www.menti.com/",
-    geminiUrl: "https://gemini.google.com/"
+    geminiUrl: "https://gemini.google.com/app"
   });
 });
 
