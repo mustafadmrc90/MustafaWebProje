@@ -23,7 +23,7 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti ve ChatGPT ekranlarini ayni sayfada yan yana ac.</p>
+          <p>Menti ve Gemini ekranlarini ayni sayfada yan yana ac.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -57,24 +57,24 @@
           </div>
         </section>
 
-        <aside class="table-card panel-card menti-chatgpt-card">
+        <aside class="table-card panel-card menti-gemini-card">
           <div class="menti-browser-toolbar">
-            <div class="menti-browser-address" aria-label="ChatGPT adresi">
+            <div class="menti-browser-address" aria-label="Gemini adresi">
               <span class="menti-browser-dot" aria-hidden="true"></span>
-              <span><%= chatgptUrl %></span>
+              <span><%= geminiUrl %></span>
             </div>
-            <a class="button-link ghost" href="<%= chatgptUrl %>" target="_blank" rel="noopener noreferrer">
+            <a class="button-link ghost" href="<%= geminiUrl %>" target="_blank" rel="noopener noreferrer">
               Yeni Sekmede Ac
             </a>
           </div>
 
-          <div class="menti-frame-note inline-alert">ChatGPT burada acik kalir.</div>
+          <div class="menti-frame-note inline-alert">Gemini burada acik kalir.</div>
 
           <div class="menti-browser-frame-wrap">
             <iframe
               class="menti-browser-frame"
-              src="<%= chatgptUrl %>"
-              title="ChatGPT"
+              src="<%= geminiUrl %>"
+              title="Gemini"
               referrerpolicy="strict-origin-when-cross-origin"
               loading="eager"
               allow="clipboard-read; clipboard-write"

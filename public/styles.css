@@ -2103,14 +2103,14 @@ button.ghost {
 }
 
 .menti-browser-card,
-.menti-chatgpt-card {
+.menti-gemini-card {
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.menti-chatgpt-card h2 {
+.menti-gemini-card h2 {
   margin: 0;
 }
 
