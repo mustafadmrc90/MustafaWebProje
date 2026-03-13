@@ -10864,6 +10864,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
           ? {
               id: syncJobId,
               done: Boolean(syncJob.done),
+              createdAt: Number(syncJob.createdAt || 0),
               refreshUrl: `/reports/all-companies?syncJobId=${encodeURIComponent(syncJobId)}`,
               runningMessage: "Servisten güncelleme sürüyor. Sayfa otomatik yenilenecek...",
               showCounts: false
@@ -10886,6 +10887,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
           ? {
               id: obusJobId,
               done: Boolean(obusJob.done),
+              createdAt: Number(obusJob.createdAt || 0),
               totalCount: Number(obusJob.totalCount || 0),
               processedCount: Number(obusJob.processedCount || 0),
               successCount: Number(obusJob.successCount || 0),

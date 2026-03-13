@@ -1997,12 +1997,59 @@
     const statusBoxes = Array.from(document.querySelectorAll("[data-all-companies-job='1']"));
     if (statusBoxes.length === 0) return;
 
+    const formatElapsedTime = (elapsedMs) => {
+      const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours > 0) {
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      }
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+
+    const renderStatusBox = (statusBox, message, options = {}) => {
+      const busy = options.busy === true;
+      const showCounts = options.showCounts === true;
+      const processed = Number(options.processed || 0);
+      const total = Number(options.total || 0);
+      const success = Number(options.success || 0);
+      const failure = Number(options.failure || 0);
+      const elapsedMs = Number(options.elapsedMs || 0);
+
+      statusBox.textContent = "";
+      statusBox.classList.toggle("all-companies-job-active", busy);
+
+      if (busy) {
+        const spinner = document.createElement("span");
+        spinner.className = "all-companies-job-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        statusBox.appendChild(spinner);
+      }
+
+      const text = document.createElement("span");
+      text.className = "all-companies-job-text";
+      text.textContent = showCounts
+        ? `${message} İşlenen: ${processed}/${total} | Başarılı: ${success} | Hatalı: ${failure}`
+        : message;
+      statusBox.appendChild(text);
+
+      if (busy) {
+        const timer = document.createElement("span");
+        timer.className = "all-companies-job-timer";
+        timer.textContent = formatElapsedTime(elapsedMs);
+        statusBox.appendChild(timer);
+      }
+    };
+
     statusBoxes.forEach((statusBox) => {
       if (statusBox.dataset.jobMonitorBound === "1") return;
       statusBox.dataset.jobMonitorBound = "1";
 
       const jobId = String(statusBox.getAttribute("data-job-id") || "").trim();
       const jobDone = String(statusBox.getAttribute("data-job-done") || "").trim() === "1";
+      const jobCreatedAtRaw = Number.parseInt(String(statusBox.getAttribute("data-job-created-at") || "0"), 10);
+      const jobCreatedAt = Number.isFinite(jobCreatedAtRaw) && jobCreatedAtRaw > 0 ? jobCreatedAtRaw : Date.now();
       const refreshUrl =
         String(statusBox.getAttribute("data-refresh-url") || "").trim() || window.location.pathname + window.location.search;
       const runningMessage = String(statusBox.getAttribute("data-running-message") || "").trim();
@@ -2011,6 +2058,34 @@
 
       let cursor = 0;
       let transientFailureCount = 0;
+      let latestState = {
+        processed: 0,
+        total: 0,
+        success: 0,
+        failure: 0
+      };
+
+      renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+        busy: true,
+        showCounts,
+        processed: latestState.processed,
+        total: latestState.total,
+        success: latestState.success,
+        failure: latestState.failure,
+        elapsedMs: Date.now() - jobCreatedAt
+      });
+
+      const timerId = window.setInterval(() => {
+        renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+          busy: true,
+          showCounts,
+          processed: latestState.processed,
+          total: latestState.total,
+          success: latestState.success,
+          failure: latestState.failure,
+          elapsedMs: Date.now() - jobCreatedAt
+        });
+      }, 1000);
 
       const poll = async () => {
         try {
@@ -2036,15 +2111,24 @@
 
           transientFailureCount = 0;
           cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
-          const processed = Number(data.processedCount || 0);
-          const total = Number(data.totalCount || 0);
-          const success = Number(data.successCount || 0);
-          const failure = Number(data.failureCount || 0);
-          statusBox.textContent = showCounts
-            ? `${runningMessage || "İşlem sürüyor."} İşlenen: ${processed}/${total} | Başarılı: ${success} | Hatalı: ${failure}`
-            : runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
+          latestState = {
+            processed: Number(data.processedCount || 0),
+            total: Number(data.totalCount || 0),
+            success: Number(data.successCount || 0),
+            failure: Number(data.failureCount || 0)
+          };
+          renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+            busy: true,
+            showCounts,
+            processed: latestState.processed,
+            total: latestState.total,
+            success: latestState.success,
+            failure: latestState.failure,
+            elapsedMs: Date.now() - jobCreatedAt
+          });
 
           if (data.done) {
+            window.clearInterval(timerId);
             navigate(refreshUrl, { push: true });
             return;
           }
@@ -2052,12 +2136,24 @@
           const errorCode = String(err?.message || "").trim();
           if (errorCode === "__TRANSIENT__" || !errorCode || /Failed to fetch/i.test(errorCode)) {
             transientFailureCount += 1;
-            statusBox.textContent = runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...";
+            renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+              busy: true,
+              showCounts,
+              processed: latestState.processed,
+              total: latestState.total,
+              success: latestState.success,
+              failure: latestState.failure,
+              elapsedMs: Date.now() - jobCreatedAt
+            });
             window.setTimeout(poll, transientFailureCount >= 3 ? 5000 : 2500);
             return;
           }
 
-          statusBox.textContent = err?.message || "İş durumu okunamadı.";
+          window.clearInterval(timerId);
+          renderStatusBox(statusBox, err?.message || "İş durumu okunamadı.", {
+            busy: false
+          });
+          return;
         }
 
         window.setTimeout(poll, 2500);

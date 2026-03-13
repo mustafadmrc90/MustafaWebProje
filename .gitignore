@@ -1,6 +1,7 @@
 node_modules/
 .env
+.env.save
 /data/*.db
 npm-debug.log*
 .DS_Store
-##
+/##

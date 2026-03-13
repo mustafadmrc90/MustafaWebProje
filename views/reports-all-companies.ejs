@@ -35,36 +35,48 @@
         <div class="alert inline-alert"><%= report.error %></div>
       <% } %>
       <% if (report.sync && report.sync.message) { %>
+        <% const syncJobRunning = Boolean(report.sync.job && !report.sync.job.done); %>
+        <% const syncElapsedSeconds = syncJobRunning ? Math.max(0, Math.floor((Date.now() - Number(report.sync.job.createdAt || 0)) / 1000)) : 0; %>
+        <% const syncElapsedText = `${String(Math.floor(syncElapsedSeconds / 60)).padStart(2, '0')}:${String(syncElapsedSeconds % 60).padStart(2, '0')}`; %>
         <div
-          class="<%= report.sync.kind === 'warning' || report.sync.kind === 'error' ? 'alert inline-alert' : 'inline-success' %>"
+          class="<%= report.sync.kind === 'warning' || report.sync.kind === 'error' ? 'alert inline-alert' : 'inline-success' %> <%= syncJobRunning ? 'all-companies-job-active' : '' %>"
           <% if (report.sync.job) { %>
             data-all-companies-job="1"
             data-job-id="<%= report.sync.job.id %>"
             data-job-done="<%= report.sync.job.done ? '1' : '0' %>"
+            data-job-created-at="<%= report.sync.job.createdAt %>"
             data-refresh-url="<%= report.sync.job.refreshUrl %>"
             data-running-message="<%= report.sync.job.runningMessage %>"
             data-show-counts="<%= report.sync.job.showCounts ? '1' : '0' %>"
           <% } %>
         >
-          <%= report.sync.message %>
+          <% if (syncJobRunning) { %><span class="all-companies-job-spinner" aria-hidden="true"></span><% } %>
+          <span class="all-companies-job-text"><%= report.sync.message %></span>
+          <% if (syncJobRunning) { %><span class="all-companies-job-timer"><%= syncElapsedText %></span><% } %>
         </div>
       <% } %>
       <% if (report.save && report.save.message) { %>
         <div class="inline-success"><%= report.save.message %></div>
       <% } %>
       <% if (report.obus && report.obus.message) { %>
+        <% const obusJobRunning = Boolean(report.obus.job && !report.obus.job.done); %>
+        <% const obusElapsedSeconds = obusJobRunning ? Math.max(0, Math.floor((Date.now() - Number(report.obus.job.createdAt || 0)) / 1000)) : 0; %>
+        <% const obusElapsedText = `${String(Math.floor(obusElapsedSeconds / 60)).padStart(2, '0')}:${String(obusElapsedSeconds % 60).padStart(2, '0')}`; %>
         <div
-          class="<%= report.obus.kind === 'warning' || report.obus.kind === 'error' ? 'alert inline-alert' : 'inline-success' %>"
+          class="<%= report.obus.kind === 'warning' || report.obus.kind === 'error' ? 'alert inline-alert' : 'inline-success' %> <%= obusJobRunning ? 'all-companies-job-active' : '' %>"
           <% if (report.obus.job) { %>
             data-all-companies-job="1"
             data-job-id="<%= report.obus.job.id %>"
             data-job-done="<%= report.obus.job.done ? '1' : '0' %>"
+            data-job-created-at="<%= report.obus.job.createdAt %>"
             data-refresh-url="<%= report.obus.job.refreshUrl %>"
             data-running-message="ObusMerkezSubeID güncellemesi sürüyor. Sayfa otomatik yenilenecek..."
             data-show-counts="0"
           <% } %>
         >
-          <%= report.obus.message %>
+          <% if (obusJobRunning) { %><span class="all-companies-job-spinner" aria-hidden="true"></span><% } %>
+          <span class="all-companies-job-text"><%= report.obus.message %></span>
+          <% if (obusJobRunning) { %><span class="all-companies-job-timer"><%= obusElapsedText %></span><% } %>
         </div>
       <% } %>
       <% if (report.cache && report.cache.message) { %>
