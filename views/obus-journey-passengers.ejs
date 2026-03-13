@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="6" width="18" height="11" rx="3"></rect>
+                <path d="M7 17v2"></path>
+                <path d="M17 17v2"></path>
+                <circle cx="8" cy="18" r="1.5"></circle>
+                <circle cx="16" cy="18" r="1.5"></circle>
+                <path d="M7 10h10"></path>
+              </svg>
+            </span>
+            <span>Sefer Yolcuları</span>
+          </h1>
+          <p>Otobüs altındaki bu ekran için menü ve kullanıcı yetkileri hazırlandı.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <section class="table-card panel-card">
+        <div class="empty-state">
+          <div class="empty-icon">SY</div>
+          <strong>Ekran hazır.</strong>
+          <p class="muted">Bu sayfa şu an placeholder olarak açılıyor. Veri veya aksiyon içeriği istersen onu da bağlayabilirim.</p>
+        </div>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

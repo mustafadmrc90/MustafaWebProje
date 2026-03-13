@@ -306,6 +306,26 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "jira-analysis"
   },
   {
+    key: "obus",
+    type: "section",
+    label: "Otobüs",
+    parentKey: null,
+    route: null,
+    routeKey: null,
+    sortOrder: 25,
+    iconKey: "folder"
+  },
+  {
+    key: "journey-passengers",
+    type: "item",
+    label: "Sefer Yolcuları",
+    parentKey: "obus",
+    route: "/obus/journey-passengers",
+    routeKey: "journey-passengers",
+    sortOrder: 26,
+    iconKey: "journey-passengers"
+  },
+  {
     key: "management",
     type: "section",
     label: "Yönetim",
@@ -10666,6 +10686,13 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
     mentiUrl: "https://www.menti.com/",
     geminiUrl: "https://gemini.google.com/app",
     geminiModel: GEMINI_MODEL
+  });
+});
+
+app.get("/obus/journey-passengers", requireAuth, requireMenuAccess("journey-passengers"), (req, res) => {
+  res.render("obus-journey-passengers", {
+    user: req.session.user,
+    active: "journey-passengers"
   });
 });
 
