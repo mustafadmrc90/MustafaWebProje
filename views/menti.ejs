@@ -61,7 +61,7 @@
           <div class="menti-browser-toolbar">
             <div>
               <h2>ChatGPT</h2>
-              <p class="muted">ChatGPT ekranini bu panelde ac.</p>
+              <p class="muted">ChatGPT'yi bu sekmede ac. Geri donmek icin tarayicinin geri tusunu kullan.</p>
             </div>
             <a class="button-link ghost" href="<%= chatgptUrl %>" target="_blank" rel="noopener noreferrer">
               Yeni Sekmede Ac
@@ -69,18 +69,17 @@
           </div>
 
           <div class="menti-frame-note inline-alert">
-            ChatGPT iframe engeline takilirse ayni panelden yeni sekmede acabilirsiniz.
+            Ayni sekmede acis burada yapilir. Embed denemesi yok.
           </div>
 
-          <div class="menti-browser-frame-wrap">
-            <iframe
-              class="menti-browser-frame"
-              src="<%= chatgptUrl %>"
-              title="ChatGPT"
-              referrerpolicy="strict-origin-when-cross-origin"
-              loading="eager"
-              allow="clipboard-read; clipboard-write"
-            ></iframe>
+          <div class="menti-launch-card">
+            <div class="menti-launch-copy">
+              <strong>ChatGPT</strong>
+              <span>Sorularinizi bu sekmede acilan ChatGPT sayfasinda devam ettirin.</span>
+            </div>
+            <a class="button-link menti-launch-button" href="<%= chatgptUrl %>" rel="noopener noreferrer">
+              ChatGPT'yi Bu Sekmede Ac
+            </a>
           </div>
         </aside>
       </section>
