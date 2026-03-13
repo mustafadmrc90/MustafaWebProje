@@ -303,6 +303,7 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
+  const obusBulkUserTemplatesStorageKey = "obus_bulk_user_templates_v1";
   const mentiGeminiChatStorageKey = "menti_gemini_chat_state_v1";
   const mentiGeminiChatRuntime = {
     cleanup: null
@@ -375,6 +376,47 @@
   const saveEndpointLastResponsesToStorage = (payload) => {
     try {
       window.localStorage.setItem(endpointLastResponsesStorageKey, JSON.stringify(payload || {}));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const loadObusBulkUserTemplatesFromStorage = () => {
+    try {
+      const raw = window.localStorage.getItem(obusBulkUserTemplatesStorageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((item) => {
+          const entries = Array.isArray(item?.entries)
+            ? item.entries
+                .map((entry) => ({
+                  fullName: String(entry?.fullName || "").trim(),
+                  username: String(entry?.username || "").trim(),
+                  password: String(entry?.password || "")
+                }))
+                .filter((entry) => entry.fullName || entry.username || entry.password)
+            : [];
+          return {
+            id: String(item?.id || "").trim(),
+            name: String(item?.name || "").trim(),
+            createdAt: Number(item?.createdAt || 0),
+            updatedAt: Number(item?.updatedAt || item?.createdAt || 0),
+            entries
+          };
+        })
+        .filter((item) => item.id && item.name && item.entries.length > 0)
+        .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+    } catch (err) {
+      return [];
+    }
+  };
+
+  const saveObusBulkUserTemplatesToStorage = (templates) => {
+    try {
+      window.localStorage.setItem(obusBulkUserTemplatesStorageKey, JSON.stringify(templates || []));
       return true;
     } catch (err) {
       return false;
@@ -915,6 +957,8 @@
     const bulkUserList = form.querySelector("[data-obus-bulk-user-list='1']");
     const bulkAddRowBtn = form.querySelector("[data-obus-bulk-add-row='1']");
     const bulkCreateBtn = form.querySelector("[data-obus-bulk-create-button='1']");
+    const bulkTemplateSaveOpenBtn = form.querySelector("[data-obus-bulk-template-save-open='1']");
+    const bulkTemplateLoadOpenBtn = form.querySelector("[data-obus-bulk-template-load-open='1']");
     const bulkResultsSection = document.querySelector("[data-obus-bulk-check-results='1']");
     const bulkResultsBody = bulkResultsSection?.querySelector("[data-obus-bulk-check-body='1']");
     const bulkFilterSelect = bulkResultsSection?.querySelector("[data-obus-bulk-filter='1']");
@@ -923,8 +967,15 @@
     const bulkMissingCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-missing='1']");
     const bulkExistingCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-existing='1']");
     const bulkErrorCounter = bulkResultsSection?.querySelector("[data-obus-bulk-check-error='1']");
+    const bulkTemplateModal = document.querySelector("#obus-bulk-template-modal");
+    const bulkTemplateCloseBtn = bulkTemplateModal?.querySelector("[data-obus-bulk-template-close='1']");
+    const bulkTemplateForm = bulkTemplateModal?.querySelector("[data-obus-bulk-template-form='1']");
+    const bulkTemplateNameInput = bulkTemplateModal?.querySelector("[data-obus-bulk-template-name='1']");
+    const bulkTemplateStatus = bulkTemplateModal?.querySelector("[data-obus-bulk-template-status='1']");
+    const bulkTemplateList = bulkTemplateModal?.querySelector("[data-obus-bulk-template-list='1']");
     const liveRowByKey = new Map();
     const bulkSelectedCreateKeys = new Set();
+    let bulkTemplates = loadObusBulkUserTemplatesFromStorage();
     let bulkCheckItems = [];
     let bulkRowCounter = 1;
     let typeAheadText = "";
@@ -943,11 +994,29 @@
       new Promise((resolve) => {
         window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
       });
+    const formatTemplateTimestamp = (timestamp) => {
+      const value = Number(timestamp || 0);
+      if (!Number.isFinite(value) || value <= 0) return "";
+      try {
+        return new Intl.DateTimeFormat("tr-TR", {
+          dateStyle: "short",
+          timeStyle: "short"
+        }).format(new Date(value));
+      } catch (err) {
+        return "";
+      }
+    };
     const setLiveMessage = (text = "", kind = "") => {
       if (!liveMessage) return;
       liveMessage.textContent = String(text || "").trim();
       liveMessage.hidden = !liveMessage.textContent;
       liveMessage.className = `obus-live-message ${kind === "success" ? "inline-success" : "inline-alert"}`.trim();
+    };
+    const setBulkTemplateStatus = (text = "", kind = "") => {
+      if (!bulkTemplateStatus) return;
+      bulkTemplateStatus.textContent = String(text || "").trim();
+      bulkTemplateStatus.hidden = !bulkTemplateStatus.textContent;
+      bulkTemplateStatus.className = `form-feedback${kind ? ` ${kind}` : ""}`;
     };
     const setLiveCounters = ({ processed = 0, total = 0, success = 0, failure = 0 } = {}) => {
       if (liveProgress) {
@@ -962,6 +1031,14 @@
     };
     const getBulkRows = () =>
       bulkUserList ? Array.from(bulkUserList.querySelectorAll("[data-obus-bulk-user-row='1']")) : [];
+    const normalizeBulkTemplateEntries = (entries) =>
+      (Array.isArray(entries) ? entries : [])
+        .map((entry) => ({
+          fullName: String(entry?.fullName || "").trim(),
+          username: String(entry?.username || "").trim(),
+          password: String(entry?.password || "")
+        }))
+        .filter((entry) => entry.fullName || entry.username || entry.password);
     const isBulkMissingCandidate = (item) =>
       item && item.exists === false && !String(item.error || "").trim();
     const updateBulkCounters = () => {
@@ -1005,15 +1082,16 @@
       updateBulkCreateButtonState();
     };
     const readBulkUserEntries = () =>
-      getBulkRows()
-        .map((row, index) => {
-          const entryId = String(row.getAttribute("data-obus-bulk-entry-id") || `row-${index + 1}`).trim() || `row-${index + 1}`;
+      normalizeBulkTemplateEntries(
+        getBulkRows().map((row, index) => {
+          const entryId =
+            String(row.getAttribute("data-obus-bulk-entry-id") || `row-${index + 1}`).trim() || `row-${index + 1}`;
           const fullName = String(row.querySelector("[data-obus-bulk-user-full-name='1']")?.value || "").trim();
           const username = String(row.querySelector("[data-obus-bulk-user-username='1']")?.value || "").trim();
           const password = String(row.querySelector("[data-obus-bulk-user-password='1']")?.value || "");
           return { entryId, fullName, username, password };
         })
-        .filter((entry) => entry.fullName || entry.username || entry.password);
+      );
     const bindBulkUserRow = (row) => {
       if (!row || row.dataset.bulkRowBound === "1") return;
       row.dataset.bulkRowBound = "1";
@@ -1071,6 +1149,116 @@
       if (passwordEl) passwordEl.value = String(entry.password || "");
       bulkUserList.appendChild(row);
       bindBulkUserRow(row);
+    };
+    const replaceBulkUserRows = (entries) => {
+      if (!bulkUserList) return;
+      const normalizedEntries = normalizeBulkTemplateEntries(entries);
+      bulkUserList.innerHTML = "";
+      bulkRowCounter = 0;
+      if (normalizedEntries.length === 0) {
+        addBulkUserRow();
+      } else {
+        normalizedEntries.forEach((entry) => {
+          addBulkUserRow(entry);
+        });
+      }
+      clearBulkCheckState();
+    };
+    const renderBulkTemplateList = () => {
+      if (!bulkTemplateList) return;
+      bulkTemplateList.innerHTML = "";
+      if (!bulkTemplates.length) {
+        const empty = document.createElement("div");
+        empty.className = "obus-bulk-template-empty";
+        empty.textContent = "Henüz kayıtlı bir şablon yok.";
+        bulkTemplateList.appendChild(empty);
+        return;
+      }
+
+      bulkTemplates.forEach((template) => {
+        const item = document.createElement("div");
+        item.className = "obus-bulk-template-item";
+
+        const content = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "obus-bulk-template-name";
+        name.textContent = template.name;
+
+        const meta = document.createElement("div");
+        meta.className = "obus-bulk-template-meta";
+        const rowCount = Array.isArray(template.entries) ? template.entries.length : 0;
+        const updatedText = formatTemplateTimestamp(template.updatedAt || template.createdAt);
+        meta.innerHTML = `
+          <span>${rowCount} satır</span>
+          ${updatedText ? `<span>Son güncelleme: ${updatedText}</span>` : ""}
+        `.trim();
+
+        const preview = document.createElement("div");
+        preview.className = "obus-bulk-template-preview";
+        preview.textContent = (template.entries || [])
+          .slice(0, 2)
+          .map((entry) => {
+            const nameText = String(entry?.fullName || "").trim();
+            const usernameText = String(entry?.username || "").trim();
+            return [nameText, usernameText ? `@${usernameText}` : ""].filter(Boolean).join(" ");
+          })
+          .filter(Boolean)
+          .join(" | ");
+
+        content.appendChild(name);
+        content.appendChild(meta);
+        if (preview.textContent) {
+          content.appendChild(preview);
+        }
+
+        const loadBtn = document.createElement("button");
+        loadBtn.type = "button";
+        loadBtn.className = "button-link";
+        loadBtn.textContent = "Yükle";
+        loadBtn.addEventListener("click", () => {
+          replaceBulkUserRows(template.entries || []);
+          closeBulkTemplateModal();
+          setLiveMessage(`'${template.name}' şablonu yüklendi.`, "success");
+        });
+
+        item.appendChild(content);
+        item.appendChild(loadBtn);
+        bulkTemplateList.appendChild(item);
+      });
+    };
+    const persistBulkTemplates = () => {
+      const saved = saveObusBulkUserTemplatesToStorage(bulkTemplates);
+      if (!saved) {
+        setBulkTemplateStatus("Şablonlar tarayıcıya kaydedilemedi.", "error");
+      }
+      return saved;
+    };
+    const openBulkTemplateModal = (mode = "load") => {
+      if (!bulkTemplateModal) return;
+      renderBulkTemplateList();
+      setBulkTemplateStatus("", "");
+      bulkTemplateModal.classList.add("active");
+      bulkTemplateModal.setAttribute("aria-hidden", "false");
+      if (mode === "save") {
+        const defaultName = String(bulkTemplateNameInput?.value || "").trim();
+        if (bulkTemplateNameInput && !defaultName) {
+          bulkTemplateNameInput.value = "";
+        }
+        bulkTemplateNameInput?.focus();
+      } else {
+        const firstButton = bulkTemplateList?.querySelector("button");
+        if (firstButton instanceof HTMLButtonElement) {
+          firstButton.focus();
+        } else {
+          bulkTemplateNameInput?.focus();
+        }
+      }
+    };
+    const closeBulkTemplateModal = () => {
+      if (!bulkTemplateModal) return;
+      bulkTemplateModal.classList.remove("active");
+      bulkTemplateModal.setAttribute("aria-hidden", "true");
+      setBulkTemplateStatus("", "");
     };
     const renderBulkCheckRows = () => {
       if (!bulkResultsBody) return;
@@ -1434,6 +1622,67 @@
         });
       }
 
+      bulkTemplateSaveOpenBtn?.addEventListener("click", () => {
+        openBulkTemplateModal("save");
+      });
+
+      bulkTemplateLoadOpenBtn?.addEventListener("click", () => {
+        openBulkTemplateModal("load");
+      });
+
+      bulkTemplateCloseBtn?.addEventListener("click", () => {
+        closeBulkTemplateModal();
+      });
+
+      bulkTemplateModal?.addEventListener("click", (event) => {
+        if (event.target === bulkTemplateModal) {
+          closeBulkTemplateModal();
+        }
+      });
+
+      bulkTemplateForm?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = String(bulkTemplateNameInput?.value || "").trim();
+        if (!name) {
+          setBulkTemplateStatus("Şablon adı zorunludur.", "error");
+          bulkTemplateNameInput?.focus();
+          return;
+        }
+
+        const entries = readBulkUserEntries();
+        if (entries.length === 0) {
+          setBulkTemplateStatus("Kaydetmek için en az bir dolu kullanıcı satırı girin.", "error");
+          return;
+        }
+
+        const existingIndex = bulkTemplates.findIndex(
+          (item) => String(item.name || "").trim().toLocaleLowerCase("tr") === name.toLocaleLowerCase("tr")
+        );
+        if (existingIndex >= 0) {
+          const shouldOverwrite = window.confirm(`'${name}' adlı şablon var. Üzerine yazılsın mı?`);
+          if (!shouldOverwrite) return;
+        }
+
+        const now = Date.now();
+        const existing = existingIndex >= 0 ? bulkTemplates[existingIndex] : null;
+        const nextTemplate = {
+          id: existing?.id || `tpl-${now}-${Math.random().toString(36).slice(2, 8)}`,
+          name,
+          createdAt: Number(existing?.createdAt || now),
+          updatedAt: now,
+          entries
+        };
+        if (existingIndex >= 0) {
+          bulkTemplates.splice(existingIndex, 1, nextTemplate);
+        } else {
+          bulkTemplates.unshift(nextTemplate);
+        }
+        bulkTemplates.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+        if (!persistBulkTemplates()) return;
+        renderBulkTemplateList();
+        setBulkTemplateStatus(`'${name}' şablonu kaydedildi.`, "success");
+      });
+
       if (bulkFilterSelect) {
         bulkFilterSelect.addEventListener("change", () => {
           renderBulkCheckRows();
@@ -1708,6 +1957,14 @@
     }
 
     applyInitialCompanySelection();
+    if (isBulkMode) {
+      renderBulkTemplateList();
+      bulkTemplateModal?.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && bulkTemplateModal?.classList.contains("active")) {
+          closeBulkTemplateModal();
+        }
+      });
+    }
   };
 
   const initObusUserDeactivateForm = () => {

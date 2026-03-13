@@ -146,6 +146,8 @@
 
           <div class="obus-user-create-actions">
             <% if (bulkMode) { %>
+              <button class="button-link ghost" type="button" data-obus-bulk-template-load-open="1">Şablondan Ekle</button>
+              <button class="button-link ghost" type="button" data-obus-bulk-template-save-open="1">Şablon Kaydet</button>
               <button class="button-link ghost" type="button" data-obus-bulk-add-row="1">+ Satır Ekle</button>
               <button class="button-link" type="submit" data-obus-bulk-check-button="1">Kullanıcıları Sorgula</button>
               <button class="button-link" type="button" data-obus-bulk-create-button="1" disabled>Yok Olanları Oluştur</button>
@@ -201,6 +203,42 @@
             </table>
           </div>
         </section>
+      <% } %>
+
+      <% if (bulkMode) { %>
+        <div class="modal-backdrop" id="obus-bulk-template-modal" aria-hidden="true">
+          <div class="modal obus-bulk-template-modal">
+            <div class="modal-header">
+              <h2>Kullanıcı Şablonları</h2>
+              <button class="ghost small" type="button" data-obus-bulk-template-close="1">Kapat</button>
+            </div>
+            <form class="modal-form obus-bulk-template-form" data-obus-bulk-template-form="1">
+              <label>
+                <span>Şablon Adı</span>
+                <input
+                  type="text"
+                  name="templateName"
+                  placeholder="Örn: Çağrı Merkezi Standart"
+                  data-obus-bulk-template-name="1"
+                  maxlength="80"
+                />
+              </label>
+              <div class="obus-bulk-template-form-actions">
+                <button class="button-link" type="submit">Şablon Kaydet</button>
+                <span class="muted">Ekrandaki satırlar bu tarayıcıda yerel olarak saklanır.</span>
+              </div>
+              <p class="form-feedback" data-obus-bulk-template-status="1" hidden></p>
+            </form>
+
+            <div class="modal-list obus-bulk-template-list-section">
+              <div class="obus-bulk-template-list-head">
+                <h3>Kayıtlı Şablonlar</h3>
+                <span class="muted">Yüklenen şablon mevcut kullanıcı satırlarının yerine gelir.</span>
+              </div>
+              <div class="obus-bulk-template-list" data-obus-bulk-template-list="1"></div>
+            </div>
+          </div>
+        </div>
       <% } %>
 
       <section class="table-card panel-card obus-user-create-live-results" data-obus-user-create-live-results="1" hidden>

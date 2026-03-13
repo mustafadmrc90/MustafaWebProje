@@ -2715,6 +2715,86 @@ button.ghost {
   justify-content: flex-end;
 }
 
+.obus-bulk-template-modal {
+  width: min(760px, 94vw);
+}
+
+.obus-bulk-template-form {
+  gap: 10px;
+}
+
+.obus-bulk-template-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.obus-bulk-template-list-section {
+  display: grid;
+  gap: 10px;
+}
+
+.obus-bulk-template-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.obus-bulk-template-list-head h3 {
+  margin: 0;
+}
+
+.obus-bulk-template-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.obus-bulk-template-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d9e2ef;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.obus-bulk-template-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2735;
+}
+
+.obus-bulk-template-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 4px;
+  color: #617389;
+  font-size: 12px;
+}
+
+.obus-bulk-template-preview {
+  margin-top: 6px;
+  color: #4f6176;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.obus-bulk-template-empty {
+  border: 1px dashed #d3dce8;
+  border-radius: 12px;
+  padding: 14px;
+  color: #617389;
+  background: #fbfcfe;
+}
+
 .obus-user-create-actions {
   display: flex;
   justify-content: flex-end;
@@ -3126,6 +3206,14 @@ button.ghost {
 .obus-user-create-bulk-page input,
 .obus-user-create-bulk-page select,
 .obus-user-create-bulk-page small {
+  font-size: 12px !important;
+}
+
+.obus-user-create-bulk-page .obus-bulk-template-name,
+.obus-user-create-bulk-page .obus-bulk-template-meta,
+.obus-user-create-bulk-page .obus-bulk-template-preview,
+.obus-user-create-bulk-page .obus-bulk-template-empty,
+.obus-user-create-bulk-page .form-feedback {
   font-size: 12px !important;
 }
 
@@ -3820,6 +3908,18 @@ button.ghost {
     margin-left: 0;
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .obus-bulk-template-form-actions,
+  .obus-bulk-template-list-head,
+  .obus-bulk-template-item {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .obus-bulk-template-list {
+    max-height: none;
   }
 
   .allowed-lines-actions {
