@@ -10,7 +10,7 @@
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
 
-    <section class="content">
+    <section class="content" data-menti-helper="1">
       <header class="page-header">
         <div class="page-title">
           <h1>
@@ -23,34 +23,116 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti ekranini uygulama icinde tarayici gorunumunde ac.</p>
+          <p>Menti ekranini uygulama icinde ac. Sol panelde manuel hizli kullanim yardimcisi bulunur.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
 
-      <section class="table-card panel-card menti-browser-card">
-        <div class="menti-browser-toolbar">
-          <div class="menti-browser-address" aria-label="Menti adresi">
-            <span class="menti-browser-dot" aria-hidden="true"></span>
-            <span><%= mentiUrl %></span>
+      <section class="menti-layout">
+        <aside class="table-card panel-card menti-helper-card">
+          <div class="menti-helper-header">
+            <div>
+              <h2>Menti Yardimcisi</h2>
+              <p class="muted">5 saniyelik tekrarli sayac, hizli secim ve notlar burada tutulur.</p>
+            </div>
+            <span class="pill muted" data-menti-status-pill="1">Beklemede</span>
           </div>
-          <a class="button-link ghost" href="<%= mentiUrl %>" target="_blank" rel="noopener noreferrer">
-            Yeni Sekmede Ac
-          </a>
-        </div>
 
-        <div class="menti-browser-frame-wrap">
-          <iframe
-            class="menti-browser-frame"
-            src="<%= mentiUrl %>"
-            title="Menti"
-            referrerpolicy="strict-origin-when-cross-origin"
-            loading="eager"
-            allow="clipboard-read; clipboard-write"
-          ></iframe>
-        </div>
+          <div class="menti-helper-countdown-wrap">
+            <div class="menti-helper-countdown" data-menti-countdown-value="1">05</div>
+            <div class="menti-helper-status" data-menti-status="1">
+              Sayac hazir. Baslat ile 5 saniyelik turu acabilirsiniz.
+            </div>
+          </div>
+
+          <div class="menti-helper-controls">
+            <button type="button" data-menti-start="1">5 sn Baslat</button>
+            <button type="button" class="ghost" data-menti-restart="1">Yeniden Baslat</button>
+            <button type="button" class="ghost" data-menti-stop="1" disabled>Durdur</button>
+          </div>
+
+          <div class="menti-helper-toggles">
+            <label class="menti-helper-toggle">
+              <input type="checkbox" data-menti-repeat="1" checked />
+              <span>Tekrarli mod</span>
+            </label>
+            <label class="menti-helper-toggle">
+              <input type="checkbox" data-menti-sound="1" checked />
+              <span>Sesli uyari</span>
+            </label>
+          </div>
+
+          <section class="menti-answer-section">
+            <div class="table-head">
+              <h2>Hizli Secim</h2>
+              <span class="muted">Kisayol: 1-5, R baslat, S durdur</span>
+            </div>
+
+            <div class="menti-answer-grid">
+              <% for (let i = 1; i <= 5; i += 1) { %>
+                <button type="button" class="menti-answer-button" data-menti-option-button="<%= i - 1 %>">
+                  <span class="menti-answer-key"><%= i %></span>
+                  <span class="menti-answer-label" data-menti-option-label="<%= i - 1 %>">Secenek <%= i %></span>
+                </button>
+              <% } %>
+            </div>
+
+            <div class="menti-option-editor">
+              <% for (let i = 1; i <= 5; i += 1) { %>
+                <label>
+                  <span>Secenek <%= i %></span>
+                  <input
+                    type="text"
+                    autocomplete="off"
+                    data-menti-option-input="<%= i - 1 %>"
+                    placeholder="Secenek <%= i %> etiketi"
+                  />
+                </label>
+              <% } %>
+            </div>
+
+            <div class="menti-last-selection" data-menti-last-selection="1">Son secim yapilmadi.</div>
+          </section>
+
+          <label class="menti-notes-field">
+            <span>Notlar</span>
+            <textarea
+              rows="8"
+              data-menti-notes="1"
+              placeholder="Dogru cevap ipuclari, soru notlari veya operator notlari"
+            ></textarea>
+          </label>
+        </aside>
+
+        <section class="table-card panel-card menti-browser-card">
+          <div class="menti-browser-toolbar">
+            <div class="menti-browser-address" aria-label="Menti adresi">
+              <span class="menti-browser-dot" aria-hidden="true"></span>
+              <span><%= mentiUrl %></span>
+            </div>
+            <a class="button-link ghost" href="<%= mentiUrl %>" target="_blank" rel="noopener noreferrer">
+              Yeni Sekmede Ac
+            </a>
+          </div>
+
+          <div class="menti-frame-note inline-alert">
+            Menti farkli domaine ait oldugu icin ic ekrana otomatik tiklama yapilmaz. Bu panel manuel kullanim yardimcisidir.
+          </div>
+
+          <div class="menti-browser-frame-wrap">
+            <iframe
+              class="menti-browser-frame"
+              src="<%= mentiUrl %>"
+              title="Menti"
+              referrerpolicy="strict-origin-when-cross-origin"
+              loading="eager"
+              allow="clipboard-read; clipboard-write"
+              data-menti-frame="1"
+            ></iframe>
+          </div>
+        </section>
       </section>
     </section>
     <script src="/public/app.js" defer></script>

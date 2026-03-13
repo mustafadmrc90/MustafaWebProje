@@ -303,6 +303,13 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
+  const mentiHelperStorageKey = "menti_helper_state_v1";
+  const mentiHelperRuntime = {
+    intervalId: null,
+    restartTimeoutId: null,
+    audioContext: null,
+    cleanup: null
+  };
 
   const loadLoginProfilesFromStorage = () => {
     try {
@@ -2163,6 +2170,318 @@
     });
   };
 
+  const loadMentiHelperStateFromStorage = () => {
+    try {
+      const raw = window.localStorage.getItem(mentiHelperStorageKey);
+      if (!raw) {
+        return {
+          optionLabels: ["Secenek 1", "Secenek 2", "Secenek 3", "Secenek 4", "Secenek 5"],
+          notes: "",
+          repeat: true,
+          sound: true,
+          lastSelected: -1
+        };
+      }
+      const parsed = JSON.parse(raw);
+      const optionLabels = Array.isArray(parsed?.optionLabels) ? parsed.optionLabels : [];
+      return {
+        optionLabels: Array.from({ length: 5 }, (_, index) => {
+          const value = String(optionLabels[index] || "").trim();
+          return value || `Secenek ${index + 1}`;
+        }),
+        notes: String(parsed?.notes || ""),
+        repeat: parsed?.repeat !== false,
+        sound: parsed?.sound !== false,
+        lastSelected: Number.isInteger(parsed?.lastSelected) ? parsed.lastSelected : -1
+      };
+    } catch (err) {
+      return {
+        optionLabels: ["Secenek 1", "Secenek 2", "Secenek 3", "Secenek 4", "Secenek 5"],
+        notes: "",
+        repeat: true,
+        sound: true,
+        lastSelected: -1
+      };
+    }
+  };
+
+  const saveMentiHelperStateToStorage = (state) => {
+    try {
+      window.localStorage.setItem(mentiHelperStorageKey, JSON.stringify(state));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const initMentiHelper = () => {
+    if (typeof mentiHelperRuntime.cleanup === "function") {
+      mentiHelperRuntime.cleanup();
+      mentiHelperRuntime.cleanup = null;
+    }
+
+    const root = document.querySelector("[data-menti-helper='1']");
+    if (!root) return;
+
+    const helperCard = root.querySelector(".menti-helper-card");
+    const countdownEl = root.querySelector("[data-menti-countdown-value='1']");
+    const statusEl = root.querySelector("[data-menti-status='1']");
+    const statusPill = root.querySelector("[data-menti-status-pill='1']");
+    const startBtn = root.querySelector("[data-menti-start='1']");
+    const restartBtn = root.querySelector("[data-menti-restart='1']");
+    const stopBtn = root.querySelector("[data-menti-stop='1']");
+    const repeatCheckbox = root.querySelector("[data-menti-repeat='1']");
+    const soundCheckbox = root.querySelector("[data-menti-sound='1']");
+    const notesField = root.querySelector("[data-menti-notes='1']");
+    const lastSelectionEl = root.querySelector("[data-menti-last-selection='1']");
+    const optionInputs = Array.from(root.querySelectorAll("[data-menti-option-input]"));
+    const optionButtons = Array.from(root.querySelectorAll("[data-menti-option-button]"));
+
+    if (
+      !helperCard ||
+      !countdownEl ||
+      !statusEl ||
+      !statusPill ||
+      !startBtn ||
+      !restartBtn ||
+      !stopBtn ||
+      !repeatCheckbox ||
+      !soundCheckbox ||
+      !notesField ||
+      !lastSelectionEl ||
+      optionInputs.length !== 5 ||
+      optionButtons.length !== 5
+    ) {
+      return;
+    }
+
+    const state = loadMentiHelperStateFromStorage();
+    let remainingSeconds = 5;
+    let isRunning = false;
+    let lastSelected = state.lastSelected >= 0 && state.lastSelected < 5 ? state.lastSelected : -1;
+
+    const persistState = () => {
+      const nextState = {
+        optionLabels: optionInputs.map((input, index) => {
+          const value = String(input.value || "").trim();
+          return value || `Secenek ${index + 1}`;
+        }),
+        notes: String(notesField.value || ""),
+        repeat: repeatCheckbox.checked,
+        sound: soundCheckbox.checked,
+        lastSelected
+      };
+      saveMentiHelperStateToStorage(nextState);
+    };
+
+    const setStatus = (message, variant = "idle") => {
+      statusEl.textContent = message;
+      statusPill.textContent =
+        variant === "running" ? "Calisiyor" : variant === "selected" ? "Secim Hazir" : "Beklemede";
+      statusPill.classList.toggle("success", variant === "selected");
+      statusPill.classList.toggle("muted", variant !== "selected");
+    };
+
+    const renderCountdown = () => {
+      countdownEl.textContent = String(Math.max(0, remainingSeconds)).padStart(2, "0");
+      helperCard.classList.toggle("is-running", isRunning);
+      startBtn.disabled = isRunning;
+      stopBtn.disabled = !isRunning;
+    };
+
+    const renderOptionButtons = () => {
+      optionButtons.forEach((button, index) => {
+        const labelEl = button.querySelector(`[data-menti-option-label="${index}"]`);
+        const input = optionInputs[index];
+        const label = String(input?.value || "").trim() || `Secenek ${index + 1}`;
+        if (labelEl) labelEl.textContent = label;
+        const selected = index === lastSelected;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+
+      if (lastSelected >= 0) {
+        const label = String(optionInputs[lastSelected]?.value || "").trim() || `Secenek ${lastSelected + 1}`;
+        lastSelectionEl.textContent = `Son secim: ${lastSelected + 1} - ${label}`;
+      } else {
+        lastSelectionEl.textContent = "Son secim yapilmadi.";
+      }
+    };
+
+    const ensureAudioContext = async () => {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      if (!mentiHelperRuntime.audioContext) {
+        mentiHelperRuntime.audioContext = new AudioContextCtor();
+      }
+      if (mentiHelperRuntime.audioContext.state === "suspended") {
+        await mentiHelperRuntime.audioContext.resume();
+      }
+      return mentiHelperRuntime.audioContext;
+    };
+
+    const playCompletionTone = async () => {
+      if (!soundCheckbox.checked) return;
+      try {
+        const audioContext = await ensureAudioContext();
+        if (!audioContext) return;
+        const now = audioContext.currentTime;
+        [880, 660].forEach((frequency, index) => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          const startAt = now + index * 0.18;
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(frequency, startAt);
+          gainNode.gain.setValueAtTime(0.0001, startAt);
+          gainNode.gain.exponentialRampToValueAtTime(0.08, startAt + 0.02);
+          gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.16);
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + 0.18);
+        });
+      } catch (err) {
+        // Ignore audio errors; helper remains usable without sound.
+      }
+    };
+
+    const clearTimers = () => {
+      if (mentiHelperRuntime.intervalId) {
+        window.clearInterval(mentiHelperRuntime.intervalId);
+        mentiHelperRuntime.intervalId = null;
+      }
+      if (mentiHelperRuntime.restartTimeoutId) {
+        window.clearTimeout(mentiHelperRuntime.restartTimeoutId);
+        mentiHelperRuntime.restartTimeoutId = null;
+      }
+    };
+
+    const stopCountdown = (message = "Sayac durduruldu.") => {
+      clearTimers();
+      isRunning = false;
+      renderCountdown();
+      setStatus(message, lastSelected >= 0 ? "selected" : "idle");
+    };
+
+    const startCountdown = async () => {
+      clearTimers();
+      remainingSeconds = 5;
+      isRunning = true;
+      renderCountdown();
+      setStatus("5 saniyelik tur basladi. Ekrani takip edin.", "running");
+      if (soundCheckbox.checked) {
+        ensureAudioContext().catch(() => {});
+      }
+
+      mentiHelperRuntime.intervalId = window.setInterval(() => {
+        remainingSeconds -= 1;
+        renderCountdown();
+        if (remainingSeconds > 0) return;
+
+        clearTimers();
+        isRunning = false;
+        renderCountdown();
+        playCompletionTone();
+
+        if (repeatCheckbox.checked) {
+          setStatus("Sure doldu. Yeni tur 1 saniye sonra baslayacak.", "running");
+          mentiHelperRuntime.restartTimeoutId = window.setTimeout(() => {
+            startCountdown();
+          }, 1000);
+          return;
+        }
+
+        setStatus("Sure doldu. Sonraki soru icin hazir.", lastSelected >= 0 ? "selected" : "idle");
+      }, 1000);
+    };
+
+    const selectOption = async (index) => {
+      if (index < 0 || index >= optionInputs.length) return;
+      lastSelected = index;
+      renderOptionButtons();
+      persistState();
+      const label = String(optionInputs[index]?.value || "").trim() || `Secenek ${index + 1}`;
+      let copiedSuffix = "";
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(label);
+          copiedSuffix = " Panoya kopyalandi.";
+        } catch (err) {
+          copiedSuffix = "";
+        }
+      }
+      setStatus(`Hazir secim: ${index + 1} - ${label}.${copiedSuffix}`, "selected");
+    };
+
+    state.optionLabels.forEach((label, index) => {
+      if (optionInputs[index]) optionInputs[index].value = label;
+    });
+    notesField.value = state.notes;
+    repeatCheckbox.checked = state.repeat;
+    soundCheckbox.checked = state.sound;
+
+    optionInputs.forEach((input) => {
+      input.addEventListener("input", () => {
+        renderOptionButtons();
+        persistState();
+      });
+    });
+
+    optionButtons.forEach((button, index) => {
+      button.addEventListener("click", () => {
+        selectOption(index);
+      });
+    });
+
+    notesField.addEventListener("input", persistState);
+    repeatCheckbox.addEventListener("change", persistState);
+    soundCheckbox.addEventListener("change", persistState);
+    startBtn.addEventListener("click", () => {
+      startCountdown();
+    });
+    restartBtn.addEventListener("click", () => {
+      startCountdown();
+    });
+    stopBtn.addEventListener("click", () => {
+      stopCountdown();
+    });
+
+    const handleKeydown = (event) => {
+      if (!document.body.contains(root)) return;
+      const target = event.target;
+      const tagName = String(target?.tagName || "").toLowerCase();
+      const isTypingTarget = tagName === "input" || tagName === "textarea" || target?.isContentEditable;
+      if (!isTypingTarget) {
+        const optionIndex = ["1", "2", "3", "4", "5"].indexOf(event.key);
+        if (optionIndex >= 0) {
+          event.preventDefault();
+          selectOption(optionIndex);
+          return;
+        }
+        if (event.key === "r" || event.key === "R") {
+          event.preventDefault();
+          startCountdown();
+          return;
+        }
+        if (event.key === "s" || event.key === "S") {
+          event.preventDefault();
+          stopCountdown();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
+    renderOptionButtons();
+    renderCountdown();
+    setStatus("Sayac hazir. Baslat ile 5 saniyelik turu acabilirsiniz.", lastSelected >= 0 ? "selected" : "idle");
+
+    mentiHelperRuntime.cleanup = () => {
+      clearTimers();
+      window.removeEventListener("keydown", handleKeydown);
+      isRunning = false;
+    };
+  };
+
   const initPermissionsBulkForm = () => {
     const form = document.querySelector("form[action^='/permissions/']");
     if (!form) return;
@@ -2214,6 +2533,7 @@
     initObusUserDeactivateForm();
     initAllCompaniesLoading();
     initAllCompaniesObusJobMonitor();
+    initMentiHelper();
     initPermissionsBulkForm();
 
     const modal = document.querySelector("#endpoint-modal");
