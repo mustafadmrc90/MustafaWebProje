@@ -304,8 +304,8 @@
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
   const obusBulkUserTemplatesStorageKey = "obus_bulk_user_templates_v1";
-  const mentiGeminiChatStorageKey = "menti_gemini_chat_state_v1";
-  const mentiGeminiChatRuntime = {
+  const mentiChatGptChatStorageKey = "menti_chatgpt_chat_state_v1";
+  const mentiChatGptChatRuntime = {
     cleanup: null
   };
 
@@ -2424,9 +2424,9 @@
     });
   };
 
-  const loadMentiGeminiChatStateFromStorage = () => {
+  const loadMentiChatGptChatStateFromStorage = () => {
     try {
-      const raw = window.localStorage.getItem(mentiGeminiChatStorageKey);
+      const raw = window.localStorage.getItem(mentiChatGptChatStorageKey);
       if (!raw) return { draft: "", messages: [] };
       const parsed = JSON.parse(raw);
       const messages = Array.isArray(parsed?.messages)
@@ -2447,9 +2447,9 @@
     }
   };
 
-  const saveMentiGeminiChatStateToStorage = (state) => {
+  const saveMentiChatGptChatStateToStorage = (state) => {
     try {
-      window.localStorage.setItem(mentiGeminiChatStorageKey, JSON.stringify(state));
+      window.localStorage.setItem(mentiChatGptChatStorageKey, JSON.stringify(state));
       return true;
     } catch (err) {
       return false;
@@ -2457,27 +2457,27 @@
   };
 
   const initMentiHelper = () => {
-    if (typeof mentiGeminiChatRuntime.cleanup === "function") {
-      mentiGeminiChatRuntime.cleanup();
-      mentiGeminiChatRuntime.cleanup = null;
+    if (typeof mentiChatGptChatRuntime.cleanup === "function") {
+      mentiChatGptChatRuntime.cleanup();
+      mentiChatGptChatRuntime.cleanup = null;
     }
 
-    const root = document.querySelector("[data-menti-gemini-chat='1']");
+    const root = document.querySelector("[data-menti-chatgpt-chat='1']");
     if (!root) return;
 
-    const form = root.querySelector("[data-menti-gemini-form='1']");
-    const inputEl = root.querySelector("[data-menti-gemini-input='1']");
-    const sendBtn = root.querySelector("[data-menti-gemini-send='1']");
-    const clearBtn = root.querySelector("[data-menti-gemini-clear='1']");
-    const messagesEl = root.querySelector("[data-menti-gemini-messages='1']");
-    const emptyEl = root.querySelector("[data-menti-gemini-empty='1']");
-    const statusEl = root.querySelector("[data-menti-gemini-status='1']");
+    const form = root.querySelector("[data-menti-chatgpt-form='1']");
+    const inputEl = root.querySelector("[data-menti-chatgpt-input='1']");
+    const sendBtn = root.querySelector("[data-menti-chatgpt-send='1']");
+    const clearBtn = root.querySelector("[data-menti-chatgpt-clear='1']");
+    const messagesEl = root.querySelector("[data-menti-chatgpt-messages='1']");
+    const emptyEl = root.querySelector("[data-menti-chatgpt-empty='1']");
+    const statusEl = root.querySelector("[data-menti-chatgpt-status='1']");
 
     if (!form || !inputEl || !sendBtn || !clearBtn || !messagesEl || !emptyEl || !statusEl) {
       return;
     }
 
-    const state = loadMentiGeminiChatStateFromStorage();
+    const state = loadMentiChatGptChatStateFromStorage();
     let messages = Array.isArray(state.messages) ? state.messages.slice(-20) : [];
     let isBusy = false;
     let isActive = true;
@@ -2485,7 +2485,7 @@
 
     const persistState = () => {
       if (!isActive) return;
-      saveMentiGeminiChatStateToStorage({
+      saveMentiChatGptChatStateToStorage({
         draft: String(inputEl.value || ""),
         messages
       });
@@ -2507,21 +2507,21 @@
 
     const renderMessages = () => {
       if (!isActive) return;
-      const messageNodes = Array.from(messagesEl.querySelectorAll("[data-menti-gemini-message='1']"));
+      const messageNodes = Array.from(messagesEl.querySelectorAll("[data-menti-chatgpt-message='1']"));
       messageNodes.forEach((node) => node.remove());
       emptyEl.hidden = messages.length > 0;
 
       messages.forEach((message) => {
         const article = document.createElement("article");
-        article.setAttribute("data-menti-gemini-message", "1");
-        article.className = `menti-gemini-message ${message.role === "assistant" ? "assistant" : "user"}`;
+        article.setAttribute("data-menti-chatgpt-message", "1");
+        article.className = `menti-chatgpt-message ${message.role === "assistant" ? "assistant" : "user"}`;
 
         const meta = document.createElement("div");
-        meta.className = "menti-gemini-message-meta";
-        meta.textContent = message.role === "assistant" ? "Gemini" : "Siz";
+        meta.className = "menti-chatgpt-message-meta";
+        meta.textContent = message.role === "assistant" ? "ChatGPT" : "Siz";
 
         const body = document.createElement("div");
-        body.className = "menti-gemini-message-body";
+        body.className = "menti-chatgpt-message-body";
         body.textContent = message.text;
 
         article.appendChild(meta);
@@ -2561,10 +2561,10 @@
       requestController = new AbortController();
       persistState();
       syncButtons();
-      setStatus("Gemini yanit hazirliyor...");
+      setStatus("ChatGPT yanit hazirliyor...");
 
       try {
-        const response = await fetch("/api/menti/gemini-chat", {
+        const response = await fetch("/api/menti/chatgpt-chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -2579,18 +2579,18 @@
         if (!isActive) return;
         const data = await parseJsonResponse(response);
         if (!response.ok || data?.ok === false || !String(data?.reply || "").trim()) {
-          throw new Error(getApiErrorMessage(response, data, "Gemini yanit veremedi"));
+          throw new Error(getApiErrorMessage(response, data, "ChatGPT yanit veremedi"));
         }
         appendMessage("assistant", data.reply);
         setStatus(`Yanıt alindi${data?.model ? ` (${data.model})` : ""}.`);
       } catch (err) {
         if (!isActive) return;
         if (err?.name === "AbortError") {
-          setStatus("Gemini istegi iptal edildi.", true);
+          setStatus("ChatGPT istegi iptal edildi.", true);
           return;
         }
-        appendMessage("assistant", `Hata: ${err.message || "Gemini istegi basarisiz."}`);
-        setStatus(err.message || "Gemini istegi basarisiz.", true);
+        appendMessage("assistant", `Hata: ${err.message || "ChatGPT istegi basarisiz."}`);
+        setStatus(err.message || "ChatGPT istegi basarisiz.", true);
       } finally {
         requestController = null;
         if (!isActive) return;
@@ -2603,7 +2603,7 @@
     inputEl.value = state.draft || "";
     renderMessages();
     syncButtons();
-    setStatus(messages.length ? "Kaydedilen sohbet yuklendi." : "Sorunuzu yazin. Yanit bu panelde gelecektir.");
+    setStatus(messages.length ? "Kaydedilen sohbet yuklendi." : "Sorunuzu yazin. Yanit ChatGPT uzerinden gelecektir.");
 
     const handleSubmit = (event) => {
       event.preventDefault();
@@ -2628,7 +2628,7 @@
     inputEl.addEventListener("input", handleInput);
     inputEl.addEventListener("keydown", handleKeydown);
 
-    mentiGeminiChatRuntime.cleanup = () => {
+    mentiChatGptChatRuntime.cleanup = () => {
       isActive = false;
       if (requestController) {
         requestController.abort();

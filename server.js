@@ -177,12 +177,10 @@ const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
 const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
 const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
-const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "gemini-2.5-flash").trim() || "gemini-2.5-flash";
-const GEMINI_API_TIMEOUT_MS = Number.parseInt(process.env.GEMINI_API_TIMEOUT_MS || "45000", 10) || 45000;
-const GEMINI_API_BASE_URL = String(
-  process.env.GEMINI_API_BASE_URL || "https://generativelanguage.googleapis.com/v1beta"
-)
+const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || "").trim();
+const OPENAI_MODEL = String(process.env.OPENAI_MODEL || "gpt-4.1-mini").trim() || "gpt-4.1-mini";
+const OPENAI_API_TIMEOUT_MS = Number.parseInt(process.env.OPENAI_API_TIMEOUT_MS || "45000", 10) || 45000;
+const OPENAI_API_BASE_URL = String(process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1")
   .trim()
   .replace(/\/+$/, "");
 const SLACK_SELECTED_USERS = [
@@ -477,32 +475,43 @@ function classifyDbErrorForUser(err) {
   return summary;
 }
 
-function normalizeGeminiHistoryEntries(entries, limit = 12) {
+function normalizeMentiChatHistoryEntries(entries, limit = 12) {
   if (!Array.isArray(entries)) return [];
   return entries
     .map((entry) => {
       const roleRaw = String(entry?.role || "").trim().toLowerCase();
       const text = String(entry?.text || "").trim();
       if (!text) return null;
-      const role = roleRaw === "assistant" || roleRaw === "model" ? "model" : "user";
+      const role = roleRaw === "assistant" || roleRaw === "model" ? "assistant" : "user";
       return {
         role,
-        parts: [{ text }]
+        content: text
       };
     })
     .filter(Boolean)
     .slice(-Math.max(0, limit));
 }
 
-function extractGeminiText(payload) {
-  const candidate = Array.isArray(payload?.candidates) ? payload.candidates[0] : null;
-  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-  const text = parts
-    .map((part) => String(part?.text || "").trim())
+function extractOpenAIText(payload) {
+  const choice = Array.isArray(payload?.choices) ? payload.choices[0] : null;
+  const content = choice?.message?.content;
+
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part.trim();
+      return String(part?.text || "").trim();
+    })
     .filter(Boolean)
     .join("\n\n")
     .trim();
-  return text;
 }
 
 app.set("view engine", "ejs");
@@ -10684,8 +10693,8 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
     user: req.session.user,
     active: "menti",
     mentiUrl: "https://www.menti.com/",
-    geminiUrl: "https://gemini.google.com/app",
-    geminiModel: GEMINI_MODEL
+    chatgptUrl: "https://chatgpt.com/",
+    chatgptModel: OPENAI_MODEL
   });
 });
 
@@ -12254,9 +12263,9 @@ app.post("/api/execute", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/menti/gemini-chat", requireAuth, requireMenuAccess("menti"), async (req, res) => {
+const handleMentiChatGptRequest = async (req, res) => {
   const prompt = String(req.body?.prompt || "").trim();
-  const history = normalizeGeminiHistoryEntries(req.body?.history, 14);
+  const history = normalizeMentiChatHistoryEntries(req.body?.history, 14);
 
   if (!prompt) {
     return res.status(400).json({ ok: false, error: "Mesaj bos olamaz." });
@@ -12264,67 +12273,64 @@ app.post("/api/menti/gemini-chat", requireAuth, requireMenuAccess("menti"), asyn
   if (prompt.length > 12000) {
     return res.status(400).json({ ok: false, error: "Mesaj cok uzun." });
   }
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ ok: false, error: "GEMINI_API_KEY tanimli degil." });
+  if (!OPENAI_API_KEY) {
+    return res.status(503).json({ ok: false, error: "OPENAI_API_KEY tanimli degil." });
   }
 
-  const endpointUrl = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+  const endpointUrl = `${OPENAI_API_BASE_URL}/chat/completions`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.max(5000, GEMINI_API_TIMEOUT_MS));
+  const timeout = setTimeout(() => controller.abort(), Math.max(5000, OPENAI_API_TIMEOUT_MS));
 
   try {
     const response = await fetch(endpointUrl, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        contents: history.concat([
-          {
-            role: "user",
-            parts: [{ text: prompt }]
-          }
-        ]),
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048
-        }
+        model: OPENAI_MODEL,
+        messages: history.concat([{ role: "user", content: prompt }]),
+        temperature: 0.7
       }),
       signal: controller.signal
     });
 
     const payload = await response.json().catch(() => ({}));
-    const reply = extractGeminiText(payload);
+    const reply = extractOpenAIText(payload);
     clearTimeout(timeout);
 
     if (!response.ok) {
       return res.status(response.status || 502).json({
         ok: false,
-        error: String(payload?.error?.message || "Gemini API hatasi.").trim()
+        error: String(payload?.error?.message || "OpenAI API hatasi.").trim()
       });
     }
     if (!reply) {
       return res.status(502).json({
         ok: false,
-        error: "Gemini yaniti alinamadi."
+        error: "ChatGPT yaniti alinamadi."
       });
     }
 
     return res.json({
       ok: true,
       reply,
-      model: GEMINI_MODEL
+      model: OPENAI_MODEL
     });
   } catch (err) {
     clearTimeout(timeout);
-    const message = err?.name === "AbortError" ? "Gemini istegi zaman asimina ugradi." : err?.message || "Gemini hatasi.";
+    const message =
+      err?.name === "AbortError" ? "ChatGPT istegi zaman asimina ugradi." : err?.message || "ChatGPT hatasi.";
     return res.status(502).json({
       ok: false,
       error: message
     });
   }
-});
+};
+
+app.post("/api/menti/chatgpt-chat", requireAuth, requireMenuAccess("menti"), handleMentiChatGptRequest);
+app.post("/api/menti/gemini-chat", requireAuth, requireMenuAccess("menti"), handleMentiChatGptRequest);
 
 app.get("/api/requests/:endpointId", requireAuth, async (req, res) => {
   const endpointId = Number(req.params.endpointId);

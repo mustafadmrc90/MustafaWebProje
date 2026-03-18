@@ -2103,14 +2103,14 @@ button.ghost {
 }
 
 .menti-browser-card,
-.menti-gemini-card {
+.menti-chatgpt-card {
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.menti-gemini-messages {
+.menti-chatgpt-messages {
   min-height: 52vh;
   max-height: 52vh;
   overflow: auto;
@@ -2125,27 +2125,27 @@ button.ghost {
     linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
 }
 
-.menti-gemini-empty {
+.menti-chatgpt-empty {
   color: #5f7388;
   font-size: 14px;
   line-height: 1.6;
 }
 
-.menti-gemini-message {
+.menti-chatgpt-message {
   display: grid;
   gap: 6px;
   max-width: 92%;
 }
 
-.menti-gemini-message.user {
+.menti-chatgpt-message.user {
   justify-self: end;
 }
 
-.menti-gemini-message.assistant {
+.menti-chatgpt-message.assistant {
   justify-self: start;
 }
 
-.menti-gemini-message-meta {
+.menti-chatgpt-message-meta {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -2153,7 +2153,7 @@ button.ghost {
   color: #71859b;
 }
 
-.menti-gemini-message-body {
+.menti-chatgpt-message-body {
   padding: 12px 14px;
   border-radius: 16px;
   line-height: 1.6;
@@ -2164,25 +2164,25 @@ button.ghost {
   border: 1px solid #d6dde7;
 }
 
-.menti-gemini-message.user .menti-gemini-message-body {
+.menti-chatgpt-message.user .menti-chatgpt-message-body {
   background: linear-gradient(180deg, #0f6bdc 0%, #3a8ff0 100%);
   border-color: #0f6bdc;
   color: #ffffff;
 }
 
-.menti-gemini-form {
+.menti-chatgpt-form {
   display: grid;
   gap: 12px;
 }
 
-.menti-gemini-input-wrap {
+.menti-chatgpt-input-wrap {
   display: grid;
   gap: 6px;
   color: #526173;
   font-size: 13px;
 }
 
-.menti-gemini-input-wrap textarea {
+.menti-chatgpt-input-wrap textarea {
   width: 100%;
   min-height: 132px;
   resize: vertical;
@@ -2195,11 +2195,11 @@ button.ghost {
   line-height: 1.6;
 }
 
-.menti-gemini-input-wrap textarea:disabled {
+.menti-chatgpt-input-wrap textarea:disabled {
   background: #f3f6fa;
 }
 
-.menti-gemini-actions {
+.menti-chatgpt-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -3941,7 +3941,7 @@ button.ghost {
     height: 68vh;
   }
 
-  .menti-gemini-messages {
+  .menti-chatgpt-messages {
     min-height: 34vh;
     max-height: 34vh;
   }

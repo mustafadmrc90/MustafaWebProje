@@ -23,7 +23,7 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti solda acik kalir, sagda Gemini API sohbet paneli calisir.</p>
+          <p>Menti solda acik kalir, sagda ChatGPT sohbet paneli calisir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -57,41 +57,41 @@
           </div>
         </section>
 
-        <aside class="table-card panel-card menti-gemini-card" data-menti-gemini-chat="1">
+        <aside class="table-card panel-card menti-chatgpt-card" data-menti-chatgpt-chat="1">
           <div class="menti-browser-toolbar">
-            <div class="menti-browser-address" aria-label="Gemini API paneli">
+            <div class="menti-browser-address" aria-label="ChatGPT paneli">
               <span class="menti-browser-dot" aria-hidden="true"></span>
-              <span>Gemini API Chat - <%= geminiModel %></span>
+              <span>ChatGPT - <%= chatgptModel %></span>
             </div>
-            <a class="button-link ghost" href="<%= geminiUrl %>" target="_blank" rel="noopener noreferrer">
-              Gemini'yi Ac
+            <a class="button-link ghost" href="<%= chatgptUrl %>" target="_blank" rel="noopener noreferrer">
+              ChatGPT'yi Ac
             </a>
           </div>
 
-          <div class="menti-frame-note inline-alert" data-menti-gemini-status="1">
-            Sorunuzu yazin. Yanitlar Gemini API uzerinden bu panelde gelir.
+          <div class="menti-frame-note inline-alert" data-menti-chatgpt-status="1">
+            Sorunuzu yazin. Yanitlar ChatGPT uzerinden bu panelde gelir.
           </div>
 
-          <div class="menti-gemini-messages" data-menti-gemini-messages="1">
-            <div class="menti-gemini-empty" data-menti-gemini-empty="1">
+          <div class="menti-chatgpt-messages" data-menti-chatgpt-messages="1">
+            <div class="menti-chatgpt-empty" data-menti-chatgpt-empty="1">
               Henuz sohbet baslamadi.
             </div>
           </div>
 
-          <form class="menti-gemini-form" data-menti-gemini-form="1">
-            <label class="menti-gemini-input-wrap">
+          <form class="menti-chatgpt-form" data-menti-chatgpt-form="1">
+            <label class="menti-chatgpt-input-wrap">
               <span>Mesaj</span>
               <textarea
                 rows="6"
                 name="prompt"
-                data-menti-gemini-input="1"
+                data-menti-chatgpt-input="1"
                 placeholder="Sorunuzu buraya yazin"
                 required
               ></textarea>
             </label>
-            <div class="menti-gemini-actions">
-              <button type="submit" data-menti-gemini-send="1">Gonder</button>
-              <button type="button" class="ghost" data-menti-gemini-clear="1">Sohbeti Temizle</button>
+            <div class="menti-chatgpt-actions">
+              <button type="submit" data-menti-chatgpt-send="1">Gonder</button>
+              <button type="button" class="ghost" data-menti-chatgpt-clear="1">Sohbeti Temizle</button>
             </div>
           </form>
         </aside>
