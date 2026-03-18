@@ -23,7 +23,7 @@ function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
 
       const key = normalizedLine.slice(0, eqIndex).trim();
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-      if (process.env[key] !== undefined) continue;
+      if (String(process.env[key] || "").trim()) continue;
 
       let value = normalizedLine.slice(eqIndex + 1).trim();
       if (
