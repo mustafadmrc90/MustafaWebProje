@@ -10693,8 +10693,7 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
     user: req.session.user,
     active: "menti",
     mentiUrl: "https://www.menti.com/",
-    chatgptUrl: "https://chatgpt.com/",
-    chatgptModel: OPENAI_MODEL
+    chatgptUrl: "https://chatgpt.com/"
   });
 });
 
@@ -12265,7 +12264,6 @@ app.post("/api/execute", requireAuth, async (req, res) => {
 
 const handleMentiChatGptRequest = async (req, res) => {
   const prompt = String(req.body?.prompt || "").trim();
-  const history = normalizeMentiChatHistoryEntries(req.body?.history, 14);
 
   if (!prompt) {
     return res.status(400).json({ ok: false, error: "Mesaj bos olamaz." });
@@ -12273,60 +12271,12 @@ const handleMentiChatGptRequest = async (req, res) => {
   if (prompt.length > 12000) {
     return res.status(400).json({ ok: false, error: "Mesaj cok uzun." });
   }
-  if (!OPENAI_API_KEY) {
-    return res.status(503).json({ ok: false, error: "OPENAI_API_KEY tanimli degil." });
-  }
 
-  const endpointUrl = `${OPENAI_API_BASE_URL}/chat/completions`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.max(5000, OPENAI_API_TIMEOUT_MS));
-
-  try {
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: history.concat([{ role: "user", content: prompt }]),
-        temperature: 0.7
-      }),
-      signal: controller.signal
-    });
-
-    const payload = await response.json().catch(() => ({}));
-    const reply = extractOpenAIText(payload);
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      return res.status(response.status || 502).json({
-        ok: false,
-        error: String(payload?.error?.message || "OpenAI API hatasi.").trim()
-      });
-    }
-    if (!reply) {
-      return res.status(502).json({
-        ok: false,
-        error: "ChatGPT yaniti alinamadi."
-      });
-    }
-
-    return res.json({
-      ok: true,
-      reply,
-      model: OPENAI_MODEL
-    });
-  } catch (err) {
-    clearTimeout(timeout);
-    const message =
-      err?.name === "AbortError" ? "ChatGPT istegi zaman asimina ugradi." : err?.message || "ChatGPT hatasi.";
-    return res.status(502).json({
-      ok: false,
-      error: message
-    });
-  }
+  return res.json({
+    ok: true,
+    reply: "Bu ekran artik API kullanmiyor. Mesaji kopyalayip ChatGPT web ekraninda yapistirin.",
+    model: "chatgpt-web-helper"
+  });
 };
 
 app.post("/api/menti/chatgpt-chat", requireAuth, requireMenuAccess("menti"), handleMentiChatGptRequest);

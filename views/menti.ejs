@@ -23,7 +23,7 @@
             </span>
             <span>Menti</span>
           </h1>
-          <p>Menti solda acik kalir, sagda ChatGPT sohbet paneli calisir.</p>
+          <p>Menti solda acik kalir, sagda ChatGPT icin kopyala ve ac yardimcisi calisir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -57,11 +57,15 @@
           </div>
         </section>
 
-        <aside class="table-card panel-card menti-chatgpt-card" data-menti-chatgpt-chat="1">
+        <aside
+          class="table-card panel-card menti-chatgpt-card"
+          data-menti-chatgpt-chat="1"
+          data-menti-chatgpt-url="<%= chatgptUrl %>"
+        >
           <div class="menti-browser-toolbar">
             <div class="menti-browser-address" aria-label="ChatGPT paneli">
               <span class="menti-browser-dot" aria-hidden="true"></span>
-              <span>ChatGPT - <%= chatgptModel %></span>
+              <span>ChatGPT Web Yardimcisi</span>
             </div>
             <a class="button-link ghost" href="<%= chatgptUrl %>" target="_blank" rel="noopener noreferrer">
               ChatGPT'yi Ac
@@ -69,29 +73,30 @@
           </div>
 
           <div class="menti-frame-note inline-alert" data-menti-chatgpt-status="1">
-            Sorunuzu yazin. Yanitlar ChatGPT uzerinden bu panelde gelir.
+            Bu panel API kullanmaz. Mesaji kopyalayip ChatGPT sekmesinde yapistirin.
           </div>
 
           <div class="menti-chatgpt-messages" data-menti-chatgpt-messages="1">
             <div class="menti-chatgpt-empty" data-menti-chatgpt-empty="1">
-              Henuz sohbet baslamadi.
+              Kopyaladiginiz taslaklar burada listelenir.
             </div>
           </div>
 
           <form class="menti-chatgpt-form" data-menti-chatgpt-form="1">
             <label class="menti-chatgpt-input-wrap">
-              <span>Mesaj</span>
+              <span>ChatGPT'ye gidecek mesaj</span>
               <textarea
                 rows="6"
                 name="prompt"
                 data-menti-chatgpt-input="1"
-                placeholder="Sorunuzu buraya yazin"
+                placeholder="Sorunuzu veya talimatinizi buraya yazin"
                 required
               ></textarea>
             </label>
             <div class="menti-chatgpt-actions">
-              <button type="submit" data-menti-chatgpt-send="1">Gonder</button>
-              <button type="button" class="ghost" data-menti-chatgpt-clear="1">Sohbeti Temizle</button>
+              <button type="submit" data-menti-chatgpt-send="1">Kopyala</button>
+              <button type="button" class="ghost" data-menti-chatgpt-open="1">ChatGPT'yi Ac</button>
+              <button type="button" class="ghost" data-menti-chatgpt-clear="1">Taslaklari Temizle</button>
             </div>
           </form>
         </aside>

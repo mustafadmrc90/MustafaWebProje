@@ -2464,24 +2464,24 @@
 
     const root = document.querySelector("[data-menti-chatgpt-chat='1']");
     if (!root) return;
+    const chatGptUrl = String(root.getAttribute("data-menti-chatgpt-url") || "https://chatgpt.com/").trim();
 
     const form = root.querySelector("[data-menti-chatgpt-form='1']");
     const inputEl = root.querySelector("[data-menti-chatgpt-input='1']");
     const sendBtn = root.querySelector("[data-menti-chatgpt-send='1']");
+    const openBtn = root.querySelector("[data-menti-chatgpt-open='1']");
     const clearBtn = root.querySelector("[data-menti-chatgpt-clear='1']");
     const messagesEl = root.querySelector("[data-menti-chatgpt-messages='1']");
     const emptyEl = root.querySelector("[data-menti-chatgpt-empty='1']");
     const statusEl = root.querySelector("[data-menti-chatgpt-status='1']");
 
-    if (!form || !inputEl || !sendBtn || !clearBtn || !messagesEl || !emptyEl || !statusEl) {
+    if (!form || !inputEl || !sendBtn || !openBtn || !clearBtn || !messagesEl || !emptyEl || !statusEl) {
       return;
     }
 
     const state = loadMentiChatGptChatStateFromStorage();
     let messages = Array.isArray(state.messages) ? state.messages.slice(-20) : [];
-    let isBusy = false;
     let isActive = true;
-    let requestController = null;
 
     const persistState = () => {
       if (!isActive) return;
@@ -2500,9 +2500,9 @@
     const syncButtons = () => {
       if (!isActive) return;
       const hasDraft = Boolean(String(inputEl.value || "").trim());
-      sendBtn.disabled = !hasDraft || isBusy;
-      clearBtn.disabled = (!messages.length && !hasDraft) || isBusy;
-      inputEl.disabled = isBusy;
+      sendBtn.disabled = !hasDraft;
+      openBtn.disabled = false;
+      clearBtn.disabled = !messages.length && !hasDraft;
     };
 
     const renderMessages = () => {
@@ -2518,7 +2518,7 @@
 
         const meta = document.createElement("div");
         meta.className = "menti-chatgpt-message-meta";
-        meta.textContent = message.role === "assistant" ? "ChatGPT" : "Siz";
+        meta.textContent = message.role === "assistant" ? "Not" : "Taslak";
 
         const body = document.createElement("div");
         body.className = "menti-chatgpt-message-body";
@@ -2542,75 +2542,74 @@
       syncButtons();
     };
 
+    const addNote = (text) => {
+      appendMessage("assistant", text);
+    };
+
     const clearChat = () => {
       messages = [];
       inputEl.value = "";
       renderMessages();
       persistState();
       syncButtons();
-      setStatus("Sohbet temizlendi.");
+      setStatus("Taslak gecmisi temizlendi.");
     };
 
-    const sendMessage = async () => {
+    const copyDraftToClipboard = async () => {
       const prompt = String(inputEl.value || "").trim();
-      if (!prompt || isBusy) return;
-
-      appendMessage("user", prompt);
-      inputEl.value = "";
-      isBusy = true;
-      requestController = new AbortController();
-      persistState();
-      syncButtons();
-      setStatus("ChatGPT yanit hazirliyor...");
+      if (!prompt) return false;
 
       try {
-        const response = await fetch("/api/menti/chatgpt-chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json"
-          },
-          body: JSON.stringify({
-            prompt,
-            history: messages.slice(0, -1)
-          }),
-          signal: requestController.signal
-        });
-        if (!isActive) return;
-        const data = await parseJsonResponse(response);
-        if (!response.ok || data?.ok === false || !String(data?.reply || "").trim()) {
-          throw new Error(getApiErrorMessage(response, data, "ChatGPT yanit veremedi"));
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+          throw new Error("Tarayici panoya kopyalama izni vermedi.");
         }
-        appendMessage("assistant", data.reply);
-        setStatus(`Yanıt alindi${data?.model ? ` (${data.model})` : ""}.`);
+        await navigator.clipboard.writeText(prompt);
+        appendMessage("user", prompt);
+        addNote("Mesaj panoya kopyalandi. ChatGPT sekmesini acip yapistirabilirsiniz.");
+        inputEl.value = "";
+        persistState();
+        syncButtons();
+        setStatus("Mesaj panoya kopyalandi.");
+        return true;
       } catch (err) {
         if (!isActive) return;
-        if (err?.name === "AbortError") {
-          setStatus("ChatGPT istegi iptal edildi.", true);
-          return;
-        }
-        appendMessage("assistant", `Hata: ${err.message || "ChatGPT istegi basarisiz."}`);
-        setStatus(err.message || "ChatGPT istegi basarisiz.", true);
-      } finally {
-        requestController = null;
-        if (!isActive) return;
-        isBusy = false;
-        syncButtons();
-        persistState();
+        setStatus(err?.message || "Mesaj kopyalanamadi.", true);
+        return false;
       }
+    };
+
+    const openChatGpt = () => {
+      if (!isActive) return;
+      const opened = window.open(chatGptUrl || "https://chatgpt.com/", "_blank", "noopener,noreferrer");
+      if (!opened) {
+        setStatus("ChatGPT sekmesi acilamadi. Popup engelleyiciyi kontrol edin.", true);
+        return;
+      }
+      setStatus("ChatGPT yeni sekmede acildi.");
     };
 
     inputEl.value = state.draft || "";
     renderMessages();
     syncButtons();
-    setStatus(messages.length ? "Kaydedilen sohbet yuklendi." : "Sorunuzu yazin. Yanit ChatGPT uzerinden gelecektir.");
+    setStatus(
+      messages.length
+        ? "Kaydedilen taslaklar yuklendi."
+        : "Mesajinizi yazin, Kopyala'ya basin, sonra ChatGPT sekmesinde yapistirin."
+    );
 
-    const handleSubmit = (event) => {
+    const handleSubmit = async (event) => {
       event.preventDefault();
-      sendMessage();
+      await copyDraftToClipboard();
     };
     const handleClear = () => {
       clearChat();
+    };
+    const handleOpen = async () => {
+      if (String(inputEl.value || "").trim()) {
+        const copied = await copyDraftToClipboard();
+        if (!copied) return;
+      }
+      openChatGpt();
     };
     const handleInput = () => {
       persistState();
@@ -2619,22 +2618,20 @@
     const handleKeydown = (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        sendMessage();
+        void copyDraftToClipboard();
       }
     };
 
     form.addEventListener("submit", handleSubmit);
+    openBtn.addEventListener("click", handleOpen);
     clearBtn.addEventListener("click", handleClear);
     inputEl.addEventListener("input", handleInput);
     inputEl.addEventListener("keydown", handleKeydown);
 
     mentiChatGptChatRuntime.cleanup = () => {
       isActive = false;
-      if (requestController) {
-        requestController.abort();
-        requestController = null;
-      }
       form.removeEventListener("submit", handleSubmit);
+      openBtn.removeEventListener("click", handleOpen);
       clearBtn.removeEventListener("click", handleClear);
       inputEl.removeEventListener("input", handleInput);
       inputEl.removeEventListener("keydown", handleKeydown);
