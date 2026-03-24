@@ -11595,6 +11595,19 @@ app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"
 app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), async (req, res) => {
   const jiraBaseUrl = normalizeJiraBaseUrl(JIRA_BASE_URL);
   const jiraConfigOk = Boolean(jiraBaseUrl && JIRA_EMAIL && JIRA_API_TOKEN);
+  const boardMeta = {
+    areaLabel: "Alan / OBUS-DEV",
+    boardName: "Corp",
+    tabs: [
+      "Özet",
+      "Zaman çizelgesi",
+      "Kanban panosu",
+      "Takvim",
+      "Raporlar",
+      "Liste"
+    ],
+    filters: ["Epic", "Tür", "Etiket", "Hızlı filtreler"]
+  };
   let boardReport = {
     source: "",
     jql: "",
@@ -11673,10 +11686,25 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
       .reduce((total, column) => total + column.cards.length, 0),
     completedCards: boardColumns.find((column) => column.key === "done")?.cards.length || 0
   };
+  const boardPeople = [];
+  const seenAssignees = new Set();
+  boardColumns.forEach((column) => {
+    column.cards.forEach((card) => {
+      const name = String(card?.assignee || "").trim();
+      if (!name || name === "Atanmamış" || seenAssignees.has(name)) return;
+      seenAssignees.add(name);
+      boardPeople.push({
+        name,
+        initials: String(card.assigneeInitials || "?").trim() || "?"
+      });
+    });
+  });
 
   res.render("reports-jira-board", {
     user: req.session.user,
     active: "jira-board",
+    boardMeta,
+    boardPeople,
     boardColumns,
     summary,
     boardReport,
