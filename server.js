@@ -92,8 +92,8 @@ const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
 const UETDS_PRICES_TASK_DATA =
-  String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb").trim() ||
-  "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb";
+  String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e").trim() ||
+  "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e";
 const UETDS_PRICES_REQUEST_DATE =
   String(process.env.UETDS_PRICES_REQUEST_DATE || "2019-12-23T11:33:00").trim() || "2019-12-23T11:33:00";
 const UETDS_PRICES_REQUEST_LANGUAGE =
