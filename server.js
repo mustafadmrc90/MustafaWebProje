@@ -5383,25 +5383,27 @@ async function fetchJiraIssues({ baseUrl, email, apiToken, jql, maxResults = JIR
     };
   }
 
-  const query = new URLSearchParams({
-    jql: normalizedJql,
-    startAt: String(normalizedStartAt),
-    maxResults: String(normalizedMaxResults),
-    fields: "summary,status,assignee,priority,issuetype,created,updated,resolutiondate"
-  });
-  const url = `${normalizedBaseUrl}/rest/api/3/search?${query.toString()}`;
+  const url = `${normalizedBaseUrl}/rest/api/3/search/jql`;
   const authValue = Buffer.from(`${normalizedEmail}:${normalizedApiToken}`, "utf8").toString("base64");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(3000, JIRA_API_TIMEOUT_MS));
 
   try {
+    const requestBody = {
+      jql: normalizedJql,
+      maxResults: normalizedMaxResults,
+      fields: ["summary", "status", "assignee", "priority", "issuetype", "created", "updated", "resolutiondate"]
+    };
+
     const response = await fetch(url, {
-      method: "GET",
+      method: "POST",
       signal: controller.signal,
       headers: {
         Accept: "application/json",
+        "Content-Type": "application/json",
         Authorization: `Basic ${authValue}`
-      }
+      },
+      body: JSON.stringify(requestBody)
     });
     const raw = await response.text();
     const payload = parseJsonSafe(raw);
