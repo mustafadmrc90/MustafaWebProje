@@ -861,12 +861,12 @@
     if (form.dataset.loadingBound === "1") return;
     form.dataset.loadingBound = "1";
 
-    const submitBtn = form.querySelector(".allowed-lines-actions button[type='submit']");
+    const submitButtons = Array.from(form.querySelectorAll(".allowed-lines-actions button[type='submit']"));
     const loadingMessage = form.querySelector(".allowed-lines-loading-message");
     const companySelect = form.querySelector("#allowed-lines-company");
     const endpointInput = form.querySelector("#allowed-lines-endpoint-url");
     const companySourceUrl = String(form.dataset.companySourceUrl || "").trim();
-    if (!submitBtn) return;
+    if (!submitButtons.length) return;
 
     const replaceClusterInUrl = (urlValue, clusterValue) => {
       const url = String(urlValue || "").trim();
@@ -902,8 +902,10 @@
     };
 
     form.classList.remove("is-loading");
-    submitBtn.disabled = false;
-    submitBtn.textContent = "İzinli Hatları Yükle";
+    submitButtons.forEach((button) => {
+      button.disabled = false;
+      button.textContent = String(button.dataset.defaultLabel || button.textContent || "").trim();
+    });
     if (loadingMessage) {
       loadingMessage.hidden = true;
     }
@@ -915,9 +917,18 @@
       }
     }
 
-    form.addEventListener("submit", () => {
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Yükleniyor...";
+    form.addEventListener("submit", (event) => {
+      const activeSubmitter =
+        event.submitter && submitButtons.includes(event.submitter) ? event.submitter : submitButtons[0];
+      submitButtons.forEach((button) => {
+        button.disabled = true;
+        button.textContent = String(button.dataset.defaultLabel || button.textContent || "").trim();
+      });
+      if (activeSubmitter) {
+        activeSubmitter.textContent = String(
+          activeSubmitter.dataset.loadingLabel || activeSubmitter.dataset.defaultLabel || "Yükleniyor..."
+        ).trim();
+      }
       form.classList.add("is-loading");
       if (loadingMessage) {
         loadingMessage.hidden = false;

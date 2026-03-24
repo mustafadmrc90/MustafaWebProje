@@ -91,6 +91,16 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
+const UETDS_PRICES_API_URL =
+  process.env.UETDS_PRICES_API_URL ||
+  "https://api-coreprod-cluster10.obus.com.tr/api/scheduledtask/TriggerScheduledTask";
+const UETDS_PRICES_TASK_DATA =
+  String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb").trim() ||
+  "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb";
+const UETDS_PRICES_REQUEST_DATE =
+  String(process.env.UETDS_PRICES_REQUEST_DATE || "2019-12-23T11:33:00").trim() || "2019-12-23T11:33:00";
+const UETDS_PRICES_REQUEST_LANGUAGE =
+  String(process.env.UETDS_PRICES_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const OBUS_USER_CREATE_API_URL =
   process.env.OBUS_USER_CREATE_API_URL || "https://api-preprod.obus.com.tr/api/membership/createuser";
 const OBUS_USER_CREATE_API_AUTH =
@@ -216,7 +226,7 @@ const SIDEBAR_MENU_REGISTRY = [
   {
     key: "authorized-lines-upload",
     type: "item",
-    label: "İzinli Hatları Yükle",
+    label: "İzinli Hatları & UETDS Fiyatlarını Güncelle",
     parentKey: "general",
     route: "/general/authorized-lines-upload",
     routeKey: "authorized-lines-upload",
@@ -2734,6 +2744,18 @@ function buildAuthorizedLinesUploadUrl(baseUrl, clusterLabel) {
   }
 }
 
+function buildUetdsPricesUpdateUrl(baseUrl) {
+  try {
+    const parsed = new URL(String(baseUrl || ""));
+    parsed.pathname = "/api/scheduledtask/TriggerScheduledTask";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function buildCompanyOptionValue(item) {
   const code = String(item?.code || "").trim();
   const id = String(item?.id || "").trim();
@@ -2823,6 +2845,10 @@ function resolveSelectedPartnerId({ selectedCompanyMeta, selectedCompanyValue, c
   if (metaId) return metaId;
 
   return "";
+}
+
+function normalizeAuthorizedLinesSubmitAction(value) {
+  return String(value || "").trim().toLowerCase() === "uetds-prices" ? "uetds-prices" : "authorized-lines";
 }
 
 function buildAuthorizedLinesLoginRequestBodyPreview({
@@ -7846,6 +7872,54 @@ function buildAuthorizedLinesReportModel() {
   };
 }
 
+function buildUetdsPricesRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
+  return {
+    data: UETDS_PRICES_TASK_DATA,
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    token: String(token || "").trim(),
+    date: UETDS_PRICES_REQUEST_DATE,
+    language: UETDS_PRICES_REQUEST_LANGUAGE
+  };
+}
+
+function applyAuthorizedLinesLoginFailureReport({
+  report,
+  loginResult,
+  partnerCode = "",
+  username = "",
+  loginBranchId = ""
+}) {
+  report.error = loginResult.error || "UserLogin başarısız.";
+  report.errorDetail =
+    String(loginResult.errorDetail || "").trim() || String(loginResult.tokenMissingDetail || "").trim();
+  report.userMessage = "";
+  report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+    partnerCode,
+    username,
+    loginBranchId
+  });
+  report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
+}
+
+function applyAuthorizedLinesServiceReport(report, serviceReport) {
+  report.requested = serviceReport.requested;
+  report.status = serviceReport.status;
+  report.error = serviceReport.error;
+  report.userMessage = serviceReport.userMessage || "";
+  report.requestBody = serviceReport.requestBody;
+  report.responseBody = serviceReport.responseBody;
+  report.errorDetail = serviceReport.error
+    ? String(serviceReport.responseBody || "").trim() || String(serviceReport.error || "").trim()
+    : "";
+  report.sessionId = serviceReport.sessionId || report.sessionId;
+  report.deviceId = serviceReport.deviceId || report.deviceId;
+  report.branchId = serviceReport.branchId || report.branchId;
+  report.loginToken = serviceReport.loginToken || report.loginToken;
+}
+
 async function fetchAuthorizedLinesLoginInfo({
   endpointUrl,
   companyUrl,
@@ -8294,6 +8368,257 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, token, partnerCode = "" }) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  if (!normalizedEndpointUrl) {
+    return {
+      requested: true,
+      status: null,
+      error: "Hedef URL geçersiz.",
+      userMessage: "",
+      requestBody: "{}",
+      responseBody: "",
+      sessionId: "",
+      deviceId: "",
+      branchId: "",
+      loginToken: ""
+    };
+  }
+
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+
+  if (!normalizedSessionId || !normalizedDeviceId) {
+    return {
+      requested: true,
+      status: null,
+      error: "UserLogin session/device bilgisi bulunamadı.",
+      userMessage: "",
+      requestBody: "{}",
+      responseBody: "",
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      branchId: "",
+      loginToken: normalizedToken
+    };
+  }
+
+  if (!normalizedToken) {
+    return {
+      requested: true,
+      status: null,
+      error: "Token zorunludur.",
+      userMessage: "",
+      requestBody: "{}",
+      responseBody: "",
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      branchId: "",
+      loginToken: normalizedToken
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  let requestBody = "{}";
+
+  try {
+    const body = buildUetdsPricesRequestBody({
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      token: normalizedToken
+    });
+    requestBody = JSON.stringify(body, null, 2);
+
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const responseBody =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        requested: true,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        userMessage: "",
+        requestBody,
+        responseBody: responseBody || "{}",
+        sessionId: normalizedSessionId,
+        deviceId: normalizedDeviceId,
+        branchId: "",
+        loginToken: normalizedToken
+      };
+    }
+
+    const hasExplicitStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+      const reason =
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim() ||
+        "İşlem başarısız döndü.";
+      return {
+        requested: true,
+        status: response.status,
+        error: reason,
+        userMessage: "",
+        requestBody,
+        responseBody: responseBody || "{}",
+        sessionId: normalizedSessionId,
+        deviceId: normalizedDeviceId,
+        branchId: "",
+        loginToken: normalizedToken
+      };
+    }
+
+    const effectivePartnerCode = String(partnerCode || "").trim();
+    const userMessage = effectivePartnerCode
+      ? `${effectivePartnerCode} UETDS fiyat güncelleme isteği tetiklendi.`
+      : "UETDS fiyat güncelleme isteği tetiklendi.";
+
+    return {
+      requested: true,
+      status: response.status,
+      error: null,
+      userMessage,
+      requestBody,
+      responseBody: responseBody || "{}",
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      branchId: "",
+      loginToken: normalizedToken
+    };
+  } catch (err) {
+    return {
+      requested: true,
+      status: null,
+      error: err?.message || "İstek gönderilemedi.",
+      userMessage: "",
+      requestBody,
+      responseBody: "",
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      branchId: "",
+      loginToken: normalizedToken
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function executeAuthorizedLinesScreenAction({
+  submitAction,
+  filters,
+  selectedCompanyMeta,
+  companies
+}) {
+  const report = buildAuthorizedLinesReportModel();
+  report.requested = true;
+
+  const normalizedAction = normalizeAuthorizedLinesSubmitAction(submitAction);
+  const partnerCode = String(selectedCompanyMeta?.code || "").trim();
+  const loginBranchId = String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim();
+
+  if (!selectedCompanyMeta) {
+    report.error = "Firma seçimi zorunludur.";
+    return report;
+  }
+
+  if (!filters.username || !filters.password) {
+    report.error = "Kullanıcı adı ve şifre zorunludur.";
+    return report;
+  }
+
+  const partnerId = resolveSelectedPartnerId({
+    selectedCompanyMeta,
+    selectedCompanyValue: filters.company,
+    companies
+  });
+  if (normalizedAction === "authorized-lines" && !partnerId) {
+    report.error = "Seçilen firma için PartnerId bulunamadı.";
+    return report;
+  }
+
+  const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
+    endpointUrl: filters.endpointUrl,
+    companyUrl: String(selectedCompanyMeta?.url || "").trim(),
+    partnerCode,
+    partnerId,
+    username: filters.username,
+    password: filters.password,
+    fallbackBranchId: loginBranchId
+  });
+  report.sessionId = loginResult.sessionId || "";
+  report.deviceId = loginResult.deviceId || "";
+  report.branchId = loginResult.branchId || "";
+  report.loginToken = loginResult.token || "";
+  report.loginUrl = loginResult.loginUrl || "";
+
+  if (!loginResult.ok) {
+    applyAuthorizedLinesLoginFailureReport({
+      report,
+      loginResult,
+      partnerCode,
+      username: filters.username,
+      loginBranchId
+    });
+    return report;
+  }
+
+  const effectiveToken = String(loginResult.token || "").trim();
+  if (!effectiveToken) {
+    report.error = "UserLogin yanıtında token bulunamadı.";
+    report.errorDetail =
+      String(loginResult.tokenMissingDetail || "").trim() || String(loginResult.errorDetail || "").trim();
+    report.userMessage = "";
+    report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
+      partnerCode,
+      username: filters.username,
+      loginBranchId
+    });
+    report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
+    return report;
+  }
+
+  const serviceReport =
+    normalizedAction === "uetds-prices"
+      ? await fetchUetdsPricesUpdateReport({
+          endpointUrl: buildUetdsPricesUpdateUrl(UETDS_PRICES_API_URL),
+          sessionId: report.sessionId,
+          deviceId: report.deviceId,
+          token: effectiveToken,
+          partnerCode
+        })
+      : await fetchAuthorizedLinesUploadReport({
+          endpointUrl: filters.endpointUrl,
+          partnerId,
+          partnerCode,
+          token: effectiveToken
+        });
+
+  applyAuthorizedLinesServiceReport(report, serviceReport);
+  return report;
 }
 
 function buildObusUserCreateReportModel() {
@@ -10435,6 +10760,7 @@ app.get(
   requireAuth,
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
+    const submitAction = normalizeAuthorizedLinesSubmitAction(req.query.submitAction);
     const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
     const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
 
@@ -10471,79 +10797,15 @@ app.get(
       report.requested = true;
       report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
     } else if (shouldRun) {
-      const partnerId = resolveSelectedPartnerId({
-        selectedCompanyMeta,
-        selectedCompanyValue: filters.company,
-        companies
-      });
-      if (!partnerId) {
-        report.requested = true;
-        report.error = "Seçilen firma için PartnerId bulunamadı.";
-      } else if (!filters.username || !filters.password) {
-        report.requested = true;
-        report.error = "Kullanıcı adı ve şifre zorunludur.";
-      } else {
-        const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
-          endpointUrl: filters.endpointUrl,
-          companyUrl: String(selectedCompanyMeta?.url || "").trim(),
-          partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-          partnerId,
-          username: filters.username,
-          password: filters.password,
-          fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-        });
-        report.requested = true;
-        report.sessionId = loginResult.sessionId || "";
-        report.deviceId = loginResult.deviceId || "";
-        report.branchId = loginResult.branchId || "";
-        report.loginToken = loginResult.token || "";
-        report.loginUrl = loginResult.loginUrl || "";
-
-        if (!loginResult.ok) {
-          report.error = loginResult.error || "UserLogin başarısız.";
-          report.errorDetail =
-            String(loginResult.errorDetail || "").trim() || String(loginResult.tokenMissingDetail || "").trim();
-          report.userMessage = "";
-          report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
-            partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-            username: filters.username,
-            loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-          });
-          report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
-        } else {
-          const effectiveToken = String(loginResult.token || "").trim();
-          if (!effectiveToken) {
-            report.error = "UserLogin yanıtında token bulunamadı.";
-            report.errorDetail =
-              String(loginResult.tokenMissingDetail || "").trim() || String(loginResult.errorDetail || "").trim();
-            report.userMessage = "";
-            report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
-              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-              username: filters.username,
-              loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-            });
-            report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
-          } else {
-            const reportResult = await fetchAuthorizedLinesUploadReport({
-              endpointUrl: filters.endpointUrl,
-              partnerId,
-              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-              token: effectiveToken
-            });
-            report.requested = reportResult.requested;
-            report.status = reportResult.status;
-            report.error = reportResult.error;
-            report.userMessage = reportResult.userMessage || "";
-            report.requestBody = reportResult.requestBody;
-            report.responseBody = reportResult.responseBody;
-            report.errorDetail = reportResult.error
-              ? String(reportResult.responseBody || "").trim() || String(reportResult.error || "").trim()
-              : "";
-            report.sessionId = reportResult.sessionId || report.sessionId;
-            report.deviceId = reportResult.deviceId || report.deviceId;
-          }
-        }
-      }
+      Object.assign(
+        report,
+        await executeAuthorizedLinesScreenAction({
+          submitAction,
+          filters,
+          selectedCompanyMeta,
+          companies
+        })
+      );
     }
 
     res.render("general-authorized-lines-upload", {
@@ -10562,6 +10824,7 @@ app.post(
   requireAuth,
   requireMenuAccess("authorized-lines-upload"),
   async (req, res) => {
+    const submitAction = normalizeAuthorizedLinesSubmitAction(req.body.submitAction);
     const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
     const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
 
@@ -10590,83 +10853,12 @@ app.post(
       username: String(req.body.username || "").trim(),
       password: String(req.body.password || "")
     };
-    const report = buildAuthorizedLinesReportModel();
-    report.requested = true;
-
-    if (!selectedCompanyMeta) {
-      report.error = "Firma seçimi zorunludur.";
-    } else if (!filters.username || !filters.password) {
-      report.error = "Kullanıcı adı ve şifre zorunludur.";
-    } else {
-      const partnerId = resolveSelectedPartnerId({
-        selectedCompanyMeta,
-        selectedCompanyValue: filters.company,
-        companies
-      });
-      if (!partnerId) {
-        report.error = "Seçilen firma için PartnerId bulunamadı.";
-      } else {
-        const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
-          endpointUrl: filters.endpointUrl,
-          companyUrl: String(selectedCompanyMeta?.url || "").trim(),
-          partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-          partnerId,
-          username: filters.username,
-          password: filters.password,
-          fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-        });
-        report.sessionId = loginResult.sessionId || "";
-        report.deviceId = loginResult.deviceId || "";
-        report.branchId = loginResult.branchId || "";
-        report.loginToken = loginResult.token || "";
-        report.loginUrl = loginResult.loginUrl || "";
-
-        if (!loginResult.ok) {
-          report.error = loginResult.error || "UserLogin başarısız.";
-          report.errorDetail =
-            String(loginResult.errorDetail || "").trim() || String(loginResult.tokenMissingDetail || "").trim();
-          report.userMessage = "";
-          report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
-            partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-            username: filters.username,
-            loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-          });
-          report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
-        } else {
-          const effectiveToken = String(loginResult.token || "").trim();
-          if (!effectiveToken) {
-            report.error = "UserLogin yanıtında token bulunamadı.";
-            report.errorDetail =
-              String(loginResult.tokenMissingDetail || "").trim() || String(loginResult.errorDetail || "").trim();
-            report.userMessage = "";
-            report.requestBody = buildAuthorizedLinesLoginRequestBodyPreview({
-              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-              username: filters.username,
-              loginBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim()
-            });
-            report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
-          } else {
-            const reportResult = await fetchAuthorizedLinesUploadReport({
-              endpointUrl: filters.endpointUrl,
-              partnerId,
-              partnerCode: String(selectedCompanyMeta?.code || "").trim(),
-              token: effectiveToken
-            });
-            report.requested = reportResult.requested;
-            report.status = reportResult.status;
-            report.error = reportResult.error;
-            report.userMessage = reportResult.userMessage || "";
-            report.requestBody = reportResult.requestBody;
-            report.responseBody = reportResult.responseBody;
-            report.errorDetail = reportResult.error
-              ? String(reportResult.responseBody || "").trim() || String(reportResult.error || "").trim()
-              : "";
-            report.sessionId = reportResult.sessionId || report.sessionId;
-            report.deviceId = reportResult.deviceId || report.deviceId;
-          }
-        }
-      }
-    }
+    const report = await executeAuthorizedLinesScreenAction({
+      submitAction,
+      filters,
+      selectedCompanyMeta,
+      companies
+    });
 
     res.render("general-authorized-lines-upload", {
       user: req.session.user,

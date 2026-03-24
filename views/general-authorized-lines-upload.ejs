@@ -21,7 +21,7 @@
                 <circle cx="12" cy="12" r="9"></circle>
               </svg>
             </span>
-            <span>İzinli Hatları Yükle</span>
+            <span>İzinli Hatları & UETDS Fiyatlarını Güncelle</span>
           </h1>
           <p>Authorization: Basic + JSON body ile servis çağrısı yapılır.</p>
         </div>
@@ -73,7 +73,24 @@
             </label>
           </div>
           <div class="allowed-lines-actions">
-            <button type="submit">İzinli Hatları Yükle</button>
+            <button
+              type="submit"
+              name="submitAction"
+              value="uetds-prices"
+              data-default-label="UETDS Fiyatları Güncelle"
+              data-loading-label="Güncelleniyor..."
+            >
+              UETDS Fiyatları Güncelle
+            </button>
+            <button
+              type="submit"
+              name="submitAction"
+              value="authorized-lines"
+              data-default-label="İzinli Hatları Yükle"
+              data-loading-label="Yükleniyor..."
+            >
+              İzinli Hatları Yükle
+            </button>
           </div>
           <div class="allowed-lines-loading-message" hidden>İstek gönderiliyor, lütfen bekleyin...</div>
         </form>
