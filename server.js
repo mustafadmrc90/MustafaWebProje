@@ -8505,7 +8505,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       };
     }
 
-    const userMessage = "UETDS fiyatları güncellenmiştir. Sisteme 10 dk sonra yansımayacaktır.";
+    const userMessage = "UETDS fiyatları güncellenmiştir. Sisteme 10 dk sonra yansıyacaktır.";
 
     return {
       requested: true,
