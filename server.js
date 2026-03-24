@@ -91,9 +91,6 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
-const UETDS_PRICES_API_URL =
-  process.env.UETDS_PRICES_API_URL ||
-  "https://api-coreprod-cluster10.obus.com.tr/api/scheduledtask/TriggerScheduledTask";
 const UETDS_PRICES_TASK_DATA =
   String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb").trim() ||
   "AddAllFeeSchedule-32c2cec8-20cb-4951-9e3b-b05482e2b0bb";
@@ -8619,7 +8616,7 @@ async function executeAuthorizedLinesScreenAction({
   const serviceReport =
     normalizedAction === "uetds-prices"
       ? await fetchUetdsPricesUpdateReport({
-          endpointUrl: buildUetdsPricesUpdateUrl(UETDS_PRICES_API_URL),
+          endpointUrl: buildUetdsPricesUpdateUrl(filters.endpointUrl || AUTHORIZED_LINES_API_URL),
           sessionId: report.sessionId,
           deviceId: report.deviceId,
           token: effectiveToken

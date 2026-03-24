@@ -865,6 +865,7 @@
     const loadingMessage = form.querySelector(".allowed-lines-loading-message");
     const companySelect = form.querySelector("#allowed-lines-company");
     const endpointInput = form.querySelector("#allowed-lines-endpoint-url");
+    const submitActionInput = form.querySelector("#allowed-lines-submit-action");
     const companySourceUrl = String(form.dataset.companySourceUrl || "").trim();
     if (!submitButtons.length) return;
 
@@ -917,9 +918,21 @@
       }
     }
 
+    submitButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!submitActionInput) return;
+        submitActionInput.value = String(button.dataset.submitAction || "authorized-lines").trim() || "authorized-lines";
+      });
+    });
+
     form.addEventListener("submit", (event) => {
       const activeSubmitter =
         event.submitter && submitButtons.includes(event.submitter) ? event.submitter : submitButtons[0];
+      if (submitActionInput) {
+        submitActionInput.value = String(
+          activeSubmitter?.dataset?.submitAction || submitActionInput.value || "authorized-lines"
+        ).trim() || "authorized-lines";
+      }
       submitButtons.forEach((button) => {
         button.disabled = true;
         button.textContent = String(button.dataset.defaultLabel || button.textContent || "").trim();

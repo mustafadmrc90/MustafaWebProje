@@ -47,6 +47,7 @@
             id="allowed-lines-endpoint-url"
             value="<%= filters.endpointUrl %>"
           />
+          <input type="hidden" name="submitAction" id="allowed-lines-submit-action" value="authorized-lines" />
           <div class="allowed-lines-grid">
             <label class="allowed-lines-field allowed-lines-field-company">
               <span>Firma</span>
@@ -75,8 +76,7 @@
           <div class="allowed-lines-actions">
             <button
               type="submit"
-              name="submitAction"
-              value="uetds-prices"
+              data-submit-action="uetds-prices"
               data-default-label="UETDS Fiyatları Güncelle"
               data-loading-label="Güncelleniyor..."
             >
@@ -84,8 +84,7 @@
             </button>
             <button
               type="submit"
-              name="submitAction"
-              value="authorized-lines"
+              data-submit-action="authorized-lines"
               data-default-label="İzinli Hatları Yükle"
               data-loading-label="Yükleniyor..."
             >
