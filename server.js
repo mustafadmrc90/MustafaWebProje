@@ -7862,6 +7862,7 @@ function buildAuthorizedLinesReportModel() {
     error: null,
     errorDetail: "",
     userMessage: "",
+    requestUrl: "",
     requestBody: "",
     responseBody: "",
     sessionId: "",
@@ -7901,6 +7902,7 @@ function applyAuthorizedLinesLoginFailureReport({
     username,
     loginBranchId
   });
+  report.requestUrl = String(loginResult.loginUrl || "").trim();
   report.responseBody = String(loginResult.rawLoginBody || "").trim() || "{}";
 }
 
@@ -7909,6 +7911,7 @@ function applyAuthorizedLinesServiceReport(report, serviceReport) {
   report.status = serviceReport.status;
   report.error = serviceReport.error;
   report.userMessage = serviceReport.userMessage || "";
+  report.requestUrl = serviceReport.requestUrl || report.requestUrl;
   report.requestBody = serviceReport.requestBody;
   report.responseBody = serviceReport.responseBody;
   report.errorDetail = serviceReport.error
@@ -8202,6 +8205,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
       status: null,
       error: "Hedef URL geçersiz.",
       userMessage: "",
+      requestUrl: "",
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -8218,6 +8222,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
       status: null,
       error: "PartnerId zorunludur.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -8234,6 +8239,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
       status: null,
       error: "Token zorunludur.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -8255,6 +8261,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
         status: null,
         error: sessionResult.error,
         userMessage: "",
+        requestUrl: normalizedEndpointUrl,
         requestBody,
         responseBody: "",
         sessionId: "",
@@ -8304,6 +8311,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
         userMessage: "",
+        requestUrl: normalizedEndpointUrl,
         requestBody,
         responseBody: responseBody || "{}",
         sessionId: sessionResult.sessionId,
@@ -8325,6 +8333,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
         status: response.status,
         error: reason,
         userMessage: "",
+        requestUrl: normalizedEndpointUrl,
         requestBody,
         responseBody: responseBody || "{}",
         sessionId: sessionResult.sessionId,
@@ -8345,6 +8354,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
       status: response.status,
       error: null,
       userMessage,
+      requestUrl: normalizedEndpointUrl,
       requestBody,
       responseBody: responseBody || "{}",
       sessionId: sessionResult.sessionId,
@@ -8358,6 +8368,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
       status: null,
       error: err?.message || "İstek gönderilemedi.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody,
       responseBody: "",
       sessionId: "",
@@ -8370,7 +8381,7 @@ async function fetchAuthorizedLinesUploadReport({ endpointUrl, partnerId, partne
   }
 }
 
-async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, token, partnerCode = "" }) {
+async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, token }) {
   const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
   if (!normalizedEndpointUrl) {
     return {
@@ -8378,6 +8389,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       status: null,
       error: "Hedef URL geçersiz.",
       userMessage: "",
+      requestUrl: "",
       requestBody: "{}",
       responseBody: "",
       sessionId: "",
@@ -8397,6 +8409,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       status: null,
       error: "UserLogin session/device bilgisi bulunamadı.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody: "{}",
       responseBody: "",
       sessionId: normalizedSessionId,
@@ -8412,6 +8425,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       status: null,
       error: "Token zorunludur.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody: "{}",
       responseBody: "",
       sessionId: normalizedSessionId,
@@ -8461,6 +8475,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
         userMessage: "",
+        requestUrl: normalizedEndpointUrl,
         requestBody,
         responseBody: responseBody || "{}",
         sessionId: normalizedSessionId,
@@ -8483,6 +8498,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
         status: response.status,
         error: reason,
         userMessage: "",
+        requestUrl: normalizedEndpointUrl,
         requestBody,
         responseBody: responseBody || "{}",
         sessionId: normalizedSessionId,
@@ -8492,16 +8508,14 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       };
     }
 
-    const effectivePartnerCode = String(partnerCode || "").trim();
-    const userMessage = effectivePartnerCode
-      ? `${effectivePartnerCode} UETDS fiyat güncelleme isteği tetiklendi.`
-      : "UETDS fiyat güncelleme isteği tetiklendi.";
+    const userMessage = "UETDS fiyatları güncellenmiştir. Sisteme 10 dk sonra yansımayacaktır.";
 
     return {
       requested: true,
       status: response.status,
       error: null,
       userMessage,
+      requestUrl: normalizedEndpointUrl,
       requestBody,
       responseBody: responseBody || "{}",
       sessionId: normalizedSessionId,
@@ -8515,6 +8529,7 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
       status: null,
       error: err?.message || "İstek gönderilemedi.",
       userMessage: "",
+      requestUrl: normalizedEndpointUrl,
       requestBody,
       responseBody: "",
       sessionId: normalizedSessionId,
@@ -8607,8 +8622,7 @@ async function executeAuthorizedLinesScreenAction({
           endpointUrl: buildUetdsPricesUpdateUrl(UETDS_PRICES_API_URL),
           sessionId: report.sessionId,
           deviceId: report.deviceId,
-          token: effectiveToken,
-          partnerCode
+          token: effectiveToken
         })
       : await fetchAuthorizedLinesUploadReport({
           endpointUrl: filters.endpointUrl,

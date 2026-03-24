@@ -120,6 +120,12 @@
             <div class="pill muted">Henüz sonuç yok.</div>
           <% } %>
         </div>
+        <% if (report.requested && report.requestUrl) { %>
+          <div class="allowed-lines-request-url">
+            <div class="label">İstek URL</div>
+            <pre class="allowed-lines-debug-pre"><%= report.requestUrl %></pre>
+          </div>
+        <% } %>
         <% if (report.requested) { %>
           <div class="allowed-lines-result-grid">
             <div class="allowed-lines-result-item">
