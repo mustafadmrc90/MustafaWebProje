@@ -11,23 +11,35 @@
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
-      <header class="page-header">
-        <div class="page-title">
-          <h1>
-            <span class="page-title-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
-                <path d="M3 10h18"></path>
-                <path d="M9 10v10"></path>
-                <path d="M15 10v10"></path>
-              </svg>
-            </span>
-            <span>Jira Board</span>
-          </h1>
-          <p>Raporlar menüsü altında 4 kolonlu board görünümü.</p>
+      <header class="jira-board-header">
+        <div class="jira-board-header-top">
+          <div class="jira-board-context">
+            <span class="jira-board-breadcrumb">Raporlar / Jira Board</span>
+            <h1>OBUSDEV Kanban</h1>
+            <p>Backlog kolonu Jira’dan canlı çekiliyor. Diğer 3 kolon için veri eşlemesi bekleniyor.</p>
+          </div>
+          <div class="page-actions">
+            <div class="user-pill"><%= user.displayName %></div>
+          </div>
         </div>
-        <div class="page-actions">
-          <div class="user-pill"><%= user.displayName %></div>
+
+        <div class="jira-board-toolbar">
+          <div class="jira-board-toolbar-item">
+            <span class="label">Toplam Kart</span>
+            <strong><%= summary.totalCards %></strong>
+          </div>
+          <div class="jira-board-toolbar-item">
+            <span class="label">Kaynak</span>
+            <strong><%= boardReport.source || "Jira API" %></strong>
+          </div>
+          <div class="jira-board-toolbar-item">
+            <span class="label">Aktif Kolonlar</span>
+            <strong><%= summary.activeCards %></strong>
+          </div>
+          <div class="jira-board-toolbar-item">
+            <span class="label">Test Edildi</span>
+            <strong><%= summary.completedCards %></strong>
+          </div>
         </div>
       </header>
 
@@ -45,43 +57,16 @@
         <div class="alert inline-alert"><%= boardReport.error %></div>
       <% } %>
 
-      <section class="table-card panel-card jira-board-overview">
-        <div class="jira-board-overview-grid">
-          <div class="jira-board-overview-item">
-            <span class="label">Toplam Kart</span>
-            <strong><%= summary.totalCards %></strong>
-          </div>
-          <div class="jira-board-overview-item">
-            <span class="label">Aktif Kolonlar</span>
-            <strong><%= summary.activeCards %></strong>
-          </div>
-          <div class="jira-board-overview-item">
-            <span class="label">Blokeli</span>
-            <strong><%= summary.blockedCards %></strong>
-          </div>
-          <div class="jira-board-overview-item">
-            <span class="label">Test Edildi</span>
-            <strong><%= summary.completedCards %></strong>
-          </div>
-        </div>
-      </section>
-
-      <section class="table-card panel-card jira-board-shell">
-        <div class="table-head">
-          <h2>Board Kolonları</h2>
-          <div class="table-actions">
-            <% if (boardReport.source) { %>
-              <span class="pill muted">Kaynak: <%= boardReport.source %></span>
-            <% } %>
-            <span class="pill muted">Backlog canlı Jira verisi</span>
-          </div>
-        </div>
-
+      <section class="jira-board-shell">
         <% if (boardReport.jql) { %>
-          <p class="muted"><strong>Backlog JQL:</strong> <code><%= boardReport.jql %></code></p>
+          <div class="jira-board-query">
+            <strong>Backlog JQL</strong>
+            <code><%= boardReport.jql %></code>
+          </div>
         <% } %>
 
-        <div class="jira-board-grid">
+        <div class="jira-board-scroll">
+          <div class="jira-board-grid">
           <% boardColumns.forEach((column) => { %>
             <section class="jira-board-column" data-tone="<%= column.tone %>">
               <div class="jira-board-column-head">
@@ -89,7 +74,7 @@
                   <h3><%= column.title %></h3>
                   <p><%= column.subtitle %></p>
                 </div>
-                <span class="pill"><%= column.cards.length %></span>
+                <span class="jira-board-count"><%= column.cards.length %></span>
               </div>
 
               <% if (column.cards.length === 0) { %>
@@ -100,14 +85,15 @@
                 <div class="jira-board-card-list">
                   <% column.cards.forEach((card) => { %>
                     <article class="jira-board-card <%= card.blocked ? 'is-blocked' : '' %>">
+                      <div class="jira-board-card-status">
+                        <span class="jira-board-status-dot"></span>
+                        <span><%= card.status %></span>
+                      </div>
                       <div class="jira-board-card-top">
                         <% if (card.issueUrl) { %>
                           <a class="jira-board-card-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.key %></a>
                         <% } else { %>
-                          <span class="pill"><%= card.key %></span>
-                        <% } %>
-                        <% if (card.points) { %>
-                          <span class="jira-board-card-points"><%= card.points %> SP</span>
+                          <span class="jira-board-card-link"><%= card.key %></span>
                         <% } %>
                       </div>
                       <% if (card.issueUrl) { %>
@@ -121,8 +107,8 @@
                         <span class="jira-board-tag"><%= card.priority %></span>
                       </div>
                       <div class="jira-board-card-meta">
-                        <span><%= card.assignee %></span>
-                        <span><%= card.dueLabel %></span>
+                        <span class="jira-board-updated"><%= card.updatedAt %></span>
+                        <span class="jira-board-avatar" title="<%= card.assignee %>"><%= card.assigneeInitials %></span>
                       </div>
                     </article>
                   <% }) %>
@@ -130,6 +116,7 @@
               <% } %>
             </section>
           <% }) %>
+          </div>
         </div>
       </section>
     </section>

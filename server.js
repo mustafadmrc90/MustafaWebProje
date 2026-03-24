@@ -5289,15 +5289,24 @@ function buildJiraBoardCardFromIssue(issue) {
   const key = String(issue.key || "").trim();
   const title = String(issue.summary || "").trim();
   if (!key || !title) return null;
+  const assignee = String(issue.assignee || "Atanmamış").trim() || "Atanmamış";
+  const assigneeInitials = assignee
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => String(part[0] || "").toUpperCase())
+    .join("") || "?";
 
   return {
     key,
     title,
-    summary: `Son güncelleme: ${String(issue.updatedAt || "-").trim() || "-"}`,
+    summary: String(issue.summary || "-").trim() || "-",
     issueType: String(issue.issueType || "-").trim() || "-",
     priority: String(issue.priority || "-").trim() || "-",
-    assignee: String(issue.assignee || "Atanmamış").trim() || "Atanmamış",
-    dueLabel: String(issue.status || "-").trim() || "-",
+    assignee,
+    assigneeInitials,
+    status: String(issue.status || "-").trim() || "-",
+    updatedAt: String(issue.updatedAt || "-").trim() || "-",
     issueUrl: String(issue.issueUrl || "").trim(),
     blocked: /^block/i.test(String(issue.status || "").trim())
   };
