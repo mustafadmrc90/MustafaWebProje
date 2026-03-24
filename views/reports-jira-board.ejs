@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout jira-board-page">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                <path d="M3 10h18"></path>
+                <path d="M9 10v10"></path>
+                <path d="M15 10v10"></path>
+              </svg>
+            </span>
+            <span>Jira Board</span>
+          </h1>
+          <p>Raporlar menüsü altında 4 kolonlu board görünümü.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <% if (!jiraConfig.hasConfig) { %>
+        <div class="alert inline-alert">
+          Jira bağlantısı için `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` ortam değişkenlerini tanımlayın.
+        </div>
+      <% } %>
+
+      <% if (boardReport.warning) { %>
+        <div class="inline-success"><%= boardReport.warning %></div>
+      <% } %>
+
+      <% if (boardReport.error) { %>
+        <div class="alert inline-alert"><%= boardReport.error %></div>
+      <% } %>
+
+      <section class="table-card panel-card jira-board-overview">
+        <div class="jira-board-overview-grid">
+          <div class="jira-board-overview-item">
+            <span class="label">Toplam Kart</span>
+            <strong><%= summary.totalCards %></strong>
+          </div>
+          <div class="jira-board-overview-item">
+            <span class="label">Aktif Kolonlar</span>
+            <strong><%= summary.activeCards %></strong>
+          </div>
+          <div class="jira-board-overview-item">
+            <span class="label">Blokeli</span>
+            <strong><%= summary.blockedCards %></strong>
+          </div>
+          <div class="jira-board-overview-item">
+            <span class="label">Test Edildi</span>
+            <strong><%= summary.completedCards %></strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="table-card panel-card jira-board-shell">
+        <div class="table-head">
+          <h2>Board Kolonları</h2>
+          <div class="table-actions">
+            <% if (boardReport.source) { %>
+              <span class="pill muted">Kaynak: <%= boardReport.source %></span>
+            <% } %>
+            <span class="pill muted">Backlog canlı Jira verisi</span>
+          </div>
+        </div>
+
+        <% if (boardReport.jql) { %>
+          <p class="muted"><strong>Backlog JQL:</strong> <code><%= boardReport.jql %></code></p>
+        <% } %>
+
+        <div class="jira-board-grid">
+          <% boardColumns.forEach((column) => { %>
+            <section class="jira-board-column" data-tone="<%= column.tone %>">
+              <div class="jira-board-column-head">
+                <div>
+                  <h3><%= column.title %></h3>
+                  <p><%= column.subtitle %></p>
+                </div>
+                <span class="pill"><%= column.cards.length %></span>
+              </div>
+
+              <% if (column.cards.length === 0) { %>
+                <div class="jira-board-empty">
+                  <%= column.emptyMessage || "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim." %>
+                </div>
+              <% } else { %>
+                <div class="jira-board-card-list">
+                  <% column.cards.forEach((card) => { %>
+                    <article class="jira-board-card <%= card.blocked ? 'is-blocked' : '' %>">
+                      <div class="jira-board-card-top">
+                        <% if (card.issueUrl) { %>
+                          <a class="jira-board-card-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.key %></a>
+                        <% } else { %>
+                          <span class="pill"><%= card.key %></span>
+                        <% } %>
+                        <% if (card.points) { %>
+                          <span class="jira-board-card-points"><%= card.points %> SP</span>
+                        <% } %>
+                      </div>
+                      <% if (card.issueUrl) { %>
+                        <h4><a class="jira-board-title-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.title %></a></h4>
+                      <% } else { %>
+                        <h4><%= card.title %></h4>
+                      <% } %>
+                      <p><%= card.summary %></p>
+                      <div class="jira-board-card-tags">
+                        <span class="jira-board-tag"><%= card.issueType %></span>
+                        <span class="jira-board-tag"><%= card.priority %></span>
+                      </div>
+                      <div class="jira-board-card-meta">
+                        <span><%= card.assignee %></span>
+                        <span><%= card.dueLabel %></span>
+                      </div>
+                    </article>
+                  <% }) %>
+                </div>
+              <% } %>
+            </section>
+          <% }) %>
+        </div>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

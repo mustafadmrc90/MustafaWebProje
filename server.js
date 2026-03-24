@@ -311,13 +311,23 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "jira-analysis"
   },
   {
+    key: "jira-board",
+    type: "item",
+    label: "Jira Board",
+    parentKey: "reports",
+    route: "/reports/jira-board",
+    routeKey: "jira-board",
+    sortOrder: 25,
+    iconKey: "jira-board"
+  },
+  {
     key: "obus",
     type: "section",
     label: "Otobüs",
     parentKey: null,
     route: null,
     routeKey: null,
-    sortOrder: 25,
+    sortOrder: 26,
     iconKey: "folder"
   },
   {
@@ -327,7 +337,7 @@ const SIDEBAR_MENU_REGISTRY = [
     parentKey: "obus",
     route: "/obus/journey-passengers",
     routeKey: "journey-passengers",
-    sortOrder: 26,
+    sortOrder: 27,
     iconKey: "journey-passengers"
   },
   {
@@ -5267,6 +5277,79 @@ function normalizeJiraIssue(issue, baseUrl) {
     updatedAt: formatJiraDateTime(fields.updated),
     resolvedAt: formatJiraDateTime(fields.resolutiondate),
     issueUrl: baseUrl ? `${baseUrl}/browse/${encodeURIComponent(key)}` : ""
+  };
+}
+
+function escapeJiraJqlValue(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').trim();
+}
+
+function buildJiraBoardCardFromIssue(issue) {
+  if (!issue || typeof issue !== "object") return null;
+  const key = String(issue.key || "").trim();
+  const title = String(issue.summary || "").trim();
+  if (!key || !title) return null;
+
+  return {
+    key,
+    title,
+    summary: `Son güncelleme: ${String(issue.updatedAt || "-").trim() || "-"}`,
+    issueType: String(issue.issueType || "-").trim() || "-",
+    priority: String(issue.priority || "-").trim() || "-",
+    assignee: String(issue.assignee || "Atanmamış").trim() || "Atanmamış",
+    dueLabel: String(issue.status || "-").trim() || "-",
+    issueUrl: String(issue.issueUrl || "").trim(),
+    blocked: /^block/i.test(String(issue.status || "").trim())
+  };
+}
+
+async function fetchJiraBoardCards({
+  baseUrl,
+  email,
+  apiToken,
+  projectKey,
+  statuses = [],
+  issueType = "Task",
+  maxResults = JIRA_MAX_RESULTS
+}) {
+  const normalizedProjectKey = normalizeJiraProjectKey(projectKey);
+  if (!normalizedProjectKey) {
+    return {
+      cards: [],
+      jql: "",
+      source: "Jira API",
+      error: "Proje anahtarı geçersiz."
+    };
+  }
+
+  const statusList = Array.isArray(statuses)
+    ? statuses.map((item) => escapeJiraJqlValue(item)).filter(Boolean)
+    : [];
+  const issueTypeValue = escapeJiraJqlValue(issueType);
+
+  const clauses = [`project = "${normalizedProjectKey}"`];
+  if (issueTypeValue) {
+    clauses.push(`issuetype = "${issueTypeValue}"`);
+  }
+  if (statusList.length > 0) {
+    clauses.push(`status in (${statusList.map((item) => `"${item}"`).join(", ")})`);
+  }
+  const jql = `${clauses.join(" AND ")} ORDER BY updated DESC`;
+
+  const jiraResult = await fetchJiraIssues({
+    baseUrl,
+    email,
+    apiToken,
+    jql,
+    maxResults,
+    startAt: 0
+  });
+
+  return {
+    cards: (Array.isArray(jiraResult.issues) ? jiraResult.issues : []).map(buildJiraBoardCardFromIssue).filter(Boolean),
+    jql,
+    source: String(jiraResult.source || "Jira API"),
+    error: jiraResult.error || null
   };
 }
 
@@ -11494,6 +11577,101 @@ app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"
     jiraConfig: {
       baseUrl: jiraBaseUrl,
       hasConfig: Boolean(jiraBaseUrl && JIRA_EMAIL && JIRA_API_TOKEN)
+    }
+  });
+});
+
+app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), async (req, res) => {
+  const jiraBaseUrl = normalizeJiraBaseUrl(JIRA_BASE_URL);
+  const jiraConfigOk = Boolean(jiraBaseUrl && JIRA_EMAIL && JIRA_API_TOKEN);
+  let boardReport = {
+    source: "",
+    jql: "",
+    warning: "Hotfix, Test Edilecekler ve Test Edildi kolonları için veri eşlemesi bekleniyor.",
+    error: null
+  };
+
+  const boardColumns = [
+    {
+      key: "backlog",
+      title: "Backlog",
+      subtitle: "Henüz ele alınmamış işler",
+      tone: "backlog",
+      cards: [],
+      emptyMessage: "Bu kriterlerde task bulunamadı."
+    },
+    {
+      key: "hotfix",
+      title: "Hotfix",
+      subtitle: "Öncelikli acil düzeltmeler",
+      tone: "hotfix",
+      cards: [],
+      emptyMessage: "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim."
+    },
+    {
+      key: "test-pending",
+      title: "Test Edilecekler",
+      subtitle: "Kontrole çıkacak işler",
+      tone: "review",
+      cards: [],
+      emptyMessage: "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim."
+    },
+    {
+      key: "done",
+      title: "Test Edildi",
+      subtitle: "Testten geçen işler",
+      tone: "done",
+      cards: [],
+      emptyMessage: "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim."
+    }
+  ];
+
+  if (!jiraConfigOk) {
+    boardReport.error = "Jira bağlantısı için JIRA_BASE_URL, JIRA_EMAIL ve JIRA_API_TOKEN tanımlı olmalıdır.";
+  } else {
+    const backlogResult = await fetchJiraBoardCards({
+      baseUrl: jiraBaseUrl,
+      email: JIRA_EMAIL,
+      apiToken: JIRA_API_TOKEN,
+      projectKey: "OBUSDEV",
+      statuses: ["Backlog", "Analysis Done", "Analysis Revision"],
+      issueType: "Task",
+      maxResults: JIRA_MAX_RESULTS
+    });
+
+    boardColumns[0].cards = backlogResult.cards;
+    boardColumns[0].emptyMessage = backlogResult.error
+      ? "Backlog verisi Jira'dan alınamadı."
+      : "Seçilen Jira kriterlerinde task bulunamadı.";
+    boardReport = {
+      source: backlogResult.source,
+      jql: backlogResult.jql,
+      warning: "Hotfix, Test Edilecekler ve Test Edildi kolonları için veri eşlemesi bekleniyor.",
+      error: backlogResult.error ? `Backlog kolonu alınamadı: ${backlogResult.error}` : null
+    };
+  }
+
+  const summary = {
+    totalCards: boardColumns.reduce((total, column) => total + column.cards.length, 0),
+    blockedCards: boardColumns.reduce(
+      (total, column) => total + column.cards.filter((card) => card.blocked).length,
+      0
+    ),
+    activeCards: boardColumns
+      .filter((column) => column.key === "hotfix" || column.key === "test-pending")
+      .reduce((total, column) => total + column.cards.length, 0),
+    completedCards: boardColumns.find((column) => column.key === "done")?.cards.length || 0
+  };
+
+  res.render("reports-jira-board", {
+    user: req.session.user,
+    active: "jira-board",
+    boardColumns,
+    summary,
+    boardReport,
+    jiraConfig: {
+      baseUrl: jiraBaseUrl,
+      hasConfig: jiraConfigOk
     }
   });
 });
