@@ -5354,8 +5354,23 @@ function getJiraCardLinkVersionParts(cardLinks) {
   return candidates.sort(compareJiraVersionParts)[0];
 }
 
-function sortJiraBoardCards(cards) {
+function hasJiraEpicCardLink(card) {
+  return (Array.isArray(card?.cardLinks) ? card.cardLinks : []).some((link) =>
+    /^epic$/i.test(String(link?.issueType || "").trim())
+  );
+}
+
+function sortJiraBoardCards(cards, options = {}) {
+  const epicFirst = Boolean(options?.epicFirst);
   return [...(Array.isArray(cards) ? cards : [])].sort((left, right) => {
+    if (epicFirst) {
+      const leftEpicRank = hasJiraEpicCardLink(left) ? 1 : 0;
+      const rightEpicRank = hasJiraEpicCardLink(right) ? 1 : 0;
+      if (leftEpicRank !== rightEpicRank) {
+        return rightEpicRank - leftEpicRank;
+      }
+    }
+
     const versionCompare = compareJiraVersionParts(
       getJiraCardLinkVersionParts(left?.cardLinks),
       getJiraCardLinkVersionParts(right?.cardLinks)
@@ -5592,7 +5607,8 @@ async function fetchJiraBoardCards({
   projectKey,
   statuses = [],
   issueType = "Task",
-  maxResults = JIRA_MAX_RESULTS
+  maxResults = JIRA_MAX_RESULTS,
+  sortOptions = {}
 }) {
   const normalizedProjectKey = normalizeJiraProjectKey(projectKey);
   if (!normalizedProjectKey) {
@@ -5634,7 +5650,7 @@ async function fetchJiraBoardCards({
   });
 
   return {
-    cards: sortJiraBoardCards(issuesWithBadges.map(buildJiraBoardCardFromIssue).filter(Boolean)),
+    cards: sortJiraBoardCards(issuesWithBadges.map(buildJiraBoardCardFromIssue).filter(Boolean), sortOptions),
     jql,
     source: String(jiraResult.source || "Jira API"),
     error: jiraResult.error || null
@@ -11927,22 +11943,62 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
   if (!jiraConfigOk) {
     boardReport.error = "Jira bağlantısı için JIRA_BASE_URL, JIRA_EMAIL ve JIRA_API_TOKEN tanımlı olmalıdır.";
   } else {
-    const backlogResult = await fetchJiraBoardCards({
-      baseUrl: jiraBaseUrl,
-      email: JIRA_EMAIL,
-      apiToken: JIRA_API_TOKEN,
-      projectKey: "OBUSDEV",
-      statuses: ["Backlog", "Analysis Done", "Analysis Revision"],
-      issueType: "Task",
-      maxResults: JIRA_MAX_RESULTS
+    const columnResults = await Promise.all([
+      fetchJiraBoardCards({
+        baseUrl: jiraBaseUrl,
+        email: JIRA_EMAIL,
+        apiToken: JIRA_API_TOKEN,
+        projectKey: "OBUSDEV",
+        statuses: ["Backlog", "Analysis Done", "Analysis Revision", "Development"],
+        issueType: "Task",
+        maxResults: JIRA_MAX_RESULTS,
+        sortOptions: {
+          epicFirst: true
+        }
+      }),
+      fetchJiraBoardCards({
+        baseUrl: jiraBaseUrl,
+        email: JIRA_EMAIL,
+        apiToken: JIRA_API_TOKEN,
+        projectKey: "OBUSDEV",
+        statuses: ["Hotfix"],
+        issueType: "Task",
+        maxResults: JIRA_MAX_RESULTS
+      }),
+      fetchJiraBoardCards({
+        baseUrl: jiraBaseUrl,
+        email: JIRA_EMAIL,
+        apiToken: JIRA_API_TOKEN,
+        projectKey: "OBUSDEV",
+        statuses: ["TEST EDİLECEK"],
+        issueType: "Task",
+        maxResults: JIRA_MAX_RESULTS
+      }),
+      fetchJiraBoardCards({
+        baseUrl: jiraBaseUrl,
+        email: JIRA_EMAIL,
+        apiToken: JIRA_API_TOKEN,
+        projectKey: "OBUSDEV",
+        statuses: ["Done"],
+        issueType: "Task",
+        maxResults: JIRA_MAX_RESULTS
+      })
+    ]);
+
+    const resultMessages = [];
+    boardColumns.forEach((column, index) => {
+      const result = columnResults[index] || { cards: [], error: null };
+      column.cards = Array.isArray(result.cards) ? result.cards : [];
+      column.emptyMessage = result.error
+        ? `${column.title} verisi Jira'dan alınamadı.`
+        : "Seçilen Jira kriterlerinde task bulunamadı.";
+      if (result.error) {
+        resultMessages.push(`${column.title}: ${result.error}`);
+      }
     });
 
-    boardColumns[0].cards = backlogResult.cards;
-    boardColumns[0].emptyMessage = backlogResult.error
-      ? "Backlog verisi Jira'dan alınamadı."
-      : "Seçilen Jira kriterlerinde task bulunamadı.";
     boardReport = {
-      error: backlogResult.error ? `Backlog kolonu alınamadı: ${backlogResult.error}` : null
+      error: resultMessages.length > 0 ? resultMessages.join(" | ") : null
     };
   }
 
