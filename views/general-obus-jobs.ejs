@@ -89,10 +89,10 @@
               <thead>
                 <tr>
                   <th class="obus-jobs-sticky-col">Cluster</th>
-                  <% if (jobColumnList.length > 0) { %>
-                    <% jobColumnList.forEach((column) => { %>
-                      <th title="<%= column.id %>"><%= column.label %></th>
-                    <% }) %>
+                    <% if (jobColumnList.length > 0) { %>
+                      <% jobColumnList.forEach((column) => { %>
+                        <th><%= column.label %></th>
+                      <% }) %>
                   <% } else if (jobIdList.length > 0) { %>
                     <% jobIdList.forEach((jobId) => { %>
                       <th><%= jobId %></th>
