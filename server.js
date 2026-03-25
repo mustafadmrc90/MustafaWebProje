@@ -183,7 +183,7 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
 const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
-const SLACK_CREW_CHANNEL = String(process.env.SLACK_CREW_CHANNEL || "crew").trim() || "crew";
+const SLACK_CREW_CHANNEL = String(process.env.SLACK_CREW_CHANNEL || "corp-crew").trim() || "corp-crew";
 const SLACK_CORP_REQUEST_TAG = String(process.env.SLACK_CORP_REQUEST_TAG || "@corpproduct")
   .trim()
   .toLowerCase();
@@ -7508,7 +7508,40 @@ function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResu
   if (summary.errorSamples.length > 0) {
     lines.push(`Hata Örneği: ${summary.errorSamples.join(" | ")}`);
   }
-  return lines.join("\n");
+
+  const tableText = buildObusJobsSlackTable({ report });
+  return {
+    summary: lines.join("\n"),
+    tableText
+  };
+}
+
+function buildObusJobsSlackTable({ report }) {
+  const columnSource = Array.isArray(report?.jobColumns) && report.jobColumns.length > 0
+    ? report.jobColumns
+    : (Array.isArray(report?.jobIds) ? report.jobIds.map((id) => ({ id, label: id })) : []);
+  const rows = (Array.isArray(report?.clusterRows) ? report.clusterRows : []).flatMap((row) => {
+    if (row.error) return [];
+    return columnSource.map((column) => {
+      const job = row.jobsById?.[column.id];
+      if (!job) return null;
+      return {
+        cluster: row.clusterLabel,
+        jobLabel: column.label,
+        state: job.lastJobState,
+        lastExecution: job.lastExecutionText
+      };
+    }).filter(Boolean);
+  });
+  if (!rows.length) return null;
+  const header = "*Cluster* | *Job* | *State* | *Last Execution*";
+  const tableRows = rows
+    .map((entry) => `${entry.cluster} | ${entry.jobLabel} | ${entry.state} | ${entry.lastExecution}`)
+    .slice(0, 20);
+  if (rows.length > tableRows.length) {
+    tableRows.push(`... ve ${rows.length - tableRows.length} daha`);
+  }
+  return [header, ...tableRows].join("\n");
 }
 
 async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, saveResult }) {
@@ -7518,18 +7551,30 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
   }
 
   const resolvedChannel = await resolveSlackConversationId(token, SLACK_CREW_CHANNEL, SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
-  const text = buildObusJobsSlackMessage({
+  const message = buildObusJobsSlackMessage({
     report,
     selectedCompanyMeta,
     user,
     saveResult
   });
-  const response = await slackApiPost("chat.postMessage", token, {
+  const payload = {
     channel: resolvedChannel.channelId,
-    text,
+    text: message.summary,
     unfurl_links: false,
     unfurl_media: false
-  });
+  };
+  if (message.tableText) {
+    payload.blocks = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${message.summary}\n\n\`\`\`${message.tableText}\`\`\``
+        }
+      }
+    ];
+  }
+  const response = await slackApiPost("chat.postMessage", token, payload);
 
   return {
     channelId: resolvedChannel.channelId,
