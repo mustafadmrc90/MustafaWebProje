@@ -78,17 +78,23 @@
           </div>
 
         <% if (report.requested && report.clusterRows && report.clusterRows.length > 0) { %>
+          <% const jobColumnList = Array.isArray(report.jobColumns) ? report.jobColumns : []; %>
+          <% const jobIdList = Array.isArray(report.jobIds) ? report.jobIds : []; %>
+          <% const columnSource =
+            jobColumnList.length > 0 ? jobColumnList : jobIdList.map((id) => ({ id, label: id }));
+          const columnCount = Math.max(columnSource.length, 1);
+          %>
           <div class="obus-jobs-table-wrap">
             <table class="obus-jobs-table">
               <thead>
                 <tr>
                   <th class="obus-jobs-sticky-col">Cluster</th>
-                  <% if (report.jobColumns.length > 0) { %>
-                    <% report.jobColumns.forEach((column) => { %>
+                  <% if (jobColumnList.length > 0) { %>
+                    <% jobColumnList.forEach((column) => { %>
                       <th title="<%= column.id %>"><%= column.label %></th>
                     <% }) %>
-                  <% } else if (report.jobIds.length > 0) { %>
-                    <% report.jobIds.forEach((jobId) => { %>
+                  <% } else if (jobIdList.length > 0) { %>
+                    <% jobIdList.forEach((jobId) => { %>
                       <th><%= jobId %></th>
                     <% }) %>
                   <% } else { %>
@@ -101,11 +107,9 @@
                   <tr>
                     <th class="obus-jobs-sticky-col" scope="row"><%= row.clusterLabel %></th>
                     <% if (row.error) { %>
-                      <% const columnCount = Math.max(report.jobColumns.length || report.jobIds.length, 1); %>
                       <td class="obus-jobs-error-cell" colspan="<%= columnCount %>"><%= row.error %></td>
                     <% } else { %>
-                      <% const columns = report.jobColumns.length > 0 ? report.jobColumns : report.jobIds.map((id) => ({ id, label: id })); %>
-                      <% columns.forEach((column) => {
+                      <% columnSource.forEach((column) => {
                         const jobId = column.id;
                         const cell = row.jobsById[jobId];
                       %>

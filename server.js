@@ -8797,6 +8797,7 @@ function buildObusJobsReportModel() {
     clusterResults: [],
     clusterRows: [],
     jobIds: [],
+    jobColumns: [],
     clusterCount: 0,
     totalJobCount: 0,
     successClusterCount: 0,
@@ -8909,6 +8910,25 @@ function buildObusJobsTableModel(clusterResults) {
     )
   ).sort((left, right) => left.localeCompare(right, "tr", { numeric: true, sensitivity: "base" }));
 
+  const jobDetails = (Array.isArray(clusterResults) ? clusterResults : [])
+    .flatMap((result) => (Array.isArray(result?.jobs) ? result.jobs : []))
+    .filter((job) => String(job?.id || "").trim())
+    .reduce((map, job) => {
+      const id = String(job.id).trim();
+      if (!id) return map;
+      if (!map.has(id)) {
+        map.set(id, {
+          id,
+          label: String(job.name || job.label || job.id || "-").trim() || id
+        });
+      }
+      return map;
+    }, new Map());
+
+  const jobColumns = Array.from(jobDetails.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "tr", { sensitivity: "base" })
+  );
+
   const clusterRows = (Array.isArray(clusterResults) ? clusterResults : []).map((result) => {
     const jobsById = {};
     (Array.isArray(result?.jobs) ? result.jobs : []).forEach((job) => {
@@ -8926,6 +8946,7 @@ function buildObusJobsTableModel(clusterResults) {
   return {
     clusterRows,
     jobIds,
+    jobColumns,
     clusterCount: clusterRows.length,
     totalJobCount: jobIds.length
   };
@@ -9893,6 +9914,7 @@ async function executeObusJobsScreenAction({ filters, partnerItems }) {
   report.clusterResults = normalizedResults;
   report.clusterRows = tableModel.clusterRows;
   report.jobIds = tableModel.jobIds;
+  report.jobColumns = tableModel.jobColumns || [];
   report.clusterCount = tableModel.clusterCount;
   report.totalJobCount = tableModel.totalJobCount;
   report.successClusterCount = summary.successClusterCount;
