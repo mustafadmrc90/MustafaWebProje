@@ -113,8 +113,10 @@
                     <% } else { %>
                       <% columnSource.forEach((column) => {
                         const job = row.jobsByLabel?.[column.key];
+                        const stateNormalized = job ? String(job.lastJobState || "").trim().toLowerCase() : "";
+                        const isErrorState = job && stateNormalized !== "succeeded";
                         %>
-                        <td class="obus-jobs-job-cell <%= job && job.isYesterday ? 'is-yesterday' : '' %>">
+                        <td class="obus-jobs-job-cell <%= isErrorState ? 'is-error' : '' %> <%= job && job.isYesterday ? 'is-yesterday' : '' %>">
                           <% if (job) { %>
                             <div class="obus-jobs-cell-state"><%= job.lastJobState %></div>
                             <div class="obus-jobs-cell-date"><%= job.lastExecutionText %></div>
