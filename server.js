@@ -5255,6 +5255,44 @@ function extractJiraErrorDetails(payload) {
   return messages.join(" | ");
 }
 
+function buildJiraIssueBrowseUrl(baseUrl, key) {
+  const normalizedBaseUrl = normalizeJiraBaseUrl(baseUrl);
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedBaseUrl || !normalizedKey) return "";
+  return `${normalizedBaseUrl}/browse/${encodeURIComponent(normalizedKey)}`;
+}
+
+function normalizeJiraLinkedIssue(issue, baseUrl) {
+  if (!issue || typeof issue !== "object") return null;
+  const key = String(issue.key || "").trim();
+  if (!key) return null;
+  const fields = issue.fields && typeof issue.fields === "object" ? issue.fields : {};
+  const issueType = fields.issuetype && typeof fields.issuetype === "object" ? fields.issuetype : null;
+
+  return {
+    key,
+    summary: String(fields.summary || "").trim() || "-",
+    issueType: String(issueType?.name || "").trim() || "-",
+    issueUrl: buildJiraIssueBrowseUrl(baseUrl, key)
+  };
+}
+
+function extractRelevantJiraIssueLinks(links, baseUrl) {
+  const items = [];
+  const seen = new Set();
+  (Array.isArray(links) ? links : []).forEach((link) => {
+    if (!link || typeof link !== "object") return;
+    const candidate = normalizeJiraLinkedIssue(link.outwardIssue || link.inwardIssue, baseUrl);
+    if (!candidate) return;
+    const normalizedType = String(candidate.issueType || "").trim().toLowerCase();
+    if (normalizedType !== "epic" && normalizedType !== "task") return;
+    if (seen.has(candidate.key)) return;
+    seen.add(candidate.key);
+    items.push(candidate);
+  });
+  return items;
+}
+
 function normalizeJiraIssue(issue, baseUrl) {
   if (!issue || typeof issue !== "object") return null;
   const key = String(issue.key || "").trim();
@@ -5265,6 +5303,23 @@ function normalizeJiraIssue(issue, baseUrl) {
   const status = fields.status && typeof fields.status === "object" ? fields.status : null;
   const priority = fields.priority && typeof fields.priority === "object" ? fields.priority : null;
   const assignee = fields.assignee && typeof fields.assignee === "object" ? fields.assignee : null;
+  const parent = fields.parent && typeof fields.parent === "object" ? fields.parent : null;
+  const parentIssue = normalizeJiraLinkedIssue(parent, baseUrl);
+  const relatedIssues = extractRelevantJiraIssueLinks(fields.issuelinks, baseUrl);
+  const cardLinks = [];
+  if (parentIssue) {
+    cardLinks.push({
+      label: /^epic$/i.test(parentIssue.issueType) ? "Epic" : parentIssue.issueType,
+      ...parentIssue
+    });
+  }
+  relatedIssues.forEach((item) => {
+    if (cardLinks.some((link) => link.key === item.key)) return;
+    cardLinks.push({
+      label: item.issueType,
+      ...item
+    });
+  });
 
   return {
     key,
@@ -5276,7 +5331,8 @@ function normalizeJiraIssue(issue, baseUrl) {
     createdAt: formatJiraDateTime(fields.created),
     updatedAt: formatJiraDateTime(fields.updated),
     resolvedAt: formatJiraDateTime(fields.resolutiondate),
-    issueUrl: baseUrl ? `${baseUrl}/browse/${encodeURIComponent(key)}` : ""
+    issueUrl: buildJiraIssueBrowseUrl(baseUrl, key),
+    cardLinks
   };
 }
 
@@ -5308,6 +5364,7 @@ function buildJiraBoardCardFromIssue(issue) {
     status: String(issue.status || "-").trim() || "-",
     updatedAt: String(issue.updatedAt || "-").trim() || "-",
     issueUrl: String(issue.issueUrl || "").trim(),
+    cardLinks: Array.isArray(issue.cardLinks) ? issue.cardLinks : [],
     blocked: /^block/i.test(String(issue.status || "").trim())
   };
 }
@@ -5401,7 +5458,18 @@ async function fetchJiraIssues({ baseUrl, email, apiToken, jql, maxResults = JIR
     const requestBody = {
       jql: normalizedJql,
       maxResults: normalizedMaxResults,
-      fields: ["summary", "status", "assignee", "priority", "issuetype", "created", "updated", "resolutiondate"]
+      fields: [
+        "summary",
+        "status",
+        "assignee",
+        "priority",
+        "issuetype",
+        "created",
+        "updated",
+        "resolutiondate",
+        "parent",
+        "issuelinks"
+      ]
     };
 
     const response = await fetch(url, {
@@ -11595,23 +11663,7 @@ app.get("/reports/jira-analysis", requireAuth, requireMenuAccess("jira-analysis"
 app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), async (req, res) => {
   const jiraBaseUrl = normalizeJiraBaseUrl(JIRA_BASE_URL);
   const jiraConfigOk = Boolean(jiraBaseUrl && JIRA_EMAIL && JIRA_API_TOKEN);
-  const boardMeta = {
-    areaLabel: "Alan / OBUS-DEV",
-    boardName: "Corp",
-    tabs: [
-      "Özet",
-      "Zaman çizelgesi",
-      "Kanban panosu",
-      "Takvim",
-      "Raporlar",
-      "Liste"
-    ],
-    filters: ["Epic", "Tür", "Etiket", "Hızlı filtreler"]
-  };
   let boardReport = {
-    source: "",
-    jql: "",
-    warning: "Hotfix, Test Edilecekler ve Test Edildi kolonları için veri eşlemesi bekleniyor.",
     error: null
   };
 
@@ -11668,45 +11720,14 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
       ? "Backlog verisi Jira'dan alınamadı."
       : "Seçilen Jira kriterlerinde task bulunamadı.";
     boardReport = {
-      source: backlogResult.source,
-      jql: backlogResult.jql,
-      warning: "Hotfix, Test Edilecekler ve Test Edildi kolonları için veri eşlemesi bekleniyor.",
       error: backlogResult.error ? `Backlog kolonu alınamadı: ${backlogResult.error}` : null
     };
   }
 
-  const summary = {
-    totalCards: boardColumns.reduce((total, column) => total + column.cards.length, 0),
-    blockedCards: boardColumns.reduce(
-      (total, column) => total + column.cards.filter((card) => card.blocked).length,
-      0
-    ),
-    activeCards: boardColumns
-      .filter((column) => column.key === "hotfix" || column.key === "test-pending")
-      .reduce((total, column) => total + column.cards.length, 0),
-    completedCards: boardColumns.find((column) => column.key === "done")?.cards.length || 0
-  };
-  const boardPeople = [];
-  const seenAssignees = new Set();
-  boardColumns.forEach((column) => {
-    column.cards.forEach((card) => {
-      const name = String(card?.assignee || "").trim();
-      if (!name || name === "Atanmamış" || seenAssignees.has(name)) return;
-      seenAssignees.add(name);
-      boardPeople.push({
-        name,
-        initials: String(card.assigneeInitials || "?").trim() || "?"
-      });
-    });
-  });
-
   res.render("reports-jira-board", {
     user: req.session.user,
     active: "jira-board",
-    boardMeta,
-    boardPeople,
     boardColumns,
-    summary,
     boardReport,
     jiraConfig: {
       baseUrl: jiraBaseUrl,
