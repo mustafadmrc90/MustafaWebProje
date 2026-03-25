@@ -38,13 +38,6 @@
 
         <form class="allowed-lines-form obus-jobs-form" method="post" action="/general/obus-jobs">
           <input type="hidden" name="endpointUrl" value="<%= filters.endpointUrl %>" />
-          <div class="allowed-lines-grid obus-jobs-grid">
-            <p>
-              Her cluster için listeden rastgele bir firma seçiyoruz ve bu firma ile
-              <strong>admin / O6us&D3V3l0p3r.WaS.H3r3!</strong> kimlik bilgileriyle login olmaya çalışıyoruz. Eğer
-              bir firmada login alınamazsa, o cluster için listedeki diğer firmalar denenir.
-            </p>
-          </div>
           <div class="allowed-lines-actions">
             <button type="submit" data-default-label="Clusterları Tara" data-loading-label="Taraniyor...">
               Clusterları Tara
@@ -68,18 +61,21 @@
         <% } %>
       </section>
 
-      <section class="table-card panel-card obus-jobs-table-card">
-        <div class="table-head">
-          <h2>Cluster Job Matrisi</h2>
-          <div class="table-actions">
-            <% if (report.requested) { %>
-              <span class="pill"><%= report.clusterCount || 0 %> Cluster</span>
-              <span class="pill"><%= report.totalJobCount || 0 %> Job ID</span>
-            <% } else { %>
-              <span class="pill muted">Henuz tarama yapilmadi</span>
-            <% } %>
+        <section class="table-card panel-card obus-jobs-table-card">
+          <div class="table-head">
+            <h2>Cluster Job Matrisi</h2>
+            <div class="table-actions">
+              <% if (report.requested) { %>
+                <span class="pill"><%= report.clusterCount || 0 %> Cluster</span>
+                <span class="pill"><%= report.totalJobCount || 0 %> Job ID</span>
+              <% } else { %>
+                <span class="pill muted">Henuz tarama yapilmadi</span>
+              <% } %>
+            </div>
+            <div class="table-annotation">
+              <small>İstek URL: <%= filters.endpointUrl %></small>
+            </div>
           </div>
-        </div>
 
         <% if (report.requested && report.clusterRows && report.clusterRows.length > 0) { %>
           <div class="obus-jobs-table-wrap">
@@ -87,7 +83,11 @@
               <thead>
                 <tr>
                   <th class="obus-jobs-sticky-col">Cluster</th>
-                  <% if (report.jobIds.length > 0) { %>
+                  <% if (report.jobColumns.length > 0) { %>
+                    <% report.jobColumns.forEach((column) => { %>
+                      <th title="<%= column.id %>"><%= column.label %></th>
+                    <% }) %>
+                  <% } else if (report.jobIds.length > 0) { %>
                     <% report.jobIds.forEach((jobId) => { %>
                       <th><%= jobId %></th>
                     <% }) %>
@@ -101,9 +101,14 @@
                   <tr>
                     <th class="obus-jobs-sticky-col" scope="row"><%= row.clusterLabel %></th>
                     <% if (row.error) { %>
-                      <td class="obus-jobs-error-cell" colspan="<%= Math.max(report.jobIds.length, 1) %>"><%= row.error %></td>
+                      <% const columnCount = Math.max(report.jobColumns.length || report.jobIds.length, 1); %>
+                      <td class="obus-jobs-error-cell" colspan="<%= columnCount %>"><%= row.error %></td>
                     <% } else { %>
-                      <% report.jobIds.forEach((jobId) => { const cell = row.jobsById[jobId]; %>
+                      <% const columns = report.jobColumns.length > 0 ? report.jobColumns : report.jobIds.map((id) => ({ id, label: id })); %>
+                      <% columns.forEach((column) => {
+                        const jobId = column.id;
+                        const cell = row.jobsById[jobId];
+                      %>
                         <td class="obus-jobs-job-cell <%= cell && cell.isYesterday ? 'is-yesterday' : '' %>">
                           <% if (cell) { %>
                             <div class="obus-jobs-cell-state"><%= cell.lastJobState %></div>
