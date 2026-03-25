@@ -8890,12 +8890,23 @@ function extractObusJobsItems(payload) {
       if (!id) return null;
       const lastExecution = String(item?.LastExecution ?? item?.lastExecution ?? item?.lastexecution ?? "").trim();
       const lastJobState = String(item?.LastJobState ?? item?.lastJobState ?? item?.lastjobstate ?? "").trim() || "-";
+      const nameValue = String(
+        item?.Name ??
+          item?.name ??
+          item?.Label ??
+          item?.label ??
+          item?.JobName ??
+          item?.jobName ??
+          id
+      ).trim();
       return {
         id,
         lastExecution,
         lastExecutionText: formatObusJobsLastExecution(lastExecution),
         lastJobState,
         isYesterday: isDateYesterdayFromToday(lastExecution)
+        ,
+        columnName: nameValue
       };
     })
     .filter(Boolean);
@@ -8916,10 +8927,11 @@ function buildObusJobsTableModel(clusterResults) {
     .reduce((map, job) => {
       const id = String(job.id).trim();
       if (!id) return map;
-      if (!map.has(id)) {
-        map.set(id, {
+      const label = String(job.columnName || job.Name || job.name || job.label || "-").trim() || id;
+      if (!map.has(label)) {
+        map.set(label, {
           id,
-          label: String(job.Name || job.name || job.label || job.id || "-").trim() || id
+          label
         });
       }
       return map;
