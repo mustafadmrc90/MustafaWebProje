@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bus Product</title>
     <link rel="icon" href="/public/favicon.png" />
-    <link rel="stylesheet" href="/public/styles.css?v=20260325-jira-board-5" />
+    <link rel="stylesheet" href="/public/styles.css?v=20260325-jira-board-6" />
   </head>
   <body class="dashboard layout jira-board-page">
     <%- include("partials/sidebar", { active }) %>
@@ -15,7 +15,7 @@
         <div class="jira-board-header-top">
           <div class="jira-board-context">
             <span class="jira-board-breadcrumb">Raporlar / Jira Board</span>
-            <h1>OBUSDEV Kanban</h1>
+            <h1>OBUSDEV Task Listesi</h1>
           </div>
           <div class="page-actions">
             <div class="user-pill"><%= user.displayName %></div>
@@ -33,73 +33,80 @@
         <div class="alert inline-alert"><%= boardReport.error %></div>
       <% } %>
 
-      <section class="jira-board-shell">
-        <div class="jira-board-scroll" style="overflow-x:auto;padding:12px;border:1px solid #dde5ef;border-radius:12px;background:#fff;">
-          <div class="jira-board-grid" style="display:flex;gap:12px;align-items:flex-start;min-width:max-content;">
-          <% boardColumns.forEach((column) => { %>
-            <section
-              class="jira-board-column"
-              data-tone="<%= column.tone %>"
-              style="flex:0 0 280px;width:280px;min-width:280px;display:grid;gap:10px;padding:10px;border-radius:10px;border:1px solid #e0e7ef;background:<%= column.tone === 'hotfix' ? '#f8f1f0' : column.tone === 'review' ? '#f8f5ec' : column.tone === 'done' ? '#eef6ee' : '#f3f5f8' %>;min-height:420px;"
-            >
-              <div class="jira-board-column-head">
-                <h3><%= column.title %></h3>
-                <span class="jira-board-count"><%= column.cards.length %></span>
+      <section class="jira-board-shell asana-list-shell">
+        <% boardColumns.forEach((column) => { %>
+          <section class="asana-group" data-tone="<%= column.tone %>">
+            <header class="asana-group-header">
+              <div class="asana-group-heading">
+                <span class="asana-group-mark"></span>
+                <h2><%= column.title %></h2>
+                <span class="asana-group-count"><%= column.cards.length %></span>
               </div>
+              <p><%= column.subtitle %></p>
+            </header>
 
-              <% if (column.cards.length === 0) { %>
-                <div class="jira-board-empty" style="min-height:180px;display:grid;place-items:center;text-align:center;padding:18px 14px;border-radius:10px;border:1px dashed #ccd7e4;background:rgba(255,255,255,.68);color:#697d93;font-size:11px;line-height:1.5;">
-                  <%= column.emptyMessage || "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim." %>
+            <% if (column.cards.length === 0) { %>
+              <div class="asana-empty-state">
+                <%= column.emptyMessage || "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim." %>
+              </div>
+            <% } else { %>
+              <div class="asana-list-table">
+                <div class="asana-list-row asana-list-head">
+                  <span>Durum</span>
+                  <span>Jira</span>
+                  <span>Task</span>
+                  <span>Epic / Task</span>
                 </div>
-              <% } else { %>
-                <div class="jira-board-card-list" style="display:grid;gap:8px;">
-                  <% column.cards.forEach((card) => { %>
-                    <article class="jira-board-card <%= card.blocked ? 'is-blocked' : '' %>" style="display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:10px;border:1px solid <%= card.blocked ? '#e7b4b4' : '#d7e0ea' %>;background:#fff;box-shadow:0 1px 2px rgba(21,32,45,.06);">
-                      <div class="jira-board-card-status" style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:#62768d;">
-                        <span
-                          class="jira-board-status-dot"
-                          style="width:7px;height:7px;border-radius:50%;background:<%= column.tone === 'hotfix' ? '#d94f2b' : column.tone === 'review' ? '#d0a200' : column.tone === 'done' ? '#1f8f4f' : '#0f6bdc' %>;"
-                        ></span>
+
+                <% column.cards.forEach((card) => { %>
+                  <article class="asana-list-row asana-list-item">
+                    <div class="asana-list-status">
+                      <span class="asana-status-pill" data-tone="<%= column.tone %>">
+                        <span class="asana-status-dot"></span>
                         <span><%= card.status %></span>
-                      </div>
-                      <div class="jira-board-card-top" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                        <% if (card.issueUrl) { %>
-                          <a class="jira-board-card-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.key %></a>
-                        <% } else { %>
-                          <span class="jira-board-card-link"><%= card.key %></span>
-                        <% } %>
-                      </div>
-                      <div class="jira-board-card-summary">
-                        <p><%= card.summary %></p>
-                      </div>
-                      <% if (card.cardLinks && card.cardLinks.length > 0) { %>
-                        <div class="jira-board-card-links jira-board-card-footer">
-                          <% card.cardLinks.slice(0, 2).forEach((link) => { %>
-                            <div
-                              class="jira-board-card-link-row"
-                              style="--jira-card-link-bg:<%= link.badgeBackgroundColor || '#F4F5F7' %>;--jira-card-link-border:<%= link.badgeBorderColor || '#DFE1E6' %>;--jira-card-link-text:<%= link.badgeTextColor || '#172B4D' %>;"
-                            >
-                              <span class="jira-board-link-label"><%= link.label %></span>
-                              <div class="jira-board-mini-link-group">
-                                <% if (link.issueUrl) { %>
-                                  <a class="jira-board-mini-link" href="<%= link.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= link.key %></a>
-                                <% } else { %>
-                                  <span class="jira-board-mini-link"><%= link.key %></span>
-                                <% } %>
-                                <span class="jira-board-mini-link-summary"><%= link.summary %></span>
-                              </div>
-                            </div>
-                          <% }) %>
-                        </div>
+                      </span>
+                    </div>
+
+                    <div class="asana-list-key">
+                      <% if (card.issueUrl) { %>
+                        <a class="asana-key-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.key %></a>
+                      <% } else { %>
+                        <span class="asana-key-link"><%= card.key %></span>
                       <% } %>
-                    </article>
-                  <% }) %>
-                </div>
-              <% } %>
-            </section>
-          <% }) %>
-          </div>
-        </div>
+                    </div>
+
+                    <div class="asana-list-summary">
+                      <p><%= card.summary %></p>
+                    </div>
+
+                    <div class="asana-list-links">
+                      <% if (card.cardLinks && card.cardLinks.length > 0) { %>
+                        <% card.cardLinks.slice(0, 2).forEach((link) => { %>
+                          <div
+                            class="asana-link-card"
+                            style="--jira-card-link-bg:<%= link.badgeBackgroundColor || '#F4F5F7' %>;--jira-card-link-border:<%= link.badgeBorderColor || '#DFE1E6' %>;--jira-card-link-text:<%= link.badgeTextColor || '#172B4D' %>;"
+                          >
+                            <span class="asana-link-label"><%= link.label %></span>
+                            <div class="asana-link-body">
+                              <% if (link.issueUrl) { %>
+                                <a class="asana-link-key" href="<%= link.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= link.key %></a>
+                              <% } else { %>
+                                <span class="asana-link-key"><%= link.key %></span>
+                              <% } %>
+                              <span class="asana-link-summary"><%= link.summary %></span>
+                            </div>
+                          </div>
+                        <% }) %>
+                      <% } else { %>
+                        <span class="asana-link-empty">Bagli epic/task yok</span>
+                      <% } %>
+                    </div>
+                  </article>
+                <% }) %>
+              </div>
+            <% } %>
+          </section>
+        <% }) %>
       </section>
     </section>
     <script src="/public/app.js" defer></script>
