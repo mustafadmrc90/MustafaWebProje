@@ -12041,7 +12041,19 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
         email: JIRA_EMAIL,
         apiToken: JIRA_API_TOKEN,
         projectKey: "OBUSDEV",
-        statuses: ["Backlog", "Analysis Done", "Analysis Revision", "Development"],
+        statuses: [
+          "Backlog",
+          "Analysis Done",
+          "Analysis Revision",
+          "Developmnet",
+          "Development",
+          "Planlama",
+          "Selected for Development",
+          "selected for development",
+          "Development Done",
+          "development done",
+          "Devam Ediyor"
+        ],
         issueType: "Task",
         maxResults: JIRA_MAX_RESULTS,
         sortOptions: {
@@ -12053,7 +12065,7 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
         email: JIRA_EMAIL,
         apiToken: JIRA_API_TOKEN,
         projectKey: "OBUSDEV",
-        statuses: ["Hotfix"],
+        statuses: ["HOTFİX", "HOTFIX", "Hotfix"],
         issueType: "Task",
         maxResults: JIRA_MAX_RESULTS,
         sortOptions: {
@@ -12077,7 +12089,7 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
         email: JIRA_EMAIL,
         apiToken: JIRA_API_TOKEN,
         projectKey: "OBUSDEV",
-        statuses: ["TEST OK", "Test OK", "Indeployment", "In Deployment"],
+        statuses: ["Test Ok", "TEST OK", "In Deployment"],
         issueType: "Task",
         maxResults: JIRA_MAX_RESULTS,
         sortOptions: {
