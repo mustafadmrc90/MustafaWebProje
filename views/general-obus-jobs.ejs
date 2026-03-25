@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout obus-jobs-page">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+                <path d="M8 3v4"></path>
+                <path d="M16 3v4"></path>
+                <path d="M4 10h16"></path>
+              </svg>
+            </span>
+            <span>Obus Joblar</span>
+          </h1>
+          <p>Tum clusterlar taranir, job ID'leri kolon olarak olusturulur.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <section class="table-card panel-card allowed-lines-section">
+        <div class="table-head">
+          <h2>Istek Parametreleri</h2>
+        </div>
+
+        <form class="allowed-lines-form obus-jobs-form" method="post" action="/general/obus-jobs">
+          <input type="hidden" name="endpointUrl" value="<%= filters.endpointUrl %>" />
+          <div class="allowed-lines-grid obus-jobs-grid">
+            <label class="allowed-lines-field allowed-lines-field-company">
+              <span>Firma</span>
+              <select name="company" required>
+                <% companies.forEach((company) => { %>
+                  <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %> <%= company.disabled ? "disabled" : "" %>>
+                    <%= company.label %>
+                  </option>
+                <% }) %>
+              </select>
+            </label>
+            <label class="allowed-lines-field allowed-lines-field-username">
+              <span>Kullanici Adi</span>
+              <input type="text" name="username" value="<%= filters.username || '' %>" required />
+            </label>
+            <label class="allowed-lines-field allowed-lines-field-password">
+              <span>Sifre</span>
+              <input type="password" name="password" value="<%= filters.password || '' %>" required />
+            </label>
+          </div>
+          <div class="allowed-lines-actions">
+            <button type="submit" data-default-label="Joblari Getir" data-loading-label="Taraniyor...">
+              Joblari Getir
+            </button>
+          </div>
+          <div class="allowed-lines-loading-message" hidden>Clusterlar taraniyor, lutfen bekleyin...</div>
+        </form>
+
+        <% if (report.requested && report.error) { %>
+          <div class="alert inline-alert"><%= report.error %></div>
+        <% } %>
+        <% if (Array.isArray(report.warningMessages) && report.warningMessages.length > 0) { %>
+          <% report.warningMessages.forEach((message) => { %>
+            <div class="alert inline-alert"><%= message %></div>
+          <% }) %>
+        <% } %>
+        <% if (Array.isArray(report.successMessages) && report.successMessages.length > 0) { %>
+          <% report.successMessages.forEach((message) => { %>
+            <div class="inline-success"><%= message %></div>
+          <% }) %>
+        <% } %>
+      </section>
+
+      <section class="table-card panel-card obus-jobs-table-card">
+        <div class="table-head">
+          <h2>Cluster Job Matrisi</h2>
+          <div class="table-actions">
+            <% if (report.requested) { %>
+              <span class="pill"><%= report.clusterCount || 0 %> Cluster</span>
+              <span class="pill"><%= report.totalJobCount || 0 %> Job ID</span>
+            <% } else { %>
+              <span class="pill muted">Henuz tarama yapilmadi</span>
+            <% } %>
+          </div>
+        </div>
+
+        <% if (report.requested && report.clusterRows && report.clusterRows.length > 0) { %>
+          <div class="obus-jobs-table-wrap">
+            <table class="obus-jobs-table">
+              <thead>
+                <tr>
+                  <th class="obus-jobs-sticky-col">Cluster</th>
+                  <% if (report.jobIds.length > 0) { %>
+                    <% report.jobIds.forEach((jobId) => { %>
+                      <th><%= jobId %></th>
+                    <% }) %>
+                  <% } else { %>
+                    <th>Sonuc</th>
+                  <% } %>
+                </tr>
+              </thead>
+              <tbody>
+                <% report.clusterRows.forEach((row) => { %>
+                  <tr>
+                    <th class="obus-jobs-sticky-col" scope="row"><%= row.clusterLabel %></th>
+                    <% if (row.error) { %>
+                      <td class="obus-jobs-error-cell" colspan="<%= Math.max(report.jobIds.length, 1) %>"><%= row.error %></td>
+                    <% } else { %>
+                      <% report.jobIds.forEach((jobId) => { const cell = row.jobsById[jobId]; %>
+                        <td class="obus-jobs-job-cell <%= cell && cell.isYesterday ? 'is-yesterday' : '' %>">
+                          <% if (cell) { %>
+                            <div class="obus-jobs-cell-state"><%= cell.lastJobState %></div>
+                            <div class="obus-jobs-cell-date"><%= cell.lastExecutionText %></div>
+                          <% } else { %>
+                            <span class="muted">-</span>
+                          <% } %>
+                        </td>
+                      <% }) %>
+                    <% } %>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } else if (report.requested) { %>
+          <div class="pill muted">Sonuc bulunamadi.</div>
+        <% } else { %>
+          <div class="pill muted">Tarama sonrasi tablo burada olusur.</div>
+        <% } %>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

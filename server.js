@@ -91,6 +91,15 @@ const SALES_REPORT_SESSION_CONCURRENCY =
 const AUTHORIZED_LINES_API_URL =
   process.env.AUTHORIZED_LINES_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/uetds/UpdateValidRouteCodes";
+const OBUS_JOBS_API_URL =
+  process.env.OBUS_JOBS_API_URL ||
+  "https://api-coreprod-cluster0.obus.com.tr/api/scheduledtask/getscheduledtasks";
+const OBUS_JOBS_REQUEST_DATE =
+  String(process.env.OBUS_JOBS_REQUEST_DATE || "2016-03-11T11:33:00").trim() || "2016-03-11T11:33:00";
+const OBUS_JOBS_REQUEST_LANGUAGE =
+  String(process.env.OBUS_JOBS_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
+const OBUS_JOBS_TIMEOUT_MS = Number.parseInt(process.env.OBUS_JOBS_TIMEOUT_MS || "90000", 10) || 90000;
+const OBUS_JOBS_CLUSTER_CONCURRENCY = Number.parseInt(process.env.OBUS_JOBS_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const UETDS_PRICES_TASK_DATA =
   String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e").trim() ||
   "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e";
@@ -174,6 +183,7 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
 const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
+const SLACK_CREW_CHANNEL = String(process.env.SLACK_CREW_CHANNEL || "crew").trim() || "crew";
 const SLACK_CORP_REQUEST_TAG = String(process.env.SLACK_CORP_REQUEST_TAG || "@corpproduct")
   .trim()
   .toLowerCase();
@@ -231,6 +241,16 @@ const SIDEBAR_MENU_REGISTRY = [
     routeKey: "authorized-lines-upload",
     sortOrder: 15,
     iconKey: "authorized-lines-upload"
+  },
+  {
+    key: "obus-jobs",
+    type: "item",
+    label: "Obus Joblar",
+    parentKey: "general",
+    route: "/general/obus-jobs",
+    routeKey: "obus-jobs",
+    sortOrder: 16,
+    iconKey: "obus-jobs"
   },
   {
     key: "obus-user-create",
@@ -775,6 +795,77 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_slack_reply_analysis_runs_lookup
     ON slack_reply_analysis_runs (start_date, end_date, created_by, id)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS obus_jobs_runs (
+      id SERIAL PRIMARY KEY,
+      request_key TEXT NOT NULL,
+      company_code TEXT,
+      company_id TEXT,
+      company_cluster TEXT,
+      endpoint_url TEXT,
+      requested_cluster_count INTEGER NOT NULL DEFAULT 0,
+      success_cluster_count INTEGER NOT NULL DEFAULT 0,
+      error_cluster_count INTEGER NOT NULL DEFAULT 0,
+      job_column_count INTEGER NOT NULL DEFAULT 0,
+      job_item_count INTEGER NOT NULL DEFAULT 0,
+      source TEXT,
+      created_by INTEGER REFERENCES users(id),
+      summary_error TEXT,
+      payload_json TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE obus_jobs_runs
+      ADD COLUMN IF NOT EXISTS request_key TEXT,
+      ADD COLUMN IF NOT EXISTS company_code TEXT,
+      ADD COLUMN IF NOT EXISTS company_id TEXT,
+      ADD COLUMN IF NOT EXISTS company_cluster TEXT,
+      ADD COLUMN IF NOT EXISTS endpoint_url TEXT,
+      ADD COLUMN IF NOT EXISTS requested_cluster_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS success_cluster_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS error_cluster_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS job_column_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS job_item_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS source TEXT,
+      ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS summary_error TEXT,
+      ADD COLUMN IF NOT EXISTS payload_json TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS obus_jobs_items (
+      id SERIAL PRIMARY KEY,
+      run_id INTEGER NOT NULL REFERENCES obus_jobs_runs(id) ON DELETE CASCADE,
+      cluster_label TEXT NOT NULL,
+      job_id TEXT,
+      last_execution TEXT,
+      last_job_state TEXT,
+      is_yesterday BOOLEAN NOT NULL DEFAULT false,
+      cluster_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE obus_jobs_items
+      ADD COLUMN IF NOT EXISTS run_id INTEGER REFERENCES obus_jobs_runs(id) ON DELETE CASCADE,
+      ADD COLUMN IF NOT EXISTS cluster_label TEXT,
+      ADD COLUMN IF NOT EXISTS job_id TEXT,
+      ADD COLUMN IF NOT EXISTS last_execution TEXT,
+      ADD COLUMN IF NOT EXISTS last_job_state TEXT,
+      ADD COLUMN IF NOT EXISTS is_yesterday BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS cluster_error TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_obus_jobs_items_run_id
+    ON obus_jobs_items (run_id)
   `);
 
   await pool.query(`
@@ -2758,6 +2849,19 @@ function buildUetdsPricesUpdateUrl(baseUrl) {
   try {
     const parsed = new URL(String(baseUrl || ""));
     parsed.pathname = "/api/scheduledtask/TriggerScheduledTask";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildObusJobsUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/scheduledtask/getscheduledtasks";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -5948,6 +6052,66 @@ async function slackApiGet(method, token, params = {}, retryCount = 0) {
   }
 }
 
+async function slackApiPost(method, token, payload = {}, retryCount = 0) {
+  const url = `${SLACK_API_BASE_URL}/${method}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, SLACK_API_TIMEOUT_MS));
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload && typeof payload === "object" ? payload : {})
+    });
+
+    if (response.status === 429) {
+      if (retryCount >= SLACK_MAX_RATE_LIMIT_RETRY) {
+        throw new Error(`${method} HTTP 429 (max retry aşıldı)`);
+      }
+      const retryAfterRaw = response.headers.get("retry-after");
+      const retryAfterSeconds = Number.parseInt(retryAfterRaw || "1", 10);
+      const waitMs = (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1) * 1000 + 250;
+      await sleep(waitMs);
+      return slackApiPost(method, token, payload, retryCount + 1);
+    }
+
+    const raw = await response.text();
+    const data = parseJsonSafe(raw);
+
+    if (!response.ok) {
+      const apiMessage =
+        (data && typeof data === "object" && String(data.error || data.message || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      throw new Error(`${method} HTTP ${response.status}: ${apiMessage}`);
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new Error(`${method} API yanıtı JSON parse edilemedi.`);
+    }
+
+    if (!data.ok) {
+      const needed = data.needed ? ` needed=${data.needed}` : "";
+      const provided = data.provided ? ` provided=${data.provided}` : "";
+      throw new Error(`${method} API error: ${data.error || "unknown_error"}${needed}${provided}`);
+    }
+
+    return data;
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`${method} timeout (${Math.round(Math.max(1000, SLACK_API_TIMEOUT_MS) / 1000)}s)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function toBoundedInt(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -6236,6 +6400,34 @@ async function listSlackChannelsForAnalysis(token, channelTypes) {
   } while (cursor);
 
   return channels;
+}
+
+async function resolveSlackConversationId(token, channelRef, channelTypes = SLACK_ANALYSIS_CHANNEL_TYPES_RAW) {
+  const normalizedRef = normalizeSlackChannelLabel(channelRef).replace(/^#/, "");
+  if (!normalizedRef) {
+    throw new Error("Slack kanal adı gerekli.");
+  }
+
+  if (isLikelySlackChannelId(normalizedRef)) {
+    return {
+      channelId: normalizedRef,
+      channelLabel: normalizedRef
+    };
+  }
+
+  const channels = await listSlackChannelsForAnalysis(token, channelTypes);
+  const normalizedLookup = normalizedRef.toLowerCase();
+  const matchedChannel = channels.find(
+    (channel) => normalizeSlackChannelLabel(channel?.name).toLowerCase() === normalizedLookup
+  );
+  if (!matchedChannel?.id) {
+    throw new Error(`Slack kanalı bulunamadı: ${normalizedRef}`);
+  }
+
+  return {
+    channelId: String(matchedChannel.id || "").trim(),
+    channelLabel: normalizeSlackChannelLabel(matchedChannel.name) || normalizedRef
+  };
 }
 
 async function listSlackChannelMessagesForAnalysis(token, channelId, oldest, latest, maxPages) {
@@ -7108,6 +7300,238 @@ async function saveSlackReplyReportToDb({
   } finally {
     client.release();
   }
+}
+
+function buildObusJobsPersistencePayload({ report, selectedCompanyMeta, endpointUrl }) {
+  const clusterResults = Array.isArray(report?.clusterResults) ? report.clusterResults : [];
+  const summary = summarizeObusJobsReport(report);
+
+  return {
+    companyCode: String(selectedCompanyMeta?.code || "").trim(),
+    companyId: String(selectedCompanyMeta?.id || "").trim(),
+    companyCluster: String(selectedCompanyMeta?.cluster || "").trim(),
+    endpointUrl: String(endpointUrl || "").trim(),
+    summary: {
+      requestedClusterCount: summary.requestedClusterCount,
+      successClusterCount: summary.successClusterCount,
+      errorClusterCount: summary.errorClusterCount,
+      jobColumnCount: summary.jobColumnCount,
+      jobItemCount: summary.jobItemCount,
+      error: String(report?.error || "").trim()
+    },
+    clusters: clusterResults.map((clusterResult) => ({
+      clusterLabel: String(clusterResult?.clusterLabel || "").trim(),
+      error: String(clusterResult?.error || "").trim(),
+      jobs: (Array.isArray(clusterResult?.jobs) ? clusterResult.jobs : []).map((job) => ({
+        id: String(job?.id || "").trim(),
+        lastExecution: String(job?.lastExecution || "").trim(),
+        lastJobState: String(job?.lastJobState || "").trim(),
+        isYesterday: Boolean(job?.isYesterday)
+      }))
+    }))
+  };
+}
+
+async function saveObusJobsReportToDb({
+  report,
+  selectedCompanyMeta,
+  endpointUrl,
+  userId,
+  source = "obus-jobs-ui"
+}) {
+  const summary = summarizeObusJobsReport(report);
+  const payload = buildObusJobsPersistencePayload({
+    report,
+    selectedCompanyMeta,
+    endpointUrl
+  });
+  const requestKey = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const ownerId = userId || null;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `
+        INSERT INTO obus_jobs_runs (
+          request_key,
+          company_code,
+          company_id,
+          company_cluster,
+          endpoint_url,
+          requested_cluster_count,
+          success_cluster_count,
+          error_cluster_count,
+          job_column_count,
+          job_item_count,
+          source,
+          created_by,
+          summary_error,
+          payload_json
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `,
+      [
+        requestKey,
+        payload.companyCode,
+        payload.companyId,
+        payload.companyCluster,
+        payload.endpointUrl,
+        summary.requestedClusterCount,
+        summary.successClusterCount,
+        summary.errorClusterCount,
+        summary.jobColumnCount,
+        summary.jobItemCount,
+        source,
+        ownerId,
+        String(report?.error || "").trim(),
+        JSON.stringify(payload)
+      ]
+    );
+
+    const insertedRunResult = await client.query(
+      `
+        SELECT id
+        FROM obus_jobs_runs
+        WHERE request_key = $1
+        ORDER BY id DESC
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
+      [requestKey]
+    );
+    const runId = Number(insertedRunResult.rows[0]?.id || 0);
+    if (!runId) {
+      throw new Error("Obus Joblar SQL kayıt numarası alınamadı.");
+    }
+
+    let insertedItemCount = 0;
+    for (const clusterResult of payload.clusters) {
+      const clusterLabel = String(clusterResult?.clusterLabel || "").trim() || "cluster";
+      const clusterError = String(clusterResult?.error || "").trim();
+      const jobs = Array.isArray(clusterResult?.jobs) ? clusterResult.jobs : [];
+
+      if (clusterError) {
+        await client.query(
+          `
+            INSERT INTO obus_jobs_items (
+              run_id,
+              cluster_label,
+              job_id,
+              last_execution,
+              last_job_state,
+              is_yesterday,
+              cluster_error
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [runId, clusterLabel, null, null, null, false, clusterError]
+        );
+        insertedItemCount += 1;
+        continue;
+      }
+
+      for (const job of jobs) {
+        await client.query(
+          `
+            INSERT INTO obus_jobs_items (
+              run_id,
+              cluster_label,
+              job_id,
+              last_execution,
+              last_job_state,
+              is_yesterday,
+              cluster_error
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [
+            runId,
+            clusterLabel,
+            String(job?.id || "").trim() || null,
+            String(job?.lastExecution || "").trim() || null,
+            String(job?.lastJobState || "").trim() || null,
+            Boolean(job?.isYesterday),
+            null
+          ]
+        );
+        insertedItemCount += 1;
+      }
+    }
+
+    await client.query("COMMIT");
+    return {
+      runId,
+      requestedClusterCount: summary.requestedClusterCount,
+      successClusterCount: summary.successClusterCount,
+      errorClusterCount: summary.errorClusterCount,
+      jobColumnCount: summary.jobColumnCount,
+      jobItemCount: summary.jobItemCount,
+      itemRowCount: insertedItemCount
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResult }) {
+  const summary = summarizeObusJobsReport(report);
+  const generatedAt = new Intl.DateTimeFormat("tr-TR", {
+    dateStyle: "short",
+    timeStyle: "medium"
+  }).format(new Date());
+  const companyCode = String(selectedCompanyMeta?.code || "").trim() || "-";
+  const companyId = String(selectedCompanyMeta?.id || "").trim();
+  const companyCluster = String(selectedCompanyMeta?.cluster || "").trim();
+  const actorName = String(user?.displayName || user?.username || "").trim();
+  const companyLine = [companyCode, companyId ? `ID: ${companyId}` : "", companyCluster ? companyCluster : ""]
+    .filter(Boolean)
+    .join(" | ");
+  const lines = [
+    "*Obus Joblar* sorgusu tamamlandı.",
+    `Firma: ${companyLine || "-"}`,
+    `Zaman: ${generatedAt}`,
+    `SQL: ${saveResult?.runId ? `kaydedildi (#${saveResult.runId})` : "kaydedilemedi"}`,
+    `Cluster: ${summary.requestedClusterCount} | Başarılı: ${summary.successClusterCount} | Hatalı: ${summary.errorClusterCount}`,
+    `Job Kolonu: ${summary.jobColumnCount} | Job Kaydı: ${summary.jobItemCount}`
+  ];
+  if (actorName) {
+    lines.push(`Çalıştıran: ${actorName}`);
+  }
+  if (summary.errorSamples.length > 0) {
+    lines.push(`Hata Örneği: ${summary.errorSamples.join(" | ")}`);
+  }
+  return lines.join("\n");
+}
+
+async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, saveResult }) {
+  const token = String(process.env.SLACK_BOT_TOKEN || "").trim();
+  if (!token) {
+    throw new Error("SLACK_BOT_TOKEN gerekli.");
+  }
+
+  const resolvedChannel = await resolveSlackConversationId(token, SLACK_CREW_CHANNEL, SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
+  const text = buildObusJobsSlackMessage({
+    report,
+    selectedCompanyMeta,
+    user,
+    saveResult
+  });
+  const response = await slackApiPost("chat.postMessage", token, {
+    channel: resolvedChannel.channelId,
+    text,
+    unfurl_links: false,
+    unfurl_media: false
+  });
+
+  return {
+    channelId: resolvedChannel.channelId,
+    channelLabel: resolvedChannel.channelLabel,
+    ts: String(response?.ts || "").trim()
+  };
 }
 
 function parseSlackAutoSaveTime(value) {
@@ -8362,6 +8786,147 @@ function buildAuthorizedLinesReportModel() {
   };
 }
 
+function buildObusJobsReportModel() {
+  return {
+    requested: false,
+    error: null,
+    clusterResults: [],
+    clusterRows: [],
+    jobIds: [],
+    clusterCount: 0,
+    totalJobCount: 0,
+    successClusterCount: 0,
+    errorClusterCount: 0,
+    successMessages: [],
+    warningMessages: [],
+    saveResult: null,
+    slackResult: null
+  };
+}
+
+function summarizeObusJobsReport(report) {
+  const clusterResults = Array.isArray(report?.clusterResults) ? report.clusterResults : [];
+  const requestedClusterCount = clusterResults.length;
+  const errorClusterCount = clusterResults.filter((item) => String(item?.error || "").trim()).length;
+  const successClusterCount = Math.max(0, requestedClusterCount - errorClusterCount);
+  const jobItemCount = clusterResults.reduce((sum, item) => {
+    const jobs = Array.isArray(item?.jobs) ? item.jobs : [];
+    return sum + jobs.length;
+  }, 0);
+  const errorSamples = clusterResults
+    .filter((item) => String(item?.error || "").trim())
+    .slice(0, 3)
+    .map((item) => `${item.clusterLabel}: ${String(item.error || "").trim()}`);
+
+  return {
+    requestedClusterCount,
+    successClusterCount,
+    errorClusterCount,
+    jobColumnCount: Number(report?.totalJobCount || 0) || 0,
+    jobItemCount,
+    errorSamples
+  };
+}
+
+function buildObusJobsRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
+  return {
+    data: null,
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    token: String(token || "").trim(),
+    date: OBUS_JOBS_REQUEST_DATE,
+    language: OBUS_JOBS_REQUEST_LANGUAGE
+  };
+}
+
+function formatObusJobsLastExecution(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  try {
+    return new Intl.DateTimeFormat("tr-TR", {
+      dateStyle: "short",
+      timeStyle: "medium"
+    }).format(parsed);
+  } catch (err) {
+    return raw;
+  }
+}
+
+function isDateYesterdayFromToday(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  const target = new Date(parsed);
+  target.setHours(0, 0, 0, 0);
+  return target.getTime() === yesterday.getTime();
+}
+
+function extractObusJobsItems(payload) {
+  const rows = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.Data)
+      ? payload.Data
+      : [];
+
+  return rows
+    .map((item) => {
+      const id = String(item?.ID ?? item?.Id ?? item?.id ?? "").trim();
+      if (!id) return null;
+      const lastExecution = String(item?.LastExecution ?? item?.lastExecution ?? item?.lastexecution ?? "").trim();
+      const lastJobState = String(item?.LastJobState ?? item?.lastJobState ?? item?.lastjobstate ?? "").trim() || "-";
+      return {
+        id,
+        lastExecution,
+        lastExecutionText: formatObusJobsLastExecution(lastExecution),
+        lastJobState,
+        isYesterday: isDateYesterdayFromToday(lastExecution)
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildObusJobsTableModel(clusterResults) {
+  const jobIds = Array.from(
+    new Set(
+      (Array.isArray(clusterResults) ? clusterResults : []).flatMap((result) =>
+        Array.isArray(result?.jobs) ? result.jobs.map((job) => String(job?.id || "").trim()).filter(Boolean) : []
+      )
+    )
+  ).sort((left, right) => left.localeCompare(right, "tr", { numeric: true, sensitivity: "base" }));
+
+  const clusterRows = (Array.isArray(clusterResults) ? clusterResults : []).map((result) => {
+    const jobsById = {};
+    (Array.isArray(result?.jobs) ? result.jobs : []).forEach((job) => {
+      const id = String(job?.id || "").trim();
+      if (!id) return;
+      jobsById[id] = job;
+    });
+    return {
+      clusterLabel: String(result?.clusterLabel || "").trim() || "cluster",
+      error: String(result?.error || "").trim(),
+      jobsById
+    };
+  });
+
+  return {
+    clusterRows,
+    jobIds,
+    clusterCount: clusterRows.length,
+    totalJobCount: jobIds.length
+  };
+}
+
 function buildUetdsPricesRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
   return {
     data: UETDS_PRICES_TASK_DATA,
@@ -9121,6 +9686,193 @@ async function executeAuthorizedLinesScreenAction({
         });
 
   applyAuthorizedLinesServiceReport(report, serviceReport);
+  return report;
+}
+
+async function fetchObusJobsClusterReport({
+  clusterLabel,
+  endpointBaseUrl,
+  companyBaseUrl,
+  partnerCode,
+  partnerId,
+  username,
+  password,
+  fallbackBranchId
+}) {
+  const normalizedClusterLabel = extractClusterLabel(clusterLabel);
+  const endpointUrl = buildObusJobsUrl(endpointBaseUrl, normalizedClusterLabel);
+  const companyUrl = buildUrlForCluster(companyBaseUrl || endpointBaseUrl, normalizedClusterLabel);
+  if (!endpointUrl) {
+    return {
+      clusterLabel: normalizedClusterLabel,
+      jobs: [],
+      error: "Servis URL oluşturulamadı."
+    };
+  }
+
+  const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
+    endpointUrl,
+    companyUrl,
+    partnerCode,
+    partnerId,
+    username,
+    password,
+    fallbackBranchId
+  });
+  if (!loginResult?.ok) {
+    return {
+      clusterLabel: normalizedClusterLabel,
+      jobs: [],
+      error: String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız."
+    };
+  }
+
+  const requestBody = buildObusJobsRequestBody({
+    sessionId: loginResult.sessionId,
+    deviceId: loginResult.deviceId,
+    token: loginResult.token
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBUS_JOBS_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        clusterLabel: normalizedClusterLabel,
+        jobs: [],
+        error: `HTTP ${response.status}: ${reason}`
+      };
+    }
+
+    const hasExplicitStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+      const reason =
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+      return {
+        clusterLabel: normalizedClusterLabel,
+        jobs: [],
+        error: reason
+      };
+    }
+
+    return {
+      clusterLabel: normalizedClusterLabel,
+      jobs: extractObusJobsItems(parsed),
+      error: null
+    };
+  } catch (err) {
+    return {
+      clusterLabel: normalizedClusterLabel,
+      jobs: [],
+      error: err?.message || "İstek gönderilemedi."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function executeObusJobsScreenAction({ filters, selectedCompanyMeta, companies }) {
+  const report = buildObusJobsReportModel();
+  report.requested = true;
+
+  if (!selectedCompanyMeta) {
+    report.error = "Firma seçimi zorunludur.";
+    return report;
+  }
+
+  if (!filters.username || !filters.password) {
+    report.error = "Kullanıcı adı ve şifre zorunludur.";
+    return report;
+  }
+
+  const partnerCode = String(selectedCompanyMeta?.code || "").trim();
+  const partnerId = resolveSelectedPartnerId({
+    selectedCompanyMeta,
+    selectedCompanyValue: filters.company,
+    companies
+  });
+  const fallbackBranchId = String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim();
+  const endpointBaseUrl = String(filters.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL;
+  const companyBaseUrl = String(selectedCompanyMeta?.url || endpointBaseUrl).trim() || endpointBaseUrl;
+  const clusterLabels = Array.from(
+    { length: PARTNER_CLUSTER_MAX - PARTNER_CLUSTER_MIN + 1 },
+    (_, index) => `cluster${PARTNER_CLUSTER_MIN + index}`
+  );
+
+  const clusterResults = await runWithConcurrency(
+    clusterLabels,
+    OBUS_JOBS_CLUSTER_CONCURRENCY,
+    async (clusterLabel) =>
+      fetchObusJobsClusterReport({
+        clusterLabel,
+        endpointBaseUrl,
+        companyBaseUrl,
+        partnerCode,
+        partnerId,
+        username: filters.username,
+        password: filters.password,
+        fallbackBranchId
+      })
+  );
+
+  const normalizedResults = clusterResults.map((item, index) => {
+    if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "clusterLabel")) {
+      return item;
+    }
+    return {
+      clusterLabel: clusterLabels[index],
+      jobs: [],
+      error:
+        String(item?.error || "").trim() ||
+        (typeof item === "string" ? item : "") ||
+        "Cluster sonucu alınamadı."
+    };
+  });
+
+  const tableModel = buildObusJobsTableModel(normalizedResults);
+  const summary = summarizeObusJobsReport({
+    clusterResults: normalizedResults,
+    totalJobCount: tableModel.totalJobCount
+  });
+  report.clusterResults = normalizedResults;
+  report.clusterRows = tableModel.clusterRows;
+  report.jobIds = tableModel.jobIds;
+  report.clusterCount = tableModel.clusterCount;
+  report.totalJobCount = tableModel.totalJobCount;
+  report.successClusterCount = summary.successClusterCount;
+  report.errorClusterCount = summary.errorClusterCount;
+
+  const clusterErrors = normalizedResults
+    .map((item) => `${item.clusterLabel}: ${String(item.error || "").trim()}`)
+    .filter((text) => !/:\s*$/.test(text));
+  if (clusterErrors.length > 0) {
+    report.error = `${clusterErrors.length}/${clusterLabels.length} cluster alınamadı: ${clusterErrors
+      .slice(0, 2)
+      .join(" | ")}${clusterErrors.length > 2 ? ` (+${clusterErrors.length - 2} hata)` : ""}`;
+  }
+
   return report;
 }
 
@@ -11373,6 +12125,110 @@ app.post(
     });
   }
 );
+
+app.get("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), async (req, res) => {
+  const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
+  const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
+
+  const selectedCompanyOption = companies.find((item) => !item.disabled && item.value === requestedCompany && item.meta);
+  const parsedCompany = parseCompanyOptionValue(requestedCompany);
+  const matchedParsedCompany =
+    parsedCompany &&
+    partnerItems.find(
+      (item) =>
+        item.code === parsedCompany.code &&
+        String(item.id || "") === String(parsedCompany.id || "") &&
+        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+    );
+  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+  const filters = {
+    endpointUrl: String(req.query.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL,
+    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
+    username: String(req.query.username || "").trim(),
+    password: String(req.query.password || "")
+  };
+  const invalidCompanySelection = requestedCompany && !selectedCompanyMeta;
+  const report = buildObusJobsReportModel();
+
+  if (invalidCompanySelection) {
+    report.requested = true;
+    report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+  }
+
+  res.render("general-obus-jobs", {
+    user: req.session.user,
+    active: "obus-jobs",
+    filters,
+    companies,
+    report
+  });
+});
+
+app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), async (req, res) => {
+  const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
+  const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
+
+  const selectedCompanyOption = companies.find((item) => !item.disabled && item.value === requestedCompany && item.meta);
+  const parsedCompany = parseCompanyOptionValue(requestedCompany);
+  const matchedParsedCompany =
+    parsedCompany &&
+    partnerItems.find(
+      (item) =>
+        item.code === parsedCompany.code &&
+        String(item.id || "") === String(parsedCompany.id || "") &&
+        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+    );
+  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+  const filters = {
+    endpointUrl: String(req.body.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL,
+    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
+    username: String(req.body.username || "").trim(),
+    password: String(req.body.password || "")
+  };
+  const report = await executeObusJobsScreenAction({
+    filters,
+    selectedCompanyMeta,
+    companies
+  });
+
+  if (Array.isArray(report.clusterResults) && report.clusterResults.length > 0) {
+    try {
+      const saveResult = await saveObusJobsReportToDb({
+        report,
+        selectedCompanyMeta,
+        endpointUrl: filters.endpointUrl,
+        userId: req.session.user?.id || null
+      });
+      report.saveResult = saveResult;
+      report.successMessages.push(`SQL kaydı oluşturuldu. Kayıt No: ${saveResult.runId}`);
+    } catch (err) {
+      report.warningMessages.push(`SQL kaydı başarısız: ${summarizeErrorMessage(err)}`);
+    }
+
+    try {
+      const slackResult = await postObusJobsReportToSlack({
+        report,
+        selectedCompanyMeta,
+        user: req.session.user,
+        saveResult: report.saveResult
+      });
+      report.slackResult = slackResult;
+      report.successMessages.push(`Slack bildirimi ${slackResult.channelLabel} kanalına gönderildi.`);
+    } catch (err) {
+      report.warningMessages.push(`Slack bildirimi başarısız: ${summarizeErrorMessage(err)}`);
+    }
+  }
+
+  res.render("general-obus-jobs", {
+    user: req.session.user,
+    active: "obus-jobs",
+    filters,
+    companies,
+    report
+  });
+});
 
 app.get("/change-password", requireAuth, requireMenuAccess("password"), (req, res) => {
   res.render("change-password", {
