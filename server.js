@@ -8919,7 +8919,7 @@ function buildObusJobsTableModel(clusterResults) {
       if (!map.has(id)) {
         map.set(id, {
           id,
-          label: String(job.name || job.label || job.id || "-").trim() || id
+          label: String(job.Name || job.name || job.label || job.id || "-").trim() || id
         });
       }
       return map;
