@@ -5292,9 +5292,23 @@ function resolveJiraEpicPalette(colorKey) {
   return paletteMap[normalizedColorKey] || paletteMap.color_9;
 }
 
+function getDefaultJiraLinkPalette() {
+  return {
+    backgroundColor: "#E3FCEF",
+    borderColor: "#79F2C0",
+    textColor: "#164B35"
+  };
+}
+
 function resolveJiraCardLinkBadge(issueType, epicColorKey) {
   const normalizedType = String(issueType || "").trim().toLowerCase();
   if (normalizedType === "epic") {
+    if (!normalizeJiraEpicColorKey(epicColorKey)) {
+      return {
+        colorKey: "",
+        ...getDefaultJiraLinkPalette()
+      };
+    }
     return {
       colorKey: normalizeJiraEpicColorKey(epicColorKey),
       ...resolveJiraEpicPalette(epicColorKey)
@@ -5303,10 +5317,59 @@ function resolveJiraCardLinkBadge(issueType, epicColorKey) {
 
   return {
     colorKey: "",
-    backgroundColor: "#F4F5F7",
-    borderColor: "#DFE1E6",
-    textColor: "#172B4D"
+    ...getDefaultJiraLinkPalette()
   };
+}
+
+function parseJiraVersionParts(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const match = text.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!match) return [];
+  return match
+    .slice(1)
+    .filter((item) => item !== undefined)
+    .map((item) => Number.parseInt(item, 10))
+    .filter((item) => Number.isFinite(item));
+}
+
+function compareJiraVersionParts(left, right) {
+  const maxLength = Math.max(left.length, right.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftValue = Number.isFinite(left[index]) ? left[index] : -1;
+    const rightValue = Number.isFinite(right[index]) ? right[index] : -1;
+    if (leftValue !== rightValue) {
+      return rightValue - leftValue;
+    }
+  }
+  return 0;
+}
+
+function getJiraCardLinkVersionParts(cardLinks) {
+  const links = Array.isArray(cardLinks) ? cardLinks : [];
+  const candidates = links
+    .map((link) => parseJiraVersionParts(link?.summary))
+    .filter((parts) => parts.length > 0);
+  if (!candidates.length) return [];
+  return candidates.sort(compareJiraVersionParts)[0];
+}
+
+function sortJiraBoardCards(cards) {
+  return [...(Array.isArray(cards) ? cards : [])].sort((left, right) => {
+    const versionCompare = compareJiraVersionParts(
+      getJiraCardLinkVersionParts(left?.cardLinks),
+      getJiraCardLinkVersionParts(right?.cardLinks)
+    );
+    if (versionCompare !== 0) return versionCompare;
+
+    const leftUpdated = Date.parse(String(left?.updatedAt || ""));
+    const rightUpdated = Date.parse(String(right?.updatedAt || ""));
+    if (Number.isFinite(leftUpdated) && Number.isFinite(rightUpdated) && leftUpdated !== rightUpdated) {
+      return rightUpdated - leftUpdated;
+    }
+
+    return String(left?.key || "").localeCompare(String(right?.key || ""), "tr");
+  });
 }
 
 function normalizeJiraLinkedIssue(issue, baseUrl) {
@@ -5571,7 +5634,7 @@ async function fetchJiraBoardCards({
   });
 
   return {
-    cards: issuesWithBadges.map(buildJiraBoardCardFromIssue).filter(Boolean),
+    cards: sortJiraBoardCards(issuesWithBadges.map(buildJiraBoardCardFromIssue).filter(Boolean)),
     jql,
     source: String(jiraResult.source || "Jira API"),
     error: jiraResult.error || null
