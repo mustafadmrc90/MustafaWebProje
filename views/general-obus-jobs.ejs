@@ -81,7 +81,9 @@
           <% const jobColumnList = Array.isArray(report.jobColumns) ? report.jobColumns : []; %>
           <% const jobIdList = Array.isArray(report.jobIds) ? report.jobIds : []; %>
           <% const columnSource =
-            jobColumnList.length > 0 ? jobColumnList : jobIdList.map((id) => ({ id, label: id }));
+            jobColumnList.length > 0
+              ? jobColumnList
+              : jobIdList.map((id) => ({ id, label: id, key: String(id || "").trim().toLowerCase() }));
           const columnCount = Math.max(columnSource.length, 1);
           %>
           <div class="obus-jobs-table-wrap">
@@ -110,8 +112,8 @@
                       <td class="obus-jobs-error-cell" colspan="<%= columnCount %>"><%= row.error %></td>
                     <% } else { %>
                       <% columnSource.forEach((column) => {
-                        const job = row.jobsByLabel?.[column.label];
-                      %>
+                        const job = row.jobsByLabel?.[column.key];
+                        %>
                         <td class="obus-jobs-job-cell <%= job && job.isYesterday ? 'is-yesterday' : '' %>">
                           <% if (job) { %>
                             <div class="obus-jobs-cell-state"><%= job.lastJobState %></div>

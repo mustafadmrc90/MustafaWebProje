@@ -8973,10 +8973,13 @@ function buildObusJobsTableModel(clusterResults) {
       const id = String(job.id).trim();
       if (!id) return map;
       const label = String(job.columnName || job.Name || job.name || job.label || "-").trim() || id;
-      if (!map.has(label)) {
-        map.set(label, {
+      const key = label.toLowerCase();
+      if (!key) return map;
+      if (!map.has(key)) {
+        map.set(key, {
           id,
-          label
+          label,
+          key
         });
       }
       return map;
@@ -8995,7 +8998,7 @@ function buildObusJobsTableModel(clusterResults) {
       jobsById[id] = job;
       const label = String(job.columnName || job.Name || job.name || job.label || id).trim();
       if (label) {
-        jobsByLabel[label] = job;
+        jobsByLabel[label.toLowerCase()] = job;
       }
     });
     return {
