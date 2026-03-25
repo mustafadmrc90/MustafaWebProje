@@ -110,13 +110,12 @@
                       <td class="obus-jobs-error-cell" colspan="<%= columnCount %>"><%= row.error %></td>
                     <% } else { %>
                       <% columnSource.forEach((column) => {
-                        const jobId = column.id;
-                        const cell = row.jobsById[jobId];
+                        const job = row.jobsByLabel?.[column.label];
                       %>
-                        <td class="obus-jobs-job-cell <%= cell && cell.isYesterday ? 'is-yesterday' : '' %>">
-                          <% if (cell) { %>
-                            <div class="obus-jobs-cell-state"><%= cell.lastJobState %></div>
-                            <div class="obus-jobs-cell-date"><%= cell.lastExecutionText %></div>
+                        <td class="obus-jobs-job-cell <%= job && job.isYesterday ? 'is-yesterday' : '' %>">
+                          <% if (job) { %>
+                            <div class="obus-jobs-cell-state"><%= job.lastJobState %></div>
+                            <div class="obus-jobs-cell-date"><%= job.lastExecutionText %></div>
                           <% } else { %>
                             <span class="muted">Job yok</span>
                           <% } %>

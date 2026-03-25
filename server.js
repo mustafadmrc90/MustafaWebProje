@@ -8988,15 +8988,21 @@ function buildObusJobsTableModel(clusterResults) {
 
   const clusterRows = (Array.isArray(clusterResults) ? clusterResults : []).map((result) => {
     const jobsById = {};
+    const jobsByLabel = {};
     (Array.isArray(result?.jobs) ? result.jobs : []).forEach((job) => {
       const id = String(job?.id || "").trim();
       if (!id) return;
       jobsById[id] = job;
+      const label = String(job.columnName || job.Name || job.name || job.label || id).trim();
+      if (label) {
+        jobsByLabel[label] = job;
+      }
     });
     return {
       clusterLabel: String(result?.clusterLabel || "").trim() || "cluster",
       error: String(result?.error || "").trim(),
-      jobsById
+      jobsById,
+      jobsByLabel
     };
   });
 
