@@ -184,6 +184,7 @@ const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
 const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
 const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
+const JIRA_BOARD_MAX_ITEMS = Number.parseInt(process.env.JIRA_BOARD_MAX_ITEMS || "1000", 10) || 1000;
 const JIRA_EPIC_CACHE_TTL_MS = Number.parseInt(process.env.JIRA_EPIC_CACHE_TTL_MS || "600000", 10) || 600000;
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || "").trim();
 const OPENAI_MODEL = String(process.env.OPENAI_MODEL || "gpt-4.1-mini").trim() || "gpt-4.1-mini";
@@ -5634,13 +5635,13 @@ async function fetchJiraBoardCards({
   }
   const jql = `${clauses.join(" AND ")} ORDER BY updated DESC`;
 
-  const jiraResult = await fetchJiraIssues({
+  const jiraResult = await fetchAllJiraIssues({
     baseUrl,
     email,
     apiToken,
     jql,
-    maxResults,
-    startAt: 0
+    pageSize: Math.min(200, Math.max(1, Number.parseInt(maxResults, 10) || JIRA_MAX_RESULTS)),
+    maxItems: JIRA_BOARD_MAX_ITEMS
   });
   const issuesWithBadges = await enrichJiraIssueLinksWithBadges({
     issues: jiraResult.issues,
@@ -5654,6 +5655,72 @@ async function fetchJiraBoardCards({
     jql,
     source: String(jiraResult.source || "Jira API"),
     error: jiraResult.error || null
+  };
+}
+
+async function fetchAllJiraIssues({
+  baseUrl,
+  email,
+  apiToken,
+  jql,
+  pageSize = 200,
+  maxItems = JIRA_BOARD_MAX_ITEMS
+}) {
+  const normalizedPageSize = toBoundedInt(pageSize, 200, 1, 200);
+  const normalizedMaxItems = toBoundedInt(maxItems, JIRA_BOARD_MAX_ITEMS, 1, 5000);
+  const issues = [];
+  const seenKeys = new Set();
+  let total = 0;
+  let startAt = 0;
+  let source = "Jira API";
+
+  while (issues.length < normalizedMaxItems) {
+    const remaining = normalizedMaxItems - issues.length;
+    const pageResult = await fetchJiraIssues({
+      baseUrl,
+      email,
+      apiToken,
+      jql,
+      maxResults: Math.min(normalizedPageSize, remaining),
+      startAt
+    });
+
+    source = String(pageResult.source || "Jira API");
+    if (pageResult.error) {
+      return {
+        issues,
+        total,
+        startAt,
+        maxResults: normalizedPageSize,
+        error: pageResult.error,
+        source
+      };
+    }
+
+    const pageIssues = Array.isArray(pageResult.issues) ? pageResult.issues : [];
+    total = Number.isFinite(Number(pageResult.total)) ? Number(pageResult.total) : total;
+    pageIssues.forEach((issue) => {
+      const key = String(issue?.key || "").trim();
+      if (!key || seenKeys.has(key)) return;
+      seenKeys.add(key);
+      issues.push(issue);
+    });
+
+    if (!pageIssues.length) break;
+    startAt = Number.isFinite(Number(pageResult.startAt))
+      ? Number(pageResult.startAt) + pageIssues.length
+      : startAt + pageIssues.length;
+
+    if (total > 0 && startAt >= total) break;
+  }
+
+  return {
+    issues,
+    total: total || issues.length,
+    startAt: 0,
+    maxResults: normalizedPageSize,
+    error: null,
+    source
   };
 }
 
