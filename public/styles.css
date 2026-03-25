@@ -2856,6 +2856,11 @@ button.ghost {
   gap: 5px;
 }
 
+.jira-board-card-footer {
+  margin-top: auto;
+  padding-top: 2px;
+}
+
 .jira-board-card-link-row {
   display: grid;
   gap: 3px;
