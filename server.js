@@ -5361,6 +5361,20 @@ function hasJiraEpicCardLink(card) {
   );
 }
 
+function getPrimaryJiraCardLink(card) {
+  const links = Array.isArray(card?.cardLinks) ? card.cardLinks : [];
+  if (!links.length) return null;
+  const epicLinks = links.filter((link) => /^epic$/i.test(String(link?.issueType || "").trim()));
+  const candidateLinks = epicLinks.length > 0 ? epicLinks : links;
+  return [...candidateLinks].sort((left, right) => {
+    const leftSummary = String(left?.summary || left?.key || "").trim();
+    const rightSummary = String(right?.summary || right?.key || "").trim();
+    const summaryCompare = leftSummary.localeCompare(rightSummary, "tr", { sensitivity: "base" });
+    if (summaryCompare !== 0) return summaryCompare;
+    return String(left?.key || "").localeCompare(String(right?.key || ""), "tr");
+  })[0];
+}
+
 function sortJiraBoardCards(cards, options = {}) {
   const epicFirst = Boolean(options?.epicFirst);
   return [...(Array.isArray(cards) ? cards : [])].sort((left, right) => {
@@ -5370,6 +5384,17 @@ function sortJiraBoardCards(cards, options = {}) {
       if (leftEpicRank !== rightEpicRank) {
         return rightEpicRank - leftEpicRank;
       }
+    }
+
+    const leftPrimaryLink = getPrimaryJiraCardLink(left);
+    const rightPrimaryLink = getPrimaryJiraCardLink(right);
+    const leftPrimaryName = String(leftPrimaryLink?.summary || leftPrimaryLink?.key || "").trim();
+    const rightPrimaryName = String(rightPrimaryLink?.summary || rightPrimaryLink?.key || "").trim();
+    if (leftPrimaryName || rightPrimaryName) {
+      if (!leftPrimaryName) return 1;
+      if (!rightPrimaryName) return -1;
+      const primaryNameCompare = leftPrimaryName.localeCompare(rightPrimaryName, "tr", { sensitivity: "base" });
+      if (primaryNameCompare !== 0) return primaryNameCompare;
     }
 
     const versionCompare = compareJiraVersionParts(
@@ -12030,7 +12055,10 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
         projectKey: "OBUSDEV",
         statuses: ["Hotfix"],
         issueType: "Task",
-        maxResults: JIRA_MAX_RESULTS
+        maxResults: JIRA_MAX_RESULTS,
+        sortOptions: {
+          epicFirst: true
+        }
       }),
       fetchJiraBoardCards({
         baseUrl: jiraBaseUrl,
@@ -12039,16 +12067,22 @@ app.get("/reports/jira-board", requireAuth, requireMenuAccess("jira-board"), asy
         projectKey: "OBUSDEV",
         statuses: ["TEST EDİLECEK"],
         issueType: "Task",
-        maxResults: JIRA_MAX_RESULTS
+        maxResults: JIRA_MAX_RESULTS,
+        sortOptions: {
+          epicFirst: true
+        }
       }),
       fetchJiraBoardCards({
         baseUrl: jiraBaseUrl,
         email: JIRA_EMAIL,
         apiToken: JIRA_API_TOKEN,
         projectKey: "OBUSDEV",
-        statuses: ["Done"],
+        statuses: ["TEST OK", "Test OK", "Indeployment", "In Deployment"],
         issueType: "Task",
-        maxResults: JIRA_MAX_RESULTS
+        maxResults: JIRA_MAX_RESULTS,
+        sortOptions: {
+          epicFirst: true
+        }
       })
     ]);
 

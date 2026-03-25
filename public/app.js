@@ -1,8 +1,41 @@
 (() => {
   const sidebar = document.querySelector(".sidebar");
   const content = document.querySelector(".content");
+  const sidebarCollapsedStorageKey = "dashboard_sidebar_collapsed_v1";
 
   if (!sidebar || !content) return;
+
+  const loadSidebarCollapsedState = () => {
+    try {
+      return window.localStorage.getItem(sidebarCollapsedStorageKey) === "true";
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const saveSidebarCollapsedState = (collapsed) => {
+    try {
+      window.localStorage.setItem(sidebarCollapsedStorageKey, collapsed ? "true" : "false");
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const applySidebarState = (collapsed) => {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    const toggle = document.querySelector("[data-sidebar-toggle]");
+    if (toggle) {
+      const label = collapsed ? "Menüyü genişlet" : "Menüyü daralt";
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("title", label);
+    }
+    if (collapsed) {
+      document.querySelectorAll(".nav-accordion").forEach((section) => {
+        section.setAttribute("open", "");
+      });
+    }
+  };
 
   const isModified = (event) =>
     event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
@@ -44,6 +77,7 @@
     content.innerHTML = next.innerHTML;
     document.title = doc.title || document.title;
     setActive(new URL(url).pathname);
+    applySidebarState(loadSidebarCollapsedState());
     initEndpointUI();
 
     if (push) {
@@ -73,6 +107,15 @@
   };
 
   sidebar.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-sidebar-toggle]");
+    if (toggle) {
+      event.preventDefault();
+      const nextCollapsed = !document.body.classList.contains("sidebar-collapsed");
+      saveSidebarCollapsedState(nextCollapsed);
+      applySidebarState(nextCollapsed);
+      return;
+    }
+
     const link = event.target.closest("a.nav-item");
     if (!link) return;
     if (link.target || isModified(event)) return;
@@ -83,6 +126,8 @@
   window.addEventListener("popstate", () => {
     navigate(window.location.href, { push: false });
   });
+
+  applySidebarState(loadSidebarCollapsedState());
 
   const parseJsonResponse = async (response) => {
     const contentType = response.headers.get("content-type") || "";
