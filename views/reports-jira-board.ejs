@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bus Product</title>
     <link rel="icon" href="/public/favicon.png" />
-    <link rel="stylesheet" href="/public/styles.css" />
+    <link rel="stylesheet" href="/public/styles.css?v=20260324-jira-board-2" />
   </head>
   <body class="dashboard layout jira-board-page">
     <%- include("partials/sidebar", { active }) %>
@@ -65,10 +65,14 @@
           </div>
         <% } %>
 
-        <div class="jira-board-scroll">
-          <div class="jira-board-grid">
+        <div class="jira-board-scroll" style="overflow-x:auto;padding:12px;border:1px solid #dde5ef;border-radius:12px;background:#fff;">
+          <div class="jira-board-grid" style="display:flex;gap:12px;align-items:flex-start;min-width:max-content;">
           <% boardColumns.forEach((column) => { %>
-            <section class="jira-board-column" data-tone="<%= column.tone %>">
+            <section
+              class="jira-board-column"
+              data-tone="<%= column.tone %>"
+              style="flex:0 0 280px;width:280px;min-width:280px;display:grid;gap:10px;padding:10px;border-radius:10px;border:1px solid #e0e7ef;background:<%= column.tone === 'hotfix' ? '#f8f1f0' : column.tone === 'review' ? '#f8f5ec' : column.tone === 'done' ? '#eef6ee' : '#f3f5f8' %>;min-height:420px;"
+            >
               <div class="jira-board-column-head">
                 <div>
                   <h3><%= column.title %></h3>
@@ -78,18 +82,21 @@
               </div>
 
               <% if (column.cards.length === 0) { %>
-                <div class="jira-board-empty">
+                <div class="jira-board-empty" style="min-height:180px;display:grid;place-items:center;text-align:center;padding:18px 14px;border-radius:10px;border:1px dashed #ccd7e4;background:rgba(255,255,255,.68);color:#697d93;font-size:12px;line-height:1.5;">
                   <%= column.emptyMessage || "Bu kolona gelecek kart verisini paylaştığınızda burada göstereceğim." %>
                 </div>
               <% } else { %>
-                <div class="jira-board-card-list">
+                <div class="jira-board-card-list" style="display:grid;gap:8px;">
                   <% column.cards.forEach((card) => { %>
-                    <article class="jira-board-card <%= card.blocked ? 'is-blocked' : '' %>">
-                      <div class="jira-board-card-status">
-                        <span class="jira-board-status-dot"></span>
+                    <article class="jira-board-card <%= card.blocked ? 'is-blocked' : '' %>" style="display:grid;gap:8px;padding:10px;border-radius:10px;border:1px solid <%= card.blocked ? '#e7b4b4' : '#d7e0ea' %>;background:#fff;box-shadow:0 1px 2px rgba(21,32,45,.06);">
+                      <div class="jira-board-card-status" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#62768d;">
+                        <span
+                          class="jira-board-status-dot"
+                          style="width:7px;height:7px;border-radius:50%;background:<%= column.tone === 'hotfix' ? '#d94f2b' : column.tone === 'review' ? '#d0a200' : column.tone === 'done' ? '#1f8f4f' : '#0f6bdc' %>;"
+                        ></span>
                         <span><%= card.status %></span>
                       </div>
-                      <div class="jira-board-card-top">
+                      <div class="jira-board-card-top" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                         <% if (card.issueUrl) { %>
                           <a class="jira-board-card-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.key %></a>
                         <% } else { %>
@@ -102,11 +109,11 @@
                         <h4><%= card.title %></h4>
                       <% } %>
                       <p><%= card.summary %></p>
-                      <div class="jira-board-card-tags">
+                      <div class="jira-board-card-tags" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                         <span class="jira-board-tag"><%= card.issueType %></span>
                         <span class="jira-board-tag"><%= card.priority %></span>
                       </div>
-                      <div class="jira-board-card-meta">
+                      <div class="jira-board-card-meta" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                         <span class="jira-board-updated"><%= card.updatedAt %></span>
                         <span class="jira-board-avatar" title="<%= card.assignee %>"><%= card.assigneeInitials %></span>
                       </div>
