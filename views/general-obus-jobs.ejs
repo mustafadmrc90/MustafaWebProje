@@ -39,28 +39,15 @@
         <form class="allowed-lines-form obus-jobs-form" method="post" action="/general/obus-jobs">
           <input type="hidden" name="endpointUrl" value="<%= filters.endpointUrl %>" />
           <div class="allowed-lines-grid obus-jobs-grid">
-            <label class="allowed-lines-field allowed-lines-field-company">
-              <span>Firma</span>
-              <select name="company" required>
-                <% companies.forEach((company) => { %>
-                  <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %> <%= company.disabled ? "disabled" : "" %>>
-                    <%= company.label %>
-                  </option>
-                <% }) %>
-              </select>
-            </label>
-            <label class="allowed-lines-field allowed-lines-field-username">
-              <span>Kullanici Adi</span>
-              <input type="text" name="username" value="<%= filters.username || '' %>" required />
-            </label>
-            <label class="allowed-lines-field allowed-lines-field-password">
-              <span>Sifre</span>
-              <input type="password" name="password" value="<%= filters.password || '' %>" required />
-            </label>
+            <p>
+              Her cluster için listeden rastgele bir firma seçiyoruz ve bu firma ile
+              <strong>admin / O6us&D3V3l0p3r.WaS.H3r3!</strong> kimlik bilgileriyle login olmaya çalışıyoruz. Eğer
+              bir firmada login alınamazsa, o cluster için listedeki diğer firmalar denenir.
+            </p>
           </div>
           <div class="allowed-lines-actions">
-            <button type="submit" data-default-label="Joblari Getir" data-loading-label="Taraniyor...">
-              Joblari Getir
+            <button type="submit" data-default-label="Clusterları Tara" data-loading-label="Taraniyor...">
+              Clusterları Tara
             </button>
           </div>
           <div class="allowed-lines-loading-message" hidden>Clusterlar taraniyor, lutfen bekleyin...</div>

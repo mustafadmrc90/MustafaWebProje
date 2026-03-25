@@ -403,6 +403,10 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "menti"
   }
 ];
+const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "admin").trim();
+const OBUS_JOB_FIXED_PASSWORD = String(
+  process.env.OBUS_JOB_FIXED_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
+).trim();
 const slackReplyReportCache = new Map();
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
@@ -8927,6 +8931,34 @@ function buildObusJobsTableModel(clusterResults) {
   };
 }
 
+function shuffleArray(items = []) {
+  const list = Array.isArray(items) ? [...items] : [];
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
+
+function buildClusterCompanyCandidates(partnerItems = []) {
+  const map = new Map();
+  (Array.isArray(partnerItems) ? partnerItems : []).forEach((item) => {
+    const cluster = String((item?.cluster || "").trim()).toLowerCase();
+    if (!cluster) return;
+    const clusterLabel = cluster.startsWith("cluster") ? cluster : `cluster${cluster}`;
+    const list = map.get(clusterLabel) || [];
+    list.push({
+      code: String(item?.code || "").trim(),
+      id: String(item?.id || "").trim(),
+      cluster: clusterLabel,
+      url: String(item?.url || "").trim(),
+      branchId: String(item?.branchId || item?.id || "").trim()
+    });
+    map.set(clusterLabel, list);
+  });
+  return map;
+}
+
 function buildUetdsPricesRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
   return {
     data: UETDS_PRICES_TASK_DATA,
@@ -9692,16 +9724,12 @@ async function executeAuthorizedLinesScreenAction({
 async function fetchObusJobsClusterReport({
   clusterLabel,
   endpointBaseUrl,
-  companyBaseUrl,
-  partnerCode,
-  partnerId,
+  companyCandidates = [],
   username,
-  password,
-  fallbackBranchId
+  password
 }) {
   const normalizedClusterLabel = extractClusterLabel(clusterLabel);
   const endpointUrl = buildObusJobsUrl(endpointBaseUrl, normalizedClusterLabel);
-  const companyUrl = buildUrlForCluster(companyBaseUrl || endpointBaseUrl, normalizedClusterLabel);
   if (!endpointUrl) {
     return {
       clusterLabel: normalizedClusterLabel,
@@ -9710,20 +9738,46 @@ async function fetchObusJobsClusterReport({
     };
   }
 
-  const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
-    endpointUrl,
-    companyUrl,
-    partnerCode,
-    partnerId,
-    username,
-    password,
-    fallbackBranchId
-  });
+  const candidates = shuffleArray(companyCandidates).filter(
+    (item) => String(item?.code || "").trim()
+  );
+  if (!candidates.length) {
+    return {
+      clusterLabel: normalizedClusterLabel,
+      jobs: [],
+      error: "Bu cluster için kayıtlı firma bulunamadı."
+    };
+  }
+
+  let lastError = "";
+  let loginResult = null;
+  for (const candidate of candidates) {
+    const partnerCode = String(candidate.code || "").trim();
+    const partnerId = String(candidate.id || "").trim();
+    const fallbackBranchId = String(candidate.branchId || candidate.id || "").trim();
+    const companyBaseUrl = String(candidate.url || endpointBaseUrl).trim() || endpointBaseUrl;
+    const companyUrl = buildUrlForCluster(companyBaseUrl, normalizedClusterLabel);
+
+    loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
+      endpointUrl,
+      companyUrl,
+      partnerCode,
+      partnerId,
+      username,
+      password,
+      fallbackBranchId
+    });
+    if (loginResult?.ok) {
+      break;
+    }
+    lastError = String(loginResult?.error || lastError).trim() || "UserLogin başarısız.";
+  }
+
   if (!loginResult?.ok) {
     return {
       clusterLabel: normalizedClusterLabel,
       jobs: [],
-      error: String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız."
+      error: lastError || "UserLogin başarısız."
     };
   }
 
@@ -9793,29 +9847,12 @@ async function fetchObusJobsClusterReport({
   }
 }
 
-async function executeObusJobsScreenAction({ filters, selectedCompanyMeta, companies }) {
+async function executeObusJobsScreenAction({ filters, partnerItems }) {
   const report = buildObusJobsReportModel();
   report.requested = true;
 
-  if (!selectedCompanyMeta) {
-    report.error = "Firma seçimi zorunludur.";
-    return report;
-  }
-
-  if (!filters.username || !filters.password) {
-    report.error = "Kullanıcı adı ve şifre zorunludur.";
-    return report;
-  }
-
-  const partnerCode = String(selectedCompanyMeta?.code || "").trim();
-  const partnerId = resolveSelectedPartnerId({
-    selectedCompanyMeta,
-    selectedCompanyValue: filters.company,
-    companies
-  });
-  const fallbackBranchId = String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim();
   const endpointBaseUrl = String(filters.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL;
-  const companyBaseUrl = String(selectedCompanyMeta?.url || endpointBaseUrl).trim() || endpointBaseUrl;
+  const companyCandidatesByCluster = buildClusterCompanyCandidates(partnerItems);
   const clusterLabels = Array.from(
     { length: PARTNER_CLUSTER_MAX - PARTNER_CLUSTER_MIN + 1 },
     (_, index) => `cluster${PARTNER_CLUSTER_MIN + index}`
@@ -9828,12 +9865,9 @@ async function executeObusJobsScreenAction({ filters, selectedCompanyMeta, compa
       fetchObusJobsClusterReport({
         clusterLabel,
         endpointBaseUrl,
-        companyBaseUrl,
-        partnerCode,
-        partnerId,
-        username: filters.username,
-        password: filters.password,
-        fallbackBranchId
+        companyCandidates: companyCandidatesByCluster.get(clusterLabel) || [],
+        username: OBUS_JOB_FIXED_USERNAME,
+        password: OBUS_JOB_FIXED_PASSWORD
       })
   );
 
@@ -12127,34 +12161,11 @@ app.post(
 );
 
 app.get("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), async (req, res) => {
-  const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
   const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
-
-  const selectedCompanyOption = companies.find((item) => !item.disabled && item.value === requestedCompany && item.meta);
-  const parsedCompany = parseCompanyOptionValue(requestedCompany);
-  const matchedParsedCompany =
-    parsedCompany &&
-    partnerItems.find(
-      (item) =>
-        item.code === parsedCompany.code &&
-        String(item.id || "") === String(parsedCompany.id || "") &&
-        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
-    );
-  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
-
   const filters = {
-    endpointUrl: String(req.query.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL,
-    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
-    username: String(req.query.username || "").trim(),
-    password: String(req.query.password || "")
+    endpointUrl: String(req.query.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL
   };
-  const invalidCompanySelection = requestedCompany && !selectedCompanyMeta;
   const report = buildObusJobsReportModel();
-
-  if (invalidCompanySelection) {
-    report.requested = true;
-    report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
-  }
 
   res.render("general-obus-jobs", {
     user: req.session.user,
@@ -12166,31 +12177,13 @@ app.get("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), async
 });
 
 app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), async (req, res) => {
-  const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
   const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
-
-  const selectedCompanyOption = companies.find((item) => !item.disabled && item.value === requestedCompany && item.meta);
-  const parsedCompany = parseCompanyOptionValue(requestedCompany);
-  const matchedParsedCompany =
-    parsedCompany &&
-    partnerItems.find(
-      (item) =>
-        item.code === parsedCompany.code &&
-        String(item.id || "") === String(parsedCompany.id || "") &&
-        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
-    );
-  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
-
   const filters = {
-    endpointUrl: String(req.body.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL,
-    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
-    username: String(req.body.username || "").trim(),
-    password: String(req.body.password || "")
+    endpointUrl: String(req.body.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL
   };
   const report = await executeObusJobsScreenAction({
     filters,
-    selectedCompanyMeta,
-    companies
+    partnerItems
   });
 
   if (Array.isArray(report.clusterResults) && report.clusterResults.length > 0) {
