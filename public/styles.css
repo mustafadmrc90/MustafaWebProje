@@ -3377,10 +3377,10 @@ button.ghost {
   z-index: 2;
   background: #f7f9fc;
   color: #4f6176;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: normal;
   padding: 12px 14px;
   border-bottom: 1px solid #dbe3ee;
   white-space: nowrap;
