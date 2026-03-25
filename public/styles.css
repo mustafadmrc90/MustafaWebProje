@@ -2816,16 +2816,14 @@ button.ghost {
   flex-wrap: wrap;
 }
 
-.jira-board-card-link,
-.jira-board-title-link {
-  color: #0052cc;
+.jira-board-card-link {
+  color: #172b4d;
   text-decoration: none;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 10px;
 }
 
-.jira-board-card-link:hover,
-.jira-board-title-link:hover {
+.jira-board-card-link:hover {
   text-decoration: underline;
 }
 
@@ -2843,23 +2841,28 @@ button.ghost {
 
 .jira-board-card p {
   margin: 0;
-  font-size: 10px;
-  line-height: 1.4;
-  color: #5e6c84;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #172b4d;
+  font-weight: 500;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .jira-board-card-links {
   display: grid;
-  gap: 3px;
+  gap: 5px;
 }
 
 .jira-board-card-link-row {
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--jira-card-link-border, #dfe1e6);
+  background: var(--jira-card-link-bg, #f4f5f7);
 }
 
 .jira-board-link-label {
@@ -2867,7 +2870,8 @@ button.ghost {
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: #6b778c;
+  color: var(--jira-card-link-text, #172b4d);
+  opacity: 0.82;
 }
 
 .jira-board-mini-link-group {
@@ -2878,9 +2882,9 @@ button.ghost {
 }
 
 .jira-board-mini-link {
-  color: #0052cc;
+  color: var(--jira-card-link-text, #172b4d);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   text-decoration: none;
 }
 
@@ -2890,8 +2894,9 @@ button.ghost {
 
 .jira-board-mini-link-summary {
   font-size: 10px;
-  color: #6b778c;
+  color: var(--jira-card-link-text, #172b4d);
   line-height: 1.35;
+  opacity: 0.9;
 }
 
 .jira-board-tag {

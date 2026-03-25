@@ -184,6 +184,7 @@ const JIRA_EMAIL = String(process.env.JIRA_EMAIL || "").trim();
 const JIRA_API_TOKEN = String(process.env.JIRA_API_TOKEN || "").trim();
 const JIRA_API_TIMEOUT_MS = Number.parseInt(process.env.JIRA_API_TIMEOUT_MS || "20000", 10) || 20000;
 const JIRA_MAX_RESULTS = Number.parseInt(process.env.JIRA_MAX_RESULTS || "50", 10) || 50;
+const JIRA_EPIC_CACHE_TTL_MS = Number.parseInt(process.env.JIRA_EPIC_CACHE_TTL_MS || "600000", 10) || 600000;
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || "").trim();
 const OPENAI_MODEL = String(process.env.OPENAI_MODEL || "gpt-4.1-mini").trim() || "gpt-4.1-mini";
 const OPENAI_API_TIMEOUT_MS = Number.parseInt(process.env.OPENAI_API_TIMEOUT_MS || "45000", 10) || 45000;
@@ -384,6 +385,7 @@ const SIDEBAR_MENU_REGISTRY = [
 const slackReplyReportCache = new Map();
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
+const jiraEpicMetaCache = new Map();
 const slackAutoSaveState = {
   timerId: null,
   isRunning: false
@@ -5262,6 +5264,51 @@ function buildJiraIssueBrowseUrl(baseUrl, key) {
   return `${normalizedBaseUrl}/browse/${encodeURIComponent(normalizedKey)}`;
 }
 
+function buildJiraAuthValue(email, apiToken) {
+  const normalizedEmail = String(email || "").trim();
+  const normalizedApiToken = String(apiToken || "").trim();
+  if (!normalizedEmail || !normalizedApiToken) return "";
+  return Buffer.from(`${normalizedEmail}:${normalizedApiToken}`, "utf8").toString("base64");
+}
+
+function normalizeJiraEpicColorKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return /^color_\d+$/.test(normalized) ? normalized : "";
+}
+
+function resolveJiraEpicPalette(colorKey) {
+  const normalizedColorKey = normalizeJiraEpicColorKey(colorKey);
+  const paletteMap = {
+    color_1: { backgroundColor: "#FFEBE6", borderColor: "#FFBDAD", textColor: "#5D1F1A" },
+    color_2: { backgroundColor: "#FFF3EB", borderColor: "#FEC195", textColor: "#702E00" },
+    color_3: { backgroundColor: "#FFF7D6", borderColor: "#F5CD47", textColor: "#533F04" },
+    color_4: { backgroundColor: "#E3FCEF", borderColor: "#79F2C0", textColor: "#164B35" },
+    color_5: { backgroundColor: "#E6FCFF", borderColor: "#79E2F2", textColor: "#0C5460" },
+    color_6: { backgroundColor: "#DEEBFF", borderColor: "#B3D4FF", textColor: "#0747A6" },
+    color_7: { backgroundColor: "#EAE6FF", borderColor: "#C0B6F2", textColor: "#403294" },
+    color_8: { backgroundColor: "#FFECF8", borderColor: "#F797D2", textColor: "#943D73" },
+    color_9: { backgroundColor: "#F4F5F7", borderColor: "#DFE1E6", textColor: "#172B4D" }
+  };
+  return paletteMap[normalizedColorKey] || paletteMap.color_9;
+}
+
+function resolveJiraCardLinkBadge(issueType, epicColorKey) {
+  const normalizedType = String(issueType || "").trim().toLowerCase();
+  if (normalizedType === "epic") {
+    return {
+      colorKey: normalizeJiraEpicColorKey(epicColorKey),
+      ...resolveJiraEpicPalette(epicColorKey)
+    };
+  }
+
+  return {
+    colorKey: "",
+    backgroundColor: "#F4F5F7",
+    borderColor: "#DFE1E6",
+    textColor: "#172B4D"
+  };
+}
+
 function normalizeJiraLinkedIssue(issue, baseUrl) {
   if (!issue || typeof issue !== "object") return null;
   const key = String(issue.key || "").trim();
@@ -5291,6 +5338,112 @@ function extractRelevantJiraIssueLinks(links, baseUrl) {
     items.push(candidate);
   });
   return items;
+}
+
+async function fetchJiraEpicMeta({ baseUrl, email, apiToken, epicKey }) {
+  const normalizedBaseUrl = normalizeJiraBaseUrl(baseUrl);
+  const normalizedEpicKey = String(epicKey || "").trim();
+  const authValue = buildJiraAuthValue(email, apiToken);
+  if (!normalizedBaseUrl || !normalizedEpicKey || !authValue) {
+    return {
+      key: normalizedEpicKey,
+      colorKey: ""
+    };
+  }
+
+  const cached = jiraEpicMetaCache.get(normalizedEpicKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(3000, JIRA_API_TIMEOUT_MS));
+
+  try {
+    const url = `${normalizedBaseUrl}/rest/agile/1.0/epic/${encodeURIComponent(normalizedEpicKey)}`;
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Basic ${authValue}`
+      }
+    });
+    const raw = await response.text();
+    const payload = parseJsonSafe(raw);
+    const value = {
+      key: normalizedEpicKey,
+      colorKey: normalizeJiraEpicColorKey(payload?.color?.key)
+    };
+
+    if (response.ok) {
+      jiraEpicMetaCache.set(normalizedEpicKey, {
+        value,
+        expiresAt: Date.now() + JIRA_EPIC_CACHE_TTL_MS
+      });
+      return value;
+    }
+  } catch (_err) {
+    return {
+      key: normalizedEpicKey,
+      colorKey: ""
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  return {
+    key: normalizedEpicKey,
+    colorKey: ""
+  };
+}
+
+async function enrichJiraIssueLinksWithBadges({ issues, baseUrl, email, apiToken }) {
+  const issueList = Array.isArray(issues) ? issues : [];
+  if (!issueList.length) return issueList;
+
+  const epicKeys = Array.from(
+    new Set(
+      issueList
+        .flatMap((issue) => (Array.isArray(issue?.cardLinks) ? issue.cardLinks : []))
+        .filter((link) => /^epic$/i.test(String(link?.issueType || "").trim()))
+        .map((link) => String(link.key || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const epicMetaMap = new Map();
+  await Promise.all(
+    epicKeys.map(async (epicKey) => {
+      const meta = await fetchJiraEpicMeta({
+        baseUrl,
+        email,
+        apiToken,
+        epicKey
+      });
+      epicMetaMap.set(epicKey, meta);
+    })
+  );
+
+  return issueList.map((issue) => {
+    const cardLinks = Array.isArray(issue?.cardLinks) ? issue.cardLinks : [];
+    return {
+      ...issue,
+      cardLinks: cardLinks.map((link) => {
+        const epicMeta = /^epic$/i.test(String(link?.issueType || "").trim())
+          ? epicMetaMap.get(String(link.key || "").trim())
+          : null;
+        const badge = resolveJiraCardLinkBadge(link?.issueType, epicMeta?.colorKey);
+        return {
+          ...link,
+          epicColorKey: epicMeta?.colorKey || "",
+          badgeBackgroundColor: badge.backgroundColor,
+          badgeBorderColor: badge.borderColor,
+          badgeTextColor: badge.textColor
+        };
+      })
+    };
+  });
 }
 
 function normalizeJiraIssue(issue, baseUrl) {
@@ -5410,9 +5563,15 @@ async function fetchJiraBoardCards({
     maxResults,
     startAt: 0
   });
+  const issuesWithBadges = await enrichJiraIssueLinksWithBadges({
+    issues: jiraResult.issues,
+    baseUrl,
+    email,
+    apiToken
+  });
 
   return {
-    cards: (Array.isArray(jiraResult.issues) ? jiraResult.issues : []).map(buildJiraBoardCardFromIssue).filter(Boolean),
+    cards: issuesWithBadges.map(buildJiraBoardCardFromIssue).filter(Boolean),
     jql,
     source: String(jiraResult.source || "Jira API"),
     error: jiraResult.error || null
@@ -5450,7 +5609,7 @@ async function fetchJiraIssues({ baseUrl, email, apiToken, jql, maxResults = JIR
   }
 
   const url = `${normalizedBaseUrl}/rest/api/3/search/jql`;
-  const authValue = Buffer.from(`${normalizedEmail}:${normalizedApiToken}`, "utf8").toString("base64");
+  const authValue = buildJiraAuthValue(normalizedEmail, normalizedApiToken);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(3000, JIRA_API_TIMEOUT_MS));
 

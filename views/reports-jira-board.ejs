@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bus Product</title>
     <link rel="icon" href="/public/favicon.png" />
-    <link rel="stylesheet" href="/public/styles.css?v=20260325-jira-board-4" />
+    <link rel="stylesheet" href="/public/styles.css?v=20260325-jira-board-5" />
   </head>
   <body class="dashboard layout jira-board-page">
     <%- include("partials/sidebar", { active }) %>
@@ -69,17 +69,15 @@
                           <span class="jira-board-card-link"><%= card.key %></span>
                         <% } %>
                       </div>
-                      <% if (card.issueUrl) { %>
-                        <h4><a class="jira-board-title-link" href="<%= card.issueUrl %>" target="_blank" rel="noopener noreferrer"><%= card.title %></a></h4>
-                      <% } else { %>
-                        <h4><%= card.title %></h4>
-                      <% } %>
                       <div class="jira-board-card-summary">
                         <p><%= card.summary %></p>
                         <% if (card.cardLinks && card.cardLinks.length > 0) { %>
                         <div class="jira-board-card-links">
                           <% card.cardLinks.slice(0, 2).forEach((link) => { %>
-                            <div class="jira-board-card-link-row">
+                            <div
+                              class="jira-board-card-link-row"
+                              style="--jira-card-link-bg:<%= link.badgeBackgroundColor || '#F4F5F7' %>;--jira-card-link-border:<%= link.badgeBorderColor || '#DFE1E6' %>;--jira-card-link-text:<%= link.badgeTextColor || '#172B4D' %>;"
+                            >
                               <span class="jira-board-link-label"><%= link.label %></span>
                               <div class="jira-board-mini-link-group">
                                 <% if (link.issueUrl) { %>
@@ -93,10 +91,6 @@
                           <% }) %>
                         </div>
                         <% } %>
-                      </div>
-                      <div class="jira-board-card-tags" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                        <span class="jira-board-tag"><%= card.issueType %></span>
-                        <span class="jira-board-tag"><%= card.priority %></span>
                       </div>
                       <div class="jira-board-card-meta" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
                         <span class="jira-board-updated"><%= card.updatedAt %></span>
