@@ -116,7 +116,7 @@
                         const stateNormalized = job ? String(job.lastJobState || "").trim().toLowerCase() : "";
                         const isErrorState = job && stateNormalized !== "succeeded";
                         %>
-                        <td class="obus-jobs-job-cell <%= isErrorState ? 'is-error' : '' %> <%= job && job.isYesterday ? 'is-yesterday' : '' %>">
+                        <td class="obus-jobs-job-cell <%= isErrorState ? 'is-error' : '' %> <%= job && job.isYesterday ? 'is-yesterday' : '' %> <%= job && job.isPastExecution ? 'is-past' : '' %>">
                           <% if (job) { %>
                             <div class="obus-jobs-cell-state"><%= job.lastJobState %></div>
                             <div class="obus-jobs-cell-date"><%= job.lastExecutionText %></div>

@@ -8922,6 +8922,18 @@ function isDateYesterdayFromToday(value) {
   return target.getTime() === yesterday.getTime();
 }
 
+function isDateBeforeToday(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(parsed);
+  target.setHours(0, 0, 0, 0);
+  return target.getTime() < today.getTime();
+}
+
 function extractObusJobsItems(payload) {
   const rows = Array.isArray(payload?.data)
     ? payload.data
@@ -8951,7 +8963,8 @@ function extractObusJobsItems(payload) {
         lastJobState,
         isYesterday: isDateYesterdayFromToday(lastExecution)
         ,
-        columnName: nameValue
+        columnName: nameValue,
+        isPastExecution: isDateBeforeToday(lastExecution)
       };
     })
     .filter(Boolean);

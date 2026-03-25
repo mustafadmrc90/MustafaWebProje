@@ -3399,6 +3399,10 @@ button.ghost {
   background: #fdecea;
   color: #7f1d1d;
 }
+.obus-jobs-job-cell.is-past {
+  background: #ff4d4f;
+  color: #fff;
+}
 
 .obus-jobs-table tbody tr:last-child th,
 .obus-jobs-table tbody tr:last-child td {
