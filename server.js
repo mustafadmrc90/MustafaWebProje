@@ -7509,39 +7509,79 @@ function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResu
     lines.push(`Hata Örneği: ${summary.errorSamples.join(" | ")}`);
   }
 
-  const tableText = buildObusJobsSlackTable({ report });
+  const tableResult = buildObusJobsSlackTable({ report });
+  if (Array.isArray(tableResult.flaggedCells) && tableResult.flaggedCells.length > 0) {
+    lines.push("Uyarılı hücreler:");
+    tableResult.flaggedCells.slice(0, 5).forEach((flag) => {
+      lines.push(`• Cluster ${flag.cluster} / ${flag.jobLabel} → ${flag.reason}`);
+    });
+  }
   return {
     summary: lines.join("\n"),
-    tableText
+    tableText: tableResult.tableText
   };
 }
 
 function buildObusJobsSlackTable({ report }) {
   const columnSource = Array.isArray(report?.jobColumns) && report.jobColumns.length > 0
     ? report.jobColumns
-    : (Array.isArray(report?.jobIds) ? report.jobIds.map((id) => ({ id, label: id })) : []);
-  const rows = (Array.isArray(report?.clusterRows) ? report.clusterRows : []).flatMap((row) => {
-    if (row.error) return [];
-    return columnSource.map((column) => {
-      const job = row.jobsById?.[column.id];
-      if (!job) return null;
-      return {
+    : (Array.isArray(report?.jobIds) ? report.jobIds.map((id) => ({ id, label: id, key: String(id || "").trim().toLowerCase() })) : []);
+
+  const entries = [];
+  const flaggedCells = [];
+  (Array.isArray(report?.clusterRows) ? report.clusterRows : []).forEach((row) => {
+    if (row.error) return;
+    columnSource.forEach((column) => {
+      const job = row.jobsByLabel?.[column.key];
+      if (!job) return;
+      entries.push({
         cluster: row.clusterLabel,
         jobLabel: column.label,
         state: job.lastJobState,
-        lastExecution: job.lastExecutionText
-      };
-    }).filter(Boolean);
+        lastExecution: job.lastExecutionText,
+        isPast: Boolean(job.isPastExecution),
+        isError: String(job.lastJobState || "").trim().toLowerCase() !== "succeeded"
+      });
+      if (job.isPastExecution) {
+        flaggedCells.push({
+          cluster: row.clusterLabel,
+          jobLabel: column.label,
+          reason: "Tarih geçmiş"
+        });
+      } else if (String(job.lastJobState || "").trim().toLowerCase() !== "succeeded") {
+        flaggedCells.push({
+          cluster: row.clusterLabel,
+          jobLabel: column.label,
+          reason: `Durum: ${job.lastJobState}`
+        });
+      }
+    });
   });
-  if (!rows.length) return null;
+
+  if (!entries.length) return { tableText: null, flaggedCells: [] };
   const header = "*Cluster* | *Job* | *State* | *Last Execution*";
-  const tableRows = rows
+  const tableRows = entries
     .map((entry) => `${entry.cluster} | ${entry.jobLabel} | ${entry.state} | ${entry.lastExecution}`)
     .slice(0, 20);
-  if (rows.length > tableRows.length) {
-    tableRows.push(`... ve ${rows.length - tableRows.length} daha`);
+  if (entries.length > tableRows.length) {
+    tableRows.push(`... ve ${entries.length - tableRows.length} daha`);
   }
-  return [header, ...tableRows].join("\n");
+
+  // Deduplicate flagged cells by cluster+jobLabel
+  const seenFlags = new Set();
+  const uniqueFlags = [];
+  flaggedCells.forEach((flag) => {
+    const key = `${flag.cluster}|${flag.jobLabel}|${flag.reason}`;
+    if (!seenFlags.has(key)) {
+      seenFlags.add(key);
+      uniqueFlags.push(flag);
+    }
+  });
+
+  return {
+    tableText: [header, ...tableRows].join("\n"),
+    flaggedCells: uniqueFlags
+  };
 }
 
 async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, saveResult }) {
