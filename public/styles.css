@@ -3048,6 +3048,266 @@ button.ghost {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
+.asana-list-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.asana-group {
+  border: 1px solid #dbe2ea;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.asana-group-header {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid #edf1f5;
+  background: #fbfcfd;
+}
+
+.asana-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.asana-group-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #4c9aff;
+  flex-shrink: 0;
+}
+
+.asana-group[data-tone="hotfix"] .asana-group-mark {
+  background: #e34935;
+}
+
+.asana-group[data-tone="review"] .asana-group-mark {
+  background: #f5b700;
+}
+
+.asana-group[data-tone="done"] .asana-group-mark {
+  background: #2e9f5b;
+}
+
+.asana-group-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.asana-group-header p {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.asana-group-count {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.asana-empty-state {
+  padding: 24px 18px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.asana-list-table {
+  display: grid;
+}
+
+.asana-list-row {
+  display: grid;
+  grid-template-columns: 170px 120px minmax(280px, 1.55fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+  padding: 12px 18px;
+}
+
+.asana-list-head {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid #edf1f5;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.asana-list-item {
+  border-top: 1px solid #edf1f5;
+  background: #ffffff;
+}
+
+.asana-list-item:first-of-type {
+  border-top: none;
+}
+
+.asana-list-item:hover {
+  background: #fcfdff;
+}
+
+.asana-list-status,
+.asana-list-key,
+.asana-list-summary,
+.asana-list-links {
+  min-width: 0;
+}
+
+.asana-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #dbe4ff;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.asana-status-pill[data-tone="hotfix"] {
+  border-color: #ffd2c9;
+  background: #fff1ed;
+  color: #c2410c;
+}
+
+.asana-status-pill[data-tone="review"] {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #a16207;
+}
+
+.asana-status-pill[data-tone="done"] {
+  border-color: #bbf7d0;
+  background: #ecfdf3;
+  color: #166534;
+}
+
+.asana-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.asana-key-link {
+  color: #111827;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.asana-key-link:hover {
+  text-decoration: underline;
+}
+
+.asana-list-summary p {
+  margin: 0;
+  color: #1f2937;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.asana-list-links {
+  display: grid;
+  gap: 8px;
+}
+
+.asana-link-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--jira-card-link-border, #dfe1e6);
+  background: var(--jira-card-link-bg, #f4f5f7);
+}
+
+.asana-link-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--jira-card-link-text, #172b4d);
+  opacity: 0.82;
+}
+
+.asana-link-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.asana-link-key {
+  color: var(--jira-card-link-text, #172b4d);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.asana-link-key:hover {
+  text-decoration: underline;
+}
+
+.asana-link-summary {
+  color: var(--jira-card-link-text, #172b4d);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.asana-link-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+@media (max-width: 1080px) {
+  .asana-list-row {
+    grid-template-columns: 140px 110px minmax(220px, 1.3fr) minmax(240px, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (max-width: 860px) {
+  .asana-list-head {
+    display: none;
+  }
+
+  .asana-list-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .asana-list-item {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+}
+
 @media (max-width: 960px) {
   .jira-board-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3091,6 +3351,98 @@ button.ghost {
   color: #1f2735;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.obus-jobs-table-card {
+  margin-top: 12px;
+}
+
+.obus-jobs-table-wrap {
+  overflow: auto;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+}
+
+.obus-jobs-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #ffffff;
+}
+
+.obus-jobs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f7f9fc;
+  color: #4f6176;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 12px 14px;
+  border-bottom: 1px solid #dbe3ee;
+  white-space: nowrap;
+}
+
+.obus-jobs-table tbody th,
+.obus-jobs-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2f7;
+  border-right: 1px solid #edf2f7;
+  vertical-align: top;
+  background: #ffffff;
+}
+
+.obus-jobs-table tbody tr:last-child th,
+.obus-jobs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.obus-jobs-sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 110px;
+  background: #f7f9fc !important;
+  color: #1f2735;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.obus-jobs-job-cell {
+  min-width: 180px;
+}
+
+.obus-jobs-cell-state {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1f2735;
+}
+
+.obus-jobs-cell-date {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #5f7186;
+  line-height: 1.45;
+}
+
+.obus-jobs-job-cell.is-yesterday {
+  background: #ffe6e6;
+}
+
+.obus-jobs-job-cell.is-yesterday .obus-jobs-cell-state,
+.obus-jobs-job-cell.is-yesterday .obus-jobs-cell-date {
+  color: #8f1d1d;
+}
+
+.obus-jobs-error-cell {
+  color: #9a1f1f;
+  background: #fff1f1 !important;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .obus-user-create-section {
