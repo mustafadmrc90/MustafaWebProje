@@ -407,6 +407,9 @@ const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "a
 const OBUS_JOB_FIXED_PASSWORD = String(
   process.env.OBUS_JOB_FIXED_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
 ).trim();
+const OBUS_JOBS_AUTO_RUN_ENABLED =
+  String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
+const OBUS_JOBS_AUTO_RUN_TIME = String(process.env.OBUS_JOBS_AUTO_RUN_TIME || "10:00").trim();
 const slackReplyReportCache = new Map();
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
@@ -960,7 +963,8 @@ initDb()
       process.exit(0);
       return;
     }
-    startSlackAutoSaveScheduler();
+  startSlackAutoSaveScheduler();
+  startObusJobsAutoScheduler();
   })
   .catch(async (err) => {
     dbRuntimeState.initOk = false;
@@ -7604,6 +7608,75 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
   };
 }
 
+let obusJobsAutoTimeout = null;
+
+async function runObusJobsScheduledScan({ source = "auto" } = {}) {
+  if (source === "auto" && !OBUS_JOBS_AUTO_RUN_ENABLED) return;
+  try {
+    const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
+    const filters = { endpointUrl: OBUS_JOBS_API_URL };
+    console.log(`[ObusJobsScheduler] (${source}) taraması başlıyor.`);
+    const report = await executeObusJobsScreenAction({
+      filters,
+      partnerItems
+    });
+    const selectedCompanyMeta = partnerItems.length > 0 ? partnerItems[0] : null;
+
+    if (Array.isArray(report.clusterResults) && report.clusterResults.length > 0) {
+      try {
+        const saveResult = await saveObusJobsReportToDb({
+          report,
+          selectedCompanyMeta,
+          endpointUrl: filters.endpointUrl,
+          userId: null,
+          source: `obus-jobs-${source}`
+        });
+        console.log(`[ObusJobsScheduler] SQL kaydı oluşturuldu (#${saveResult.runId}).`);
+        report.saveResult = saveResult;
+      } catch (err) {
+        console.error(`[ObusJobsScheduler] SQL kaydı başarısız: ${summarizeErrorMessage(err)}`);
+      }
+
+      try {
+        const slackResult = await postObusJobsReportToSlack({
+          report,
+          selectedCompanyMeta,
+          user: null,
+          saveResult: report.saveResult
+        });
+        console.log(`[ObusJobsScheduler] Slack bildirimi ${slackResult.channelLabel} kanalına gönderildi.`);
+      } catch (err) {
+        console.error(`[ObusJobsScheduler] Slack bildirimi başarısız: ${summarizeErrorMessage(err)}`);
+      }
+    } else {
+      console.log("[ObusJobsScheduler] Kayıt üretilemedi (cluster sonucu yok).");
+    }
+  } catch (err) {
+    console.error(`[ObusJobsScheduler] Hata: ${summarizeErrorMessage(err)}`);
+  }
+}
+
+function scheduleNextObusJobsRun() {
+  if (!OBUS_JOBS_AUTO_RUN_ENABLED) return;
+  const delay = parseTimeToNextDelay(OBUS_JOBS_AUTO_RUN_TIME);
+  if (obusJobsAutoTimeout) {
+    clearTimeout(obusJobsAutoTimeout);
+  }
+  obusJobsAutoTimeout = setTimeout(async () => {
+    await runObusJobsScheduledScan({ source: "auto" });
+    scheduleNextObusJobsRun();
+  }, delay);
+  console.log(`[ObusJobsScheduler] Bir sonraki tarama ${Math.round(delay / 1000 / 60)} dakika sonra planlandı.`);
+}
+
+function startObusJobsAutoScheduler() {
+  if (!OBUS_JOBS_AUTO_RUN_ENABLED) {
+    console.log("[ObusJobsScheduler] Otomatik tarama devre dışı.");
+    return;
+  }
+  scheduleNextObusJobsRun();
+}
+
 function parseSlackAutoSaveTime(value) {
   const raw = String(value || "").trim();
   const matched = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -8953,6 +9026,19 @@ function isDateBeforeToday(value) {
   const target = new Date(parsed);
   target.setHours(0, 0, 0, 0);
   return target.getTime() < today.getTime();
+}
+
+function parseTimeToNextDelay(value) {
+  const now = new Date();
+  const match = String(value || "").match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  const hour = match ? Number(match[1]) : 10;
+  const minute = match ? Number(match[2]) : 0;
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target.getTime() - now.getTime();
 }
 
 function extractObusJobsItems(payload) {
@@ -12371,6 +12457,10 @@ app.get("/obus/journey-passengers", requireAuth, requireMenuAccess("journey-pass
   });
 });
 
+module.exports = {
+  runObusJobsScheduledScan
+};
+
 app.get("/reports/sales", requireAuth, requireMenuAccess("sales"), async (req, res) => {
   const normalizeDate = (value) => {
     if (typeof value !== "string") return "";
@@ -14143,7 +14233,7 @@ app.delete("/api/requests/:endpointId", requireAuth, async (req, res) => {
   }
 });
 
-if (!initDbOnly) {
+if (require.main === module && !initDbOnly) {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
