@@ -7490,26 +7490,16 @@ function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResu
   const companyCode = String(selectedCompanyMeta?.code || "").trim() || "-";
   const companyId = String(selectedCompanyMeta?.id || "").trim();
   const companyCluster = String(selectedCompanyMeta?.cluster || "").trim();
-  const companyLine = [companyCode, companyId ? `ID: ${companyId}` : "", companyCluster ? companyCluster : ""]
-    .filter(Boolean)
-    .join(" | ");
   const tableResult = buildObusJobsSlackTable({ report });
   const flaggedCells = Array.isArray(tableResult.flaggedCells) ? tableResult.flaggedCells : [];
   if (!flaggedCells.length) {
-    return {
-      summary: ""
-    };
+    return { summary: "" };
   }
-  const lines = [
-    `Firma: ${companyLine || "-"}`,
-    ""
-  ];
+  const lines = [];
   flaggedCells.slice(0, 5).forEach((flag) => {
-    lines.push(`cluster ${flag.cluster} ${flag.jobLabel} failed.`);
+    lines.push(`cluster ${flag.cluster} ${flag.jobLabel} job Failed. @Ömer Serdaroğlu - Tech kontrol edebilir misin`);
   });
-  return {
-    summary: lines.join("\n")
-  };
+  return { summary: lines.join("\n") };
 }
 
 function buildObusJobsSlackTable({ report }) {
@@ -7532,13 +7522,14 @@ function buildObusJobsSlackTable({ report }) {
         isPast: Boolean(job.isPastExecution),
         isError: String(job.lastJobState || "").trim().toLowerCase() !== "succeeded"
       });
+      const stateNorm = String(job.lastJobState || "").trim().toLowerCase();
       if (job.isPastExecution) {
         flaggedCells.push({
           cluster: row.clusterLabel,
           jobLabel: column.label,
           reason: "Tarih geçmiş"
         });
-      } else if (String(job.lastJobState || "").trim().toLowerCase() !== "succeeded") {
+      } else if (stateNorm && stateNorm !== "succeeded" && stateNorm !== "processing") {
         flaggedCells.push({
           cluster: row.clusterLabel,
           jobLabel: column.label,
