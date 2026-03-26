@@ -12322,6 +12322,7 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
   const filters = {
     endpointUrl: String(req.body.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL
   };
+  const selectedCompanyMeta = partnerItems.length > 0 ? partnerItems[0] : null;
   const report = await executeObusJobsScreenAction({
     filters,
     partnerItems
