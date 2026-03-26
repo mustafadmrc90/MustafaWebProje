@@ -7505,20 +7505,16 @@ function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResu
   if (actorName) {
     lines.push(`Çalıştıran: ${actorName}`);
   }
-  if (summary.errorSamples.length > 0) {
-    lines.push(`Hata Örneği: ${summary.errorSamples.join(" | ")}`);
-  }
-
   const tableResult = buildObusJobsSlackTable({ report });
   if (Array.isArray(tableResult.flaggedCells) && tableResult.flaggedCells.length > 0) {
-    lines.push("Uyarılı hücreler:");
+    lines.push("");
+    lines.push("Hatalı Job :");
     tableResult.flaggedCells.slice(0, 5).forEach((flag) => {
       lines.push(`• Cluster ${flag.cluster} / ${flag.jobLabel} → ${flag.reason}`);
     });
   }
   return {
-    summary: lines.join("\n"),
-    tableText: tableResult.tableText
+    summary: lines.join("\n")
   };
 }
 
@@ -7603,17 +7599,15 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
     unfurl_links: false,
     unfurl_media: false
   };
-  if (message.tableText) {
-    payload.blocks = [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `${message.summary}\n\n\`\`\`${message.tableText}\`\`\``
-        }
+  payload.blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: message.summary
       }
-    ];
-  }
+    }
+  ];
   const response = await slackApiPost("chat.postMessage", token, payload);
 
   return {
