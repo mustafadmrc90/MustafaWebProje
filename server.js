@@ -7490,29 +7490,23 @@ function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResu
   const companyCode = String(selectedCompanyMeta?.code || "").trim() || "-";
   const companyId = String(selectedCompanyMeta?.id || "").trim();
   const companyCluster = String(selectedCompanyMeta?.cluster || "").trim();
-  const actorName = String(user?.displayName || user?.username || "").trim();
   const companyLine = [companyCode, companyId ? `ID: ${companyId}` : "", companyCluster ? companyCluster : ""]
     .filter(Boolean)
     .join(" | ");
-  const lines = [
-    "*Obus Joblar* sorgusu tamamlandı.",
-    `Firma: ${companyLine || "-"}`,
-    `Zaman: ${generatedAt}`,
-    `SQL: ${saveResult?.runId ? `kaydedildi (#${saveResult.runId})` : "kaydedilemedi"}`,
-    `Cluster: ${summary.requestedClusterCount} | Başarılı: ${summary.successClusterCount} | Hatalı: ${summary.errorClusterCount}`,
-    `Job Kolonu: ${summary.jobColumnCount} | Job Kaydı: ${summary.jobItemCount}`
-  ];
-  if (actorName) {
-    lines.push(`Çalıştıran: ${actorName}`);
-  }
   const tableResult = buildObusJobsSlackTable({ report });
-  if (Array.isArray(tableResult.flaggedCells) && tableResult.flaggedCells.length > 0) {
-    lines.push("");
-    lines.push("Hatalı Job :");
-    tableResult.flaggedCells.slice(0, 5).forEach((flag) => {
-      lines.push(`• Cluster ${flag.cluster} / ${flag.jobLabel} → ${flag.reason}`);
-    });
+  const flaggedCells = Array.isArray(tableResult.flaggedCells) ? tableResult.flaggedCells : [];
+  if (!flaggedCells.length) {
+    return {
+      summary: ""
+    };
   }
+  const lines = [
+    `Firma: ${companyLine || "-"}`,
+    ""
+  ];
+  flaggedCells.slice(0, 5).forEach((flag) => {
+    lines.push(`cluster ${flag.cluster} ${flag.jobLabel} failed.`);
+  });
   return {
     summary: lines.join("\n")
   };
@@ -7599,15 +7593,17 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
     unfurl_links: false,
     unfurl_media: false
   };
-  payload.blocks = [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: message.summary
+  if (message.summary) {
+    payload.blocks = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: message.summary
+        }
       }
-    }
-  ];
+    ];
+  }
   const response = await slackApiPost("chat.postMessage", token, payload);
 
   return {
