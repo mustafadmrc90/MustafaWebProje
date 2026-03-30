@@ -2091,11 +2091,25 @@
         liveFailure.textContent = `Hatalı: ${failure}`;
       }
     };
-    const setDeactivateRowStatus = (row, text, kind) => {
+    const shortenStatusText = (text, maxLength = 96) => {
+      const normalized = String(text || "").replace(/\s+/g, " ").trim();
+      if (!normalized) return "";
+      if (normalized.length <= maxLength) return normalized;
+      return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+    };
+    const setDeactivateRowStatus = (row, text, kind, detail = "") => {
       const cell = row?.querySelector("[data-obus-user-status-cell='1']");
       if (!cell) return;
       cell.textContent = String(text || "").trim() || "-";
       cell.className = `obus-live-status ${kind || "pending"}`;
+      const tooltip = String(detail || "").trim();
+      if (tooltip) {
+        cell.setAttribute("title", tooltip);
+        cell.classList.add("has-detail");
+      } else {
+        cell.removeAttribute("title");
+        cell.classList.remove("has-detail");
+      }
     };
     const applyDeactivateEventToRow = (eventItem) => {
       const key = String(eventItem?.key || "").trim();
@@ -2104,7 +2118,11 @@
       if (eventItem?.ok === true) {
         setDeactivateRowStatus(row, eventItem.message || "Pasife alındı", "success");
       } else {
-        setDeactivateRowStatus(row, eventItem.error || "İşlem başarısız", "failure");
+        const errorText = String(eventItem?.error || "").trim() || "İşlem başarısız";
+        const errorDetail = String(eventItem?.errorDetail || "").trim();
+        const visibleText = shortenStatusText(errorDetail || errorText);
+        const tooltipText = errorDetail && errorDetail !== errorText ? `${errorText} | ${errorDetail}` : errorDetail || errorText;
+        setDeactivateRowStatus(row, visibleText, "failure", tooltipText);
       }
     };
     const pollLiveJob = async (jobId, onEvent) => {

@@ -410,10 +410,17 @@ const OBUS_JOB_FIXED_PASSWORD = String(
 const OBUS_JOBS_AUTO_RUN_ENABLED =
   String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
 const OBUS_JOBS_AUTO_RUN_TIME = String(process.env.OBUS_JOBS_AUTO_RUN_TIME || "10:00").trim();
+const APP_TIME_ZONE = String(process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Istanbul")
+  .trim() || "Europe/Istanbul";
+const OBUS_JOBS_AUTO_RUN_SOURCE = "obus-jobs-auto";
 const slackReplyReportCache = new Map();
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
 const jiraEpicMetaCache = new Map();
+const obusJobsAutoState = {
+  timerId: null,
+  isRunning: false
+};
 const slackAutoSaveState = {
   timerId: null,
   isRunning: false
@@ -2322,6 +2329,47 @@ function buildObusServiceTraceText(trace, fallbackError = "", { bodyMaxLen = 160
   }
 
   return parts.join(" | ");
+}
+
+function extractObusApiLogDetail(payload, rawBody = "", fallbackText = "") {
+  const normalizedPayload = payload && typeof payload === "object" ? payload : null;
+  const logCandidate = normalizedPayload
+    ? getDeepValueByKeyMatcher(
+        normalizedPayload,
+        (normalizedKey) =>
+          [
+            "log",
+            "logs",
+            "servicelog",
+            "servicelogs",
+            "failedservicelog",
+            "failedservicelogs",
+            "debug",
+            "trace",
+            "traces"
+          ].includes(normalizedKey)
+      )
+    : undefined;
+  const detailCandidate =
+    logCandidate !== undefined
+      ? logCandidate
+      : normalizedPayload
+        ? getDeepValueByKeyMatcher(
+            normalizedPayload,
+            (normalizedKey) => ["detail", "details", "description", "reason", "note", "notes"].includes(normalizedKey)
+          )
+        : undefined;
+
+  const detailText = truncateObusDebugText(
+    normalizeObusDebugPayload(detailCandidate !== undefined ? detailCandidate : ""),
+    260
+  );
+  const fallbackDetail = truncateObusDebugText(maskSensitiveObusDebugText(rawBody), 260);
+  const fallbackError = truncateObusDebugText(String(fallbackText || "").trim(), 220);
+
+  if (detailText && detailText !== fallbackError) return detailText;
+  if (fallbackDetail && fallbackDetail !== fallbackError) return `Ham yanıt: ${fallbackDetail}`;
+  return "";
 }
 
 function buildUserLoginTokenMissingDetail({
@@ -7608,10 +7656,13 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
   };
 }
 
-let obusJobsAutoTimeout = null;
-
 async function runObusJobsScheduledScan({ source = "auto" } = {}) {
   if (source === "auto" && !OBUS_JOBS_AUTO_RUN_ENABLED) return;
+  if (obusJobsAutoState.isRunning) {
+    console.log(`[ObusJobsScheduler] (${source}) taraması atlandı; önceki çalışma sürüyor.`);
+    return;
+  }
+  obusJobsAutoState.isRunning = true;
   try {
     const { companies, partnerItems } = await loadAuthorizedLinesCompanies();
     const filters = { endpointUrl: OBUS_JOBS_API_URL };
@@ -7653,20 +7704,74 @@ async function runObusJobsScheduledScan({ source = "auto" } = {}) {
     }
   } catch (err) {
     console.error(`[ObusJobsScheduler] Hata: ${summarizeErrorMessage(err)}`);
+  } finally {
+    obusJobsAutoState.isRunning = false;
   }
 }
 
 function scheduleNextObusJobsRun() {
   if (!OBUS_JOBS_AUTO_RUN_ENABLED) return;
   const delay = parseTimeToNextDelay(OBUS_JOBS_AUTO_RUN_TIME);
-  if (obusJobsAutoTimeout) {
-    clearTimeout(obusJobsAutoTimeout);
+  if (obusJobsAutoState.timerId) {
+    clearTimeout(obusJobsAutoState.timerId);
   }
-  obusJobsAutoTimeout = setTimeout(async () => {
+  obusJobsAutoState.timerId = setTimeout(async () => {
     await runObusJobsScheduledScan({ source: "auto" });
     scheduleNextObusJobsRun();
   }, delay);
   console.log(`[ObusJobsScheduler] Bir sonraki tarama ${Math.round(delay / 1000 / 60)} dakika sonra planlandı.`);
+}
+
+function parseObusJobsAutoRunTime(value) {
+  const raw = String(value || "").trim();
+  const matched = raw.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!matched) {
+    return { hour: 10, minute: 0, normalized: "10:00", valid: false };
+  }
+  const hour = Number.parseInt(matched[1], 10);
+  const minute = Number.parseInt(matched[2], 10);
+  return {
+    hour,
+    minute,
+    normalized: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    valid: true
+  };
+}
+
+async function hasObusJobsAutoRunForDate(targetDate) {
+  const normalizedDate = normalizeIsoDateInput(targetDate);
+  if (!normalizedDate) return false;
+
+  const result = await pool.query(
+    `
+      SELECT 1
+      FROM obus_jobs_runs
+      WHERE source = $1
+        AND created_by IS NULL
+        AND (created_at AT TIME ZONE $2)::date = $3::date
+      ORDER BY id DESC
+      OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+    `,
+    [OBUS_JOBS_AUTO_RUN_SOURCE, APP_TIME_ZONE, normalizedDate]
+  );
+
+  return result.rows.length > 0;
+}
+
+async function runDueObusJobsAutoScanOnStartup(parsedTime, now = new Date()) {
+  if (!isSlackAutoSaveDueForToday(parsedTime, now)) return;
+
+  const today = formatDateToIsoLocal(now);
+  if (!today) return;
+
+  const alreadyCompleted = await hasObusJobsAutoRunForDate(today);
+  if (alreadyCompleted) {
+    console.log(`[ObusJobsScheduler] ${today} için otomatik tarama zaten kaydedilmiş.`);
+    return;
+  }
+
+  console.log(`[ObusJobsScheduler] ${today} için kaçan otomatik tarama başlangıçta tetikleniyor.`);
+  await runObusJobsScheduledScan({ source: "auto" });
 }
 
 function startObusJobsAutoScheduler() {
@@ -7674,7 +7779,19 @@ function startObusJobsAutoScheduler() {
     console.log("[ObusJobsScheduler] Otomatik tarama devre dışı.");
     return;
   }
+
+  const parsedTime = parseObusJobsAutoRunTime(OBUS_JOBS_AUTO_RUN_TIME);
+  if (!parsedTime.valid) {
+    console.warn(
+      `[ObusJobsScheduler] OBUS_JOBS_AUTO_RUN_TIME değeri geçersiz (${OBUS_JOBS_AUTO_RUN_TIME}). 10:00 kullanılacak.`
+    );
+  }
+
+  console.log(`[ObusJobsScheduler] Günlük otomatik tarama aktif. Saat: ${parsedTime.normalized}`);
   scheduleNextObusJobsRun();
+  runDueObusJobsAutoScanOnStartup(parsedTime, new Date()).catch((err) => {
+    console.error(`[ObusJobsScheduler] başlangıç kontrol hatası: ${summarizeErrorMessage(err)}`);
+  });
 }
 
 function parseSlackAutoSaveTime(value) {
@@ -10273,7 +10390,7 @@ function extractObusUsersWithoutPermissionsRows(
     const normalizedUsername = String(username || "").trim();
     if (!normalizedId || !normalizedPartnerId || !normalizedUsername) return;
     if (isActive !== true) return;
-    if (normalizedFilter && !normalizedUsername.toLocaleLowerCase("tr").includes(normalizedFilter)) return;
+    if (normalizedFilter && normalizedUsername.toLocaleLowerCase("tr") !== normalizedFilter) return;
 
     collected.push({
       source: extractClusterLabel(clusterLabel),
@@ -10687,11 +10804,13 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
         String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
       response.statusText ||
       "Bilinmeyen hata";
+    const errorDetail = extractObusApiLogDetail(parsed, raw, errorText);
 
     if (!response.ok) {
       return {
         ok: false,
-        error: `HTTP ${response.status}: ${errorText}`
+        error: `HTTP ${response.status}: ${errorText}`,
+        errorDetail
       };
     }
 
@@ -10699,7 +10818,8 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
     if (!successByPayload) {
       return {
         ok: false,
-        error: errorText || "İşlem başarısız döndü."
+        error: errorText || "İşlem başarısız döndü.",
+        errorDetail
       };
     }
 
@@ -10794,10 +10914,11 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
           });
         }
       };
-      const pushLocalFailure = (item, errorText) => {
+      const pushLocalFailure = (item, errorText, errorDetail = "") => {
         const record = {
           label: buildObusUserDeactivateItemLabel(item),
-          error: String(errorText || "DeleteUser başarısız.").trim()
+          error: String(errorText || "DeleteUser başarısız.").trim(),
+          errorDetail: String(errorDetail || "").trim()
         };
         localFailureItems.push(record);
         if (notifyItemResult) {
@@ -10805,104 +10926,116 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
             key: String(item?.value || "").trim(),
             label: record.label,
             ok: false,
-            error: record.error
+            error: record.error,
+            errorDetail: record.errorDetail
           });
         }
       };
 
       const cluster = extractClusterLabel(contextGroup?.cluster || "");
       const clusterItems = Array.isArray(contextGroup?.items) ? contextGroup.items : [];
-      const contextFromMap = clusterContextMap.get(contextKey);
-      const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
-      const fallbackDeleteEndpointUrl = normalizeTargetUrl(
-        buildMembershipDeleteUserUrl(
-          fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
-          cluster
-        )
-      );
-      const deleteEndpointUrl = String(
-        contextFromMap?.deleteEndpointUrl || fallbackDeleteEndpointUrl || ""
-      ).trim();
-      const partnerCode =
-        String(contextFromMap?.partnerCode || "").trim() ||
-        String(contextGroup?.partnerCode || "").trim();
-      const loginPartnerId = String(clusterItems[0]?.["partner-id"] || "").trim();
-      const loginBranchId = String(contextFromMap?.loginBranchId || "").trim();
+      try {
+        const contextFromMap = clusterContextMap.get(contextKey);
+        const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(cluster);
+        const fallbackDeleteEndpointUrl = normalizeTargetUrl(
+          buildMembershipDeleteUserUrl(
+            fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
+            cluster
+          )
+        );
+        const deleteEndpointUrl = String(
+          contextFromMap?.deleteEndpointUrl || fallbackDeleteEndpointUrl || ""
+        ).trim();
+        const partnerCode =
+          String(contextFromMap?.partnerCode || "").trim() ||
+          String(contextGroup?.partnerCode || "").trim();
+        const loginPartnerId = String(clusterItems[0]?.["partner-id"] || "").trim();
+        const loginBranchId = String(contextFromMap?.loginBranchId || "").trim();
 
-      if (!deleteEndpointUrl) {
-        clusterItems.forEach((item) => {
-          pushLocalFailure(item, `${cluster}: DeleteUser URL oluşturulamadı.`);
-        });
-        return {
-          successItems: localSuccessItems,
-          failureItems: localFailureItems
-        };
-      }
-
-      const loginResult = await fetchAuthorizedLinesLoginInfo({
-        endpointUrl: deleteEndpointUrl,
-        companyUrl: "",
-        partnerCode,
-        partnerId: loginPartnerId,
-        username: OBUS_USER_CREATE_LOGIN_USERNAME,
-        password: OBUS_USER_CREATE_LOGIN_PASSWORD,
-        fallbackBranchId: "",
-        loginBranchId,
-        timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
-        authorization: OBUS_USER_CREATE_API_AUTH,
-        allowEmptyPartnerCode: false
-      });
-      if (!loginResult.ok) {
-        clusterItems.forEach((item) => {
-          pushLocalFailure(item, `${cluster}: ${loginResult.error || "UserLogin başarısız."}`);
-        });
-        return {
-          successItems: localSuccessItems,
-          failureItems: localFailureItems
-        };
-      }
-
-      const sessionId = String(loginResult.sessionId || "").trim();
-      const deviceId = String(loginResult.deviceId || "").trim();
-      const token = String(loginResult.token || "").trim();
-      if (!sessionId || !deviceId || !token) {
-        clusterItems.forEach((item) => {
-          pushLocalFailure(item, `${cluster}: UserLogin sonrası session/device/token eksik.`);
-        });
-        return {
-          successItems: localSuccessItems,
-          failureItems: localFailureItems
-        };
-      }
-
-      const deleteResults = await runWithConcurrency(
-        clusterItems,
-        Math.max(1, Math.min(clusterItems.length || 1, OBUS_USER_DEACTIVATE_DELETE_CONCURRENCY)),
-        async (item) => {
-          const result = await sendObusDeleteUserRequest({
-            endpointUrl: deleteEndpointUrl,
-            sessionId,
-            deviceId,
-            token,
-            userId: item?.id
+        if (!deleteEndpointUrl) {
+          clusterItems.forEach((item) => {
+            pushLocalFailure(item, `${cluster}: DeleteUser URL oluşturulamadı.`);
           });
           return {
-            item,
-            result
+            successItems: localSuccessItems,
+            failureItems: localFailureItems
           };
         }
-      );
 
-      deleteResults.forEach((entry) => {
-        const item = entry?.item;
-        const result = entry?.result;
-        if (!item || !result || typeof result !== "object") return;
-        if (result.ok) {
-          pushLocalSuccess(item, result.message);
-        } else {
-          pushLocalFailure(item, `${cluster}: ${String(result.error || "DeleteUser başarısız.").trim()}`);
+        const loginResult = await fetchAuthorizedLinesLoginInfo({
+          endpointUrl: deleteEndpointUrl,
+          companyUrl: "",
+          partnerCode,
+          partnerId: loginPartnerId,
+          username: OBUS_USER_CREATE_LOGIN_USERNAME,
+          password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+          fallbackBranchId: "",
+          loginBranchId,
+          timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+          authorization: OBUS_USER_CREATE_API_AUTH,
+          allowEmptyPartnerCode: false
+        });
+        if (!loginResult.ok) {
+          clusterItems.forEach((item) => {
+            pushLocalFailure(item, `${cluster}: ${loginResult.error || "UserLogin başarısız."}`);
+          });
+          return {
+            successItems: localSuccessItems,
+            failureItems: localFailureItems
+          };
         }
-      });
+
+        const sessionId = String(loginResult.sessionId || "").trim();
+        const deviceId = String(loginResult.deviceId || "").trim();
+        const token = String(loginResult.token || "").trim();
+        if (!sessionId || !deviceId || !token) {
+          clusterItems.forEach((item) => {
+            pushLocalFailure(item, `${cluster}: UserLogin sonrası session/device/token eksik.`);
+          });
+          return {
+            successItems: localSuccessItems,
+            failureItems: localFailureItems
+          };
+        }
+
+        const deleteResults = await runWithConcurrency(
+          clusterItems,
+          Math.max(1, Math.min(clusterItems.length || 1, OBUS_USER_DEACTIVATE_DELETE_CONCURRENCY)),
+          async (item) => {
+            const result = await sendObusDeleteUserRequest({
+              endpointUrl: deleteEndpointUrl,
+              sessionId,
+              deviceId,
+              token,
+              userId: item?.id
+            });
+            return {
+              item,
+              result
+            };
+          }
+        );
+
+        deleteResults.forEach((entry) => {
+          const item = entry?.item;
+          const result = entry?.result;
+          if (!item || !result || typeof result !== "object") return;
+          if (result.ok) {
+            pushLocalSuccess(item, result.message);
+          } else {
+            pushLocalFailure(
+              item,
+              `${cluster}: ${String(result.error || "DeleteUser başarısız.").trim()}`,
+              String(result.errorDetail || "").trim()
+            );
+          }
+        });
+      } catch (err) {
+        const fallbackError = `${cluster || "cluster"}: ${err?.message || "Pasife alma işlemi tamamlanamadı."}`;
+        clusterItems.forEach((item) => {
+          pushLocalFailure(item, fallbackError);
+        });
+      }
 
       return {
         successItems: localSuccessItems,
