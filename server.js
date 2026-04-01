@@ -54,6 +54,9 @@ loadLocalEnvFile();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
+const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "5mb").trim() || "5mb";
+const REQUEST_BODY_PARAMETER_LIMIT =
+  Number.parseInt(process.env.REQUEST_BODY_PARAMETER_LIMIT || "50000", 10) || 50000;
 const initDbOnly = String(process.env.INIT_DB_ONLY || "")
   .trim()
   .toLowerCase() === "true";
@@ -571,8 +574,14 @@ function extractOpenAIText(payload) {
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(
+  express.urlencoded({
+    extended: false,
+    limit: REQUEST_BODY_LIMIT,
+    parameterLimit: REQUEST_BODY_PARAMETER_LIMIT
+  })
+);
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "dev-secret-change-me",
@@ -2979,6 +2988,55 @@ function parseSelectedCompanyValuesFromInput(value) {
     .split(",")
     .map((item) => String(item || "").trim())
     .filter(Boolean);
+}
+
+function normalizeObusBulkCreateSelectedKeys(rawKeys) {
+  const list = Array.isArray(rawKeys) ? rawKeys : [];
+  const normalized = [];
+  const usedKeys = new Set();
+
+  list.forEach((rawItem) => {
+    const key = String(rawItem || "").trim();
+    if (!key || usedKeys.has(key)) return;
+    usedKeys.add(key);
+    normalized.push(key);
+  });
+
+  return normalized;
+}
+
+function buildObusBulkCreateTargetItemsFromSelection({ selectedKeys, selectedCompanyValues, userEntries }) {
+  const normalizedKeys = normalizeObusBulkCreateSelectedKeys(selectedKeys);
+  if (normalizedKeys.length === 0) return [];
+
+  const selectedCompanies = parseSelectedCompanyValuesFromInput(selectedCompanyValues);
+  const normalizedEntries = normalizeObusBulkCreateUserEntries(userEntries);
+  const selectedKeySet = new Set(normalizedKeys);
+  const normalizedTargets = [];
+  const usedKeys = new Set();
+
+  selectedCompanies.forEach((companyValue) => {
+    const normalizedCompanyValue = String(companyValue || "").trim();
+    if (!normalizedCompanyValue) return;
+
+    normalizedEntries.forEach((entry, index) => {
+      const entryId = String(entry?.entryId || `row-${index + 1}`).trim() || `row-${index + 1}`;
+      const key = `${normalizedCompanyValue}|||${entryId}`;
+      if (!selectedKeySet.has(key) || usedKeys.has(key)) return;
+
+      normalizedTargets.push({
+        key,
+        companyValue: normalizedCompanyValue,
+        entryId,
+        fullName: String(entry?.fullName || "").trim(),
+        username: String(entry?.username || "").trim(),
+        password: String(entry?.password || "")
+      });
+      usedKeys.add(key);
+    });
+  });
+
+  return normalizedTargets;
 }
 
 function extractPartnerIdFromCompanyLabel(label) {
@@ -11878,8 +11936,20 @@ async function buildObusUserCreatePostResult({ body }) {
 
 async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
   try {
+    const bulkTargetsFromSelection =
+      bulkMode === true
+        ? buildObusBulkCreateTargetItemsFromSelection({
+            selectedKeys: req.body?.selectedKeys,
+            selectedCompanyValues: req.body?.selectedCompanies,
+            userEntries: req.body?.userEntries
+          })
+        : [];
     const normalizedBulkTargets =
-      bulkMode === true ? normalizeObusBulkCreateTargetItems(req.body?.targets) : [];
+      bulkMode === true
+        ? bulkTargetsFromSelection.length > 0
+          ? bulkTargetsFromSelection
+          : normalizeObusBulkCreateTargetItems(req.body?.targets)
+        : [];
     const selectedCompaniesInput =
       normalizedBulkTargets.length > 0
         ? normalizedBulkTargets.map((item) => String(item.companyValue || "").trim())
@@ -11902,6 +11972,13 @@ async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
       return res
         .status(400)
         .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
+    }
+
+    if (bulkMode === true && normalizedBulkTargets.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Oluşturmak için sorgu listesinden en az bir kullanıcı seçmelisiniz."
+      });
     }
 
     if (bulkMode === true && normalizedBulkTargets.length > 0) {
@@ -14364,6 +14441,40 @@ app.delete("/api/requests/:endpointId", requireAuth, async (req, res) => {
     console.error(err);
     res.status(500).json({ ok: false });
   }
+});
+
+function wantsJsonErrorResponse(req) {
+  const pathText = String(req.path || req.originalUrl || "").trim();
+  if (pathText.startsWith("/api/")) return true;
+
+  const accept = String(req.headers?.accept || "").toLowerCase();
+  const contentType = String(req.headers?.["content-type"] || "").toLowerCase();
+  return accept.includes("application/json") || contentType.includes("application/json");
+}
+
+function buildRequestBodyTooLargeMessage(req) {
+  const pathText = String(req.path || req.originalUrl || "").trim();
+  const limitText = String(REQUEST_BODY_LIMIT || "5mb").trim();
+
+  if (/^\/api\/obus-user-create-bulk\/live\/start(?:\/|$)/.test(pathText)) {
+    return `Toplu kullanıcı oluşturma isteği çok büyük. Seçilen firma ve kullanıcı sayısı nedeniyle gönderilen veri sunucu limitini (${limitText}) aştı.`;
+  }
+  if (/^\/api\/obus-user-create-bulk\/check(?:\/|$)/.test(pathText)) {
+    return `Toplu kullanıcı sorgu isteği çok büyük. Girilen kullanıcı ve firma listesi sunucu limitini (${limitText}) aştı.`;
+  }
+  return `Gönderilen veri sunucu limitini (${limitText}) aştı.`;
+}
+
+app.use((err, req, res, next) => {
+  if (err?.type !== "entity.too.large" && Number(err?.status || 0) !== 413) {
+    return next(err);
+  }
+
+  const errorMessage = buildRequestBodyTooLargeMessage(req);
+  if (wantsJsonErrorResponse(req)) {
+    return res.status(413).json({ ok: false, error: errorMessage });
+  }
+  return res.status(413).send(errorMessage);
 });
 
 if (require.main === module && !initDbOnly) {

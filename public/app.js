@@ -139,8 +139,22 @@
     }
   };
 
+  const getPayloadTooLargeMessage = (fallback) => {
+    const actionText = String(fallback || "").trim().toLocaleLowerCase("tr");
+    if (actionText.includes("toplu kullanıcı oluşturma")) {
+      return "Toplu kullanıcı oluşturma isteği çok büyük. Çok fazla firma veya kullanıcı seçildiği için gönderilen veri sınırı aşıldı.";
+    }
+    if (actionText.includes("toplu kullanıcı sorgusu")) {
+      return "Toplu kullanıcı sorgu isteği çok büyük. Girilen kullanıcı veya firma sayısı nedeniyle gönderilen veri sınırı aşıldı.";
+    }
+    return "İstek çok büyük. Gönderilen veri sunucu sınırını aştı.";
+  };
+
   const getApiErrorMessage = (response, data, fallback) => {
     if (data?.error) return data.error;
+    if (response?.status === 413) {
+      return getPayloadTooLargeMessage(fallback);
+    }
     if (response?.status === 401) {
       return "Oturum süresi doldu. Lütfen tekrar giriş yapın.";
     }
@@ -1830,15 +1844,10 @@
               },
               body: JSON.stringify({
                 selectedCompanies: selectedValues,
-                targets: selectedTargets.map((item) => ({
-                  key: String(item.key || "").trim(),
-                  companyValue: String(item.companyValue || "").trim(),
-                  entryId: String(item.entryId || "").trim(),
-                  fullName: String(item.fullName || "").trim(),
-                  username: String(item.username || "").trim(),
-                  password: String(item.password || ""),
-                  bulk: String(bulkInput?.value || "1").trim()
-                })),
+                selectedKeys: selectedTargets
+                  .map((item) => String(item?.key || "").trim())
+                  .filter(Boolean),
+                userEntries: readBulkUserEntries(),
                 bulk: String(bulkInput?.value || "1").trim()
               })
             });
