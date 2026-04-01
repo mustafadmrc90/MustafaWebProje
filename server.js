@@ -941,6 +941,33 @@ async function initDb() {
     ON all_companies_cache (source, code, id)
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS obus_bulk_user_templates (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      entries_json TEXT NOT NULL,
+      created_by INTEGER REFERENCES users(id),
+      updated_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE obus_bulk_user_templates
+      ADD COLUMN IF NOT EXISTS name TEXT,
+      ADD COLUMN IF NOT EXISTS entries_json TEXT,
+      ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_obus_bulk_user_templates_name_lookup
+    ON obus_bulk_user_templates ((lower(name)))
+  `);
+
   const userCount = await pool.query("SELECT CAST(COUNT(*) AS INT) AS count FROM users");
   if (userCount.rows[0].count === 0) {
     const passwordHash = await bcrypt.hash("admin123", 10);
@@ -11563,6 +11590,149 @@ function normalizeObusBulkCreateUserEntries(rawEntries) {
   return normalized;
 }
 
+function normalizeObusBulkUserTemplateEntries(rawEntries) {
+  return normalizeObusBulkCreateUserEntries(rawEntries).map((entry) => ({
+    fullName: String(entry?.fullName || "").trim(),
+    username: String(entry?.username || "").trim(),
+    password: String(entry?.password || "")
+  }));
+}
+
+function normalizeObusBulkUserTemplateName(rawValue) {
+  return String(rawValue || "").trim().slice(0, 80);
+}
+
+function mapObusBulkUserTemplateRow(row) {
+  const source = row && typeof row === "object" ? row : {};
+  const parsedEntries = parseJsonSafe(source.entries_json);
+  const entries = Array.isArray(parsedEntries) ? normalizeObusBulkUserTemplateEntries(parsedEntries) : [];
+  return {
+    id: String(source.id || "").trim(),
+    name: String(source.name || "").trim(),
+    entries,
+    createdAt: Date.parse(source.created_at || "") || 0,
+    updatedAt: Date.parse(source.updated_at || source.created_at || "") || 0,
+    createdByName: String(source.created_by_name || "").trim(),
+    updatedByName: String(source.updated_by_name || source.created_by_name || "").trim()
+  };
+}
+
+async function listObusBulkUserTemplates() {
+  const result = await pool.query(`
+    SELECT
+      t.id,
+      t.name,
+      t.entries_json,
+      t.created_at,
+      t.updated_at,
+      COALESCE(created_user.display_name, created_user.username, '-') AS created_by_name,
+      COALESCE(updated_user.display_name, updated_user.username, created_user.display_name, created_user.username, '-') AS updated_by_name
+    FROM obus_bulk_user_templates t
+    LEFT JOIN users created_user ON created_user.id = t.created_by
+    LEFT JOIN users updated_user ON updated_user.id = t.updated_by
+    ORDER BY t.updated_at DESC, t.id DESC
+  `);
+
+  return result.rows
+    .map((row) => mapObusBulkUserTemplateRow(row))
+    .filter((item) => item.id && item.name && item.entries.length > 0);
+}
+
+async function saveObusBulkUserTemplate({ name, entries, userId = null }) {
+  const normalizedName = normalizeObusBulkUserTemplateName(name);
+  const normalizedEntries = normalizeObusBulkUserTemplateEntries(entries);
+  const normalizedUserId = Number.isInteger(Number(userId)) && Number(userId) > 0 ? Number(userId) : null;
+
+  if (!normalizedName) {
+    return {
+      item: null,
+      error: "Şablon adı zorunludur."
+    };
+  }
+  if (normalizedEntries.length === 0) {
+    return {
+      item: null,
+      error: "Kaydetmek için en az bir dolu kullanıcı satırı girin."
+    };
+  }
+
+  const serializedEntries = JSON.stringify(normalizedEntries);
+  const existingResult = await pool.query(
+    `
+      SELECT id
+      FROM obus_bulk_user_templates
+      WHERE lower(name) = lower($1)
+      ORDER BY id ASC
+      LIMIT 1
+    `,
+    [normalizedName]
+  );
+  const existing = existingResult.rows[0];
+
+  let templateId = Number(existing?.id || 0);
+  if (templateId > 0) {
+    await pool.query(
+      `
+        UPDATE obus_bulk_user_templates
+        SET name = $1,
+            entries_json = $2,
+            updated_by = $3,
+            updated_at = now()
+        WHERE id = $4
+      `,
+      [normalizedName, serializedEntries, normalizedUserId, templateId]
+    );
+  } else {
+    const insertResult = await pool.query(
+      `
+        INSERT INTO obus_bulk_user_templates
+          (name, entries_json, created_by, updated_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+      `,
+      [normalizedName, serializedEntries, normalizedUserId, normalizedUserId]
+    );
+    templateId = Number(insertResult.rows[0]?.id || 0);
+  }
+
+  if (!Number.isInteger(templateId) || templateId <= 0) {
+    return {
+      item: null,
+      error: "Şablon kaydedilemedi."
+    };
+  }
+
+  const result = await pool.query(
+    `
+      SELECT
+        t.id,
+        t.name,
+        t.entries_json,
+        t.created_at,
+        t.updated_at,
+        COALESCE(created_user.display_name, created_user.username, '-') AS created_by_name,
+        COALESCE(updated_user.display_name, updated_user.username, created_user.display_name, created_user.username, '-') AS updated_by_name
+      FROM obus_bulk_user_templates t
+      LEFT JOIN users created_user ON created_user.id = t.created_by
+      LEFT JOIN users updated_user ON updated_user.id = t.updated_by
+      WHERE t.id = $1
+      LIMIT 1
+    `,
+    [templateId]
+  );
+  const item = mapObusBulkUserTemplateRow(result.rows[0]);
+
+  return item?.id
+    ? {
+        item,
+        error: null
+      }
+    : {
+        item: null,
+        error: "Şablon kaydedilemedi."
+      };
+}
+
 function buildObusGetUsersWithoutPermissionsTargetForCompany(company) {
   const source = company && typeof company === "object" ? company : {};
   const meta = source.meta && typeof source.meta === "object" ? source.meta : {};
@@ -11870,7 +12040,8 @@ function buildObusUserCreateScreenConfig({ bulkMode = false } = {}) {
     activeKey: isBulk ? "obus-user-create-bulk" : "obus-user-create",
     formAction: isBulk ? "/general/obus-user-create-bulk" : "/general/obus-user-create",
     liveStartApiPath: isBulk ? "/api/obus-user-create-bulk/live/start" : "/api/obus-user-create/live/start",
-    bulkCheckApiPath: "/api/obus-user-create-bulk/check"
+    bulkCheckApiPath: "/api/obus-user-create-bulk/check",
+    bulkTemplatesApiPath: "/api/obus-user-create-bulk/templates"
   };
 }
 
@@ -11883,6 +12054,7 @@ function renderObusUserCreateScreen({ req, res, pageState, report, bulkMode = fa
     formAction: screenConfig.formAction,
     liveStartApiPath: screenConfig.liveStartApiPath,
     bulkCheckApiPath: screenConfig.bulkCheckApiPath,
+    bulkTemplatesApiPath: screenConfig.bulkTemplatesApiPath,
     companies: pageState.companies,
     partnerError: pageState.partnerError,
     selectedCompanyValues: pageState.selectedCompanyValues,
@@ -12355,6 +12527,58 @@ app.post(
       return res.status(500).json({
         ok: false,
         error: `Toplu kullanıcı sorgusu tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/obus-user-create-bulk/templates",
+  requireAuth,
+  requireMenuAccess("obus-user-create-bulk"),
+  async (req, res) => {
+    try {
+      const items = await listObusBulkUserTemplates();
+      return res.json({
+        ok: true,
+        items
+      });
+    } catch (err) {
+      console.error("Obus bulk user templates load error:", err);
+      return res.status(500).json({
+        ok: false,
+        error: `Şablonlar alınamadı: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/obus-user-create-bulk/templates",
+  requireAuth,
+  requireMenuAccess("obus-user-create-bulk"),
+  async (req, res) => {
+    try {
+      const result = await saveObusBulkUserTemplate({
+        name: req.body?.name,
+        entries: req.body?.entries,
+        userId: req.session.user?.id || null
+      });
+      if (result?.error) {
+        return res.status(400).json({
+          ok: false,
+          error: result.error
+        });
+      }
+      return res.json({
+        ok: true,
+        item: result.item
+      });
+    } catch (err) {
+      console.error("Obus bulk user template save error:", err);
+      return res.status(500).json({
+        ok: false,
+        error: `Şablon kaydedilemedi: ${err?.message || "Bilinmeyen hata"}`
       });
     }
   }

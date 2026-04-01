@@ -362,7 +362,7 @@
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
   const selectedTargetUrlStorageKey = "obus_selected_target_url_v1";
   const endpointLastResponsesStorageKey = "obus_endpoint_last_responses_v1";
-  const obusBulkUserTemplatesStorageKey = "obus_bulk_user_templates_v1";
+  const legacyObusBulkUserTemplatesStorageKey = "obus_bulk_user_templates_v1";
   const mentiChatGptChatStorageKey = "menti_chatgpt_chat_state_v1";
   const mentiChatGptChatRuntime = {
     cleanup: null
@@ -441,44 +441,103 @@
     }
   };
 
-  const loadObusBulkUserTemplatesFromStorage = () => {
+  const normalizeObusBulkUserTemplateItems = (items) =>
+    (Array.isArray(items) ? items : [])
+      .map((item) => {
+        const entries = Array.isArray(item?.entries)
+          ? item.entries
+              .map((entry) => ({
+                fullName: String(entry?.fullName || "").trim(),
+                username: String(entry?.username || "").trim(),
+                password: String(entry?.password || "")
+              }))
+              .filter((entry) => entry.fullName || entry.username || entry.password)
+          : [];
+        return {
+          id: String(item?.id || "").trim(),
+          name: String(item?.name || "").trim(),
+          createdAt: Number(item?.createdAt || 0),
+          updatedAt: Number(item?.updatedAt || item?.createdAt || 0),
+          createdByName: String(item?.createdByName || "").trim(),
+          updatedByName: String(item?.updatedByName || item?.createdByName || "").trim(),
+          entries
+        };
+      })
+      .filter((item) => item.id && item.name && item.entries.length > 0)
+      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+
+  const loadLegacyObusBulkUserTemplatesFromStorage = () => {
     try {
-      const raw = window.localStorage.getItem(obusBulkUserTemplatesStorageKey);
+      const raw = window.localStorage.getItem(legacyObusBulkUserTemplatesStorageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((item) => {
-          const entries = Array.isArray(item?.entries)
-            ? item.entries
-                .map((entry) => ({
-                  fullName: String(entry?.fullName || "").trim(),
-                  username: String(entry?.username || "").trim(),
-                  password: String(entry?.password || "")
-                }))
-                .filter((entry) => entry.fullName || entry.username || entry.password)
-            : [];
-          return {
-            id: String(item?.id || "").trim(),
-            name: String(item?.name || "").trim(),
-            createdAt: Number(item?.createdAt || 0),
-            updatedAt: Number(item?.updatedAt || item?.createdAt || 0),
-            entries
-          };
-        })
-        .filter((item) => item.id && item.name && item.entries.length > 0)
-        .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+      return normalizeObusBulkUserTemplateItems(parsed);
     } catch (err) {
       return [];
     }
   };
 
-  const saveObusBulkUserTemplatesToStorage = (templates) => {
+  const clearLegacyObusBulkUserTemplatesFromStorage = () => {
     try {
-      window.localStorage.setItem(obusBulkUserTemplatesStorageKey, JSON.stringify(templates || []));
+      window.localStorage.removeItem(legacyObusBulkUserTemplatesStorageKey);
       return true;
     } catch (err) {
       return false;
+    }
+  };
+
+  const loadObusBulkUserTemplates = async (url) => {
+    const endpointUrl = String(url || "").trim() || "/api/obus-user-create-bulk/templates";
+    try {
+      const response = await fetch(endpointUrl, {
+        headers: { Accept: "application/json" }
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || !data?.ok) {
+        return {
+          items: [],
+          error: getApiErrorMessage(response, data, "Şablonlar alınamadı")
+        };
+      }
+      return {
+        items: normalizeObusBulkUserTemplateItems(data.items),
+        error: null
+      };
+    } catch (err) {
+      return {
+        items: [],
+        error: err?.message || "Şablonlar alınamadı."
+      };
+    }
+  };
+
+  const saveObusBulkUserTemplate = async (url, payload) => {
+    const endpointUrl = String(url || "").trim() || "/api/obus-user-create-bulk/templates";
+    try {
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || !data?.ok) {
+        return {
+          item: null,
+          error: getApiErrorMessage(response, data, "Şablon kaydedilemedi")
+        };
+      }
+      return {
+        item: normalizeObusBulkUserTemplateItems([data.item])[0] || null,
+        error: null
+      };
+    } catch (err) {
+      return {
+        item: null,
+        error: err?.message || "Şablon kaydedilemedi."
+      };
     }
   };
 
@@ -1037,6 +1096,8 @@
       String(form.getAttribute("data-obus-live-start-url") || "").trim() || "/api/obus-user-create/live/start";
     const bulkCheckUrl =
       String(form.getAttribute("data-obus-bulk-check-url") || "").trim() || "/api/obus-user-create-bulk/check";
+    const bulkTemplatesApiUrl =
+      String(form.getAttribute("data-obus-bulk-templates-url") || "").trim() || "/api/obus-user-create-bulk/templates";
     const bulkUserList = form.querySelector("[data-obus-bulk-user-list='1']");
     const bulkAddRowBtn = form.querySelector("[data-obus-bulk-add-row='1']");
     const bulkCreateBtn = form.querySelector("[data-obus-bulk-create-button='1']");
@@ -1057,10 +1118,14 @@
     const bulkTemplateStatus = bulkTemplateModal?.querySelector("[data-obus-bulk-template-status='1']");
     const bulkTemplateList = bulkTemplateModal?.querySelector("[data-obus-bulk-template-list='1']");
     const liveRowByKey = new Map();
+    const bulkCheckItemByKey = new Map();
+    const bulkCheckRowByKey = new Map();
     const bulkSelectedCreateKeys = new Set();
-    let bulkTemplates = loadObusBulkUserTemplatesFromStorage();
+    let bulkTemplates = [];
     let bulkCheckItems = [];
     let bulkRowCounter = 1;
+    let bulkTemplatesLoading = false;
+    let legacyBulkTemplatesImportAttempted = false;
     let typeAheadText = "";
     let typeAheadTimerId = null;
 
@@ -1123,7 +1188,57 @@
         }))
         .filter((entry) => entry.fullName || entry.username || entry.password);
     const isBulkMissingCandidate = (item) =>
-      item && item.exists === false && !String(item.error || "").trim();
+      item &&
+      item.exists === false &&
+      !String(item.error || "").trim() &&
+      String(item.liveStatusKind || "").trim() !== "success" &&
+      String(item.liveStatusKind || "").trim() !== "queued";
+    const syncBulkCheckItemMap = () => {
+      bulkCheckItemByKey.clear();
+      bulkCheckItems.forEach((item) => {
+        const key = String(item?.key || "").trim();
+        if (key) bulkCheckItemByKey.set(key, item);
+      });
+    };
+    const setBulkCheckItems = (items) => {
+      bulkCheckItems = Array.isArray(items) ? items : [];
+      syncBulkCheckItemMap();
+    };
+    const getBulkCheckStatusState = (item) => {
+      const liveStatusText = String(item?.liveStatusText || "").trim();
+      const liveStatusKind = String(item?.liveStatusKind || "").trim();
+      const liveStatusDetail = String(item?.liveStatusDetail || "").trim();
+      if (liveStatusText) {
+        return {
+          text: liveStatusText,
+          kind: liveStatusKind || "pending",
+          detail: liveStatusDetail
+        };
+      }
+
+      const queryError = String(item?.error || "").trim();
+      if (queryError) {
+        return {
+          text: queryError,
+          kind: "failure",
+          detail: queryError
+        };
+      }
+
+      if (item?.exists === true) {
+        return {
+          text: "Var",
+          kind: "success",
+          detail: ""
+        };
+      }
+
+      return {
+        text: "Yok",
+        kind: "pending",
+        detail: ""
+      };
+    };
     const updateBulkCounters = () => {
       if (!isBulkMode) return;
       const total = bulkCheckItems.length;
@@ -1137,7 +1252,11 @@
     };
     const updateBulkCreateButtonState = () => {
       if (!bulkCreateBtn) return;
-      bulkCreateBtn.disabled = bulkSelectedCreateKeys.size === 0;
+      const selectedCount = bulkCheckItems.filter((item) => {
+        const key = String(item?.key || "").trim();
+        return key && bulkSelectedCreateKeys.has(key) && isBulkMissingCandidate(item);
+      }).length;
+      bulkCreateBtn.disabled = selectedCount === 0;
     };
     const updateBulkSelectAllState = () => {
       if (!bulkSelectAllCheckbox) return;
@@ -1152,7 +1271,8 @@
     };
     const clearBulkCheckState = () => {
       if (!isBulkMode) return;
-      bulkCheckItems = [];
+      setBulkCheckItems([]);
+      bulkCheckRowByKey.clear();
       bulkSelectedCreateKeys.clear();
       if (bulkResultsBody) {
         bulkResultsBody.innerHTML = "";
@@ -1250,6 +1370,13 @@
     const renderBulkTemplateList = () => {
       if (!bulkTemplateList) return;
       bulkTemplateList.innerHTML = "";
+      if (bulkTemplatesLoading) {
+        const loading = document.createElement("div");
+        loading.className = "obus-bulk-template-empty";
+        loading.textContent = "Şablonlar yükleniyor...";
+        bulkTemplateList.appendChild(loading);
+        return;
+      }
       if (!bulkTemplates.length) {
         const empty = document.createElement("div");
         empty.className = "obus-bulk-template-empty";
@@ -1271,10 +1398,20 @@
         meta.className = "obus-bulk-template-meta";
         const rowCount = Array.isArray(template.entries) ? template.entries.length : 0;
         const updatedText = formatTemplateTimestamp(template.updatedAt || template.createdAt);
-        meta.innerHTML = `
-          <span>${rowCount} satır</span>
-          ${updatedText ? `<span>Son güncelleme: ${updatedText}</span>` : ""}
-        `.trim();
+        const updatedBy = String(template.updatedByName || template.createdByName || "").trim();
+        const rowCountMeta = document.createElement("span");
+        rowCountMeta.textContent = `${rowCount} satır`;
+        meta.appendChild(rowCountMeta);
+        if (updatedText) {
+          const updatedMeta = document.createElement("span");
+          updatedMeta.textContent = `Son güncelleme: ${updatedText}`;
+          meta.appendChild(updatedMeta);
+        }
+        if (updatedBy) {
+          const updatedByMeta = document.createElement("span");
+          updatedByMeta.textContent = `Ekleyen/Güncelleyen: ${updatedBy}`;
+          meta.appendChild(updatedByMeta);
+        }
 
         const preview = document.createElement("div");
         preview.className = "obus-bulk-template-preview";
@@ -1309,19 +1446,101 @@
         bulkTemplateList.appendChild(item);
       });
     };
-    const persistBulkTemplates = () => {
-      const saved = saveObusBulkUserTemplatesToStorage(bulkTemplates);
-      if (!saved) {
-        setBulkTemplateStatus("Şablonlar tarayıcıya kaydedilemedi.", "error");
+    const upsertBulkTemplate = (item) => {
+      const normalizedItem = normalizeObusBulkUserTemplateItems([item])[0];
+      if (!normalizedItem) return;
+      const existingIndex = bulkTemplates.findIndex((template) => template.id === normalizedItem.id);
+      if (existingIndex >= 0) {
+        bulkTemplates.splice(existingIndex, 1, normalizedItem);
+      } else {
+        bulkTemplates.unshift(normalizedItem);
       }
-      return saved;
+      bulkTemplates.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
     };
-    const openBulkTemplateModal = (mode = "load") => {
-      if (!bulkTemplateModal) return;
+    const importLegacyBulkTemplatesIfNeeded = async ({ showStatus = false } = {}) => {
+      if (legacyBulkTemplatesImportAttempted) return { importedCount: 0, failedCount: 0, skippedCount: 0 };
+      legacyBulkTemplatesImportAttempted = true;
+
+      const legacyTemplates = loadLegacyObusBulkUserTemplatesFromStorage();
+      if (!legacyTemplates.length) {
+        return { importedCount: 0, failedCount: 0, skippedCount: 0 };
+      }
+
+      const existingNameSet = new Set(
+        bulkTemplates.map((template) => String(template?.name || "").trim().toLocaleLowerCase("tr")).filter(Boolean)
+      );
+      let importedCount = 0;
+      let failedCount = 0;
+      let skippedCount = 0;
+
+      for (const legacyTemplate of legacyTemplates) {
+        const normalizedName = String(legacyTemplate?.name || "").trim();
+        const nameKey = normalizedName.toLocaleLowerCase("tr");
+        if (!normalizedName || existingNameSet.has(nameKey)) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const saveResult = await saveObusBulkUserTemplate(bulkTemplatesApiUrl, {
+          name: normalizedName,
+          entries: Array.isArray(legacyTemplate?.entries) ? legacyTemplate.entries : []
+        });
+        if (saveResult.error || !saveResult.item) {
+          failedCount += 1;
+          continue;
+        }
+
+        upsertBulkTemplate(saveResult.item);
+        existingNameSet.add(nameKey);
+        importedCount += 1;
+      }
+
+      if (failedCount === 0) {
+        clearLegacyObusBulkUserTemplatesFromStorage();
+      }
       renderBulkTemplateList();
+      if (showStatus && importedCount > 0) {
+        setBulkTemplateStatus(`${importedCount} eski tarayıcı şablonu SQL'e aktarıldı.`, "success");
+      } else if (showStatus && failedCount > 0) {
+        setBulkTemplateStatus(
+          `${importedCount} şablon SQL'e aktarıldı, ${failedCount} şablon aktarılırken hata oluştu.`,
+          "error"
+        );
+      }
+      return { importedCount, failedCount, skippedCount };
+    };
+    const refreshBulkTemplates = async ({ showStatus = false } = {}) => {
+      bulkTemplatesLoading = true;
+      renderBulkTemplateList();
+      if (showStatus) {
+        setBulkTemplateStatus("Şablonlar yükleniyor...", "");
+      }
+
+      const result = await loadObusBulkUserTemplates(bulkTemplatesApiUrl);
+      bulkTemplatesLoading = false;
+      if (result.error) {
+        renderBulkTemplateList();
+        if (showStatus) {
+          setBulkTemplateStatus(result.error, "error");
+        }
+        return false;
+      }
+
+      bulkTemplates = Array.isArray(result.items) ? result.items : [];
+      renderBulkTemplateList();
+      const importResult = await importLegacyBulkTemplatesIfNeeded({ showStatus });
+      if (showStatus && Number(importResult.importedCount || 0) === 0 && Number(importResult.failedCount || 0) === 0) {
+        setBulkTemplateStatus("", "");
+      }
+      return true;
+    };
+    const openBulkTemplateModal = async (mode = "load") => {
+      if (!bulkTemplateModal) return;
       setBulkTemplateStatus("", "");
       bulkTemplateModal.classList.add("active");
       bulkTemplateModal.setAttribute("aria-hidden", "false");
+      renderBulkTemplateList();
+      await refreshBulkTemplates({ showStatus: true });
       if (mode === "save") {
         const defaultName = String(bulkTemplateNameInput?.value || "").trim();
         if (bulkTemplateNameInput && !defaultName) {
@@ -1347,6 +1566,7 @@
       if (!bulkResultsBody) return;
       const filterValue = String(bulkFilterSelect?.value || "all").trim();
       bulkResultsBody.innerHTML = "";
+      bulkCheckRowByKey.clear();
 
       bulkCheckItems.forEach((item) => {
         const exists = item.exists === true;
@@ -1354,24 +1574,24 @@
         if (filterValue === "missing" && !missing) return;
         if (filterValue === "existing" && !exists) return;
 
+        const rowKey = String(item.key || "").trim();
         const row = document.createElement("tr");
-        row.setAttribute("data-obus-bulk-check-key", String(item.key || ""));
+        row.setAttribute("data-obus-bulk-check-key", rowKey);
         const canCreate = isBulkMissingCandidate(item);
-        const statusText = String(item.error || "").trim() || (exists ? "Var" : "Yok");
-        const statusClass = String(item.error || "").trim() ? "failure" : exists ? "success" : "pending";
+        const statusState = getBulkCheckStatusState(item);
 
         const checkboxCell = document.createElement("td");
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
-        checkbox.checked = canCreate && bulkSelectedCreateKeys.has(String(item.key || ""));
+        checkbox.setAttribute("data-obus-bulk-row-select", "1");
+        checkbox.checked = canCreate && bulkSelectedCreateKeys.has(rowKey);
         checkbox.disabled = !canCreate;
         checkbox.addEventListener("change", () => {
-          const key = String(item.key || "");
-          if (!key) return;
+          if (!rowKey) return;
           if (checkbox.checked) {
-            bulkSelectedCreateKeys.add(key);
+            bulkSelectedCreateKeys.add(rowKey);
           } else {
-            bulkSelectedCreateKeys.delete(key);
+            bulkSelectedCreateKeys.delete(rowKey);
           }
           updateBulkSelectAllState();
           updateBulkCreateButtonState();
@@ -1385,12 +1605,9 @@
         const fullNameCell = document.createElement("td");
         fullNameCell.textContent = String(item.fullName || "");
         const statusCell = document.createElement("td");
-        statusCell.className = `obus-live-status ${statusClass}`;
-        statusCell.textContent = statusText;
-        if (String(item.error || "").trim()) {
-          statusCell.title = String(item.error || "").trim();
-          statusCell.classList.add("has-detail");
-        }
+        statusCell.setAttribute("data-obus-create-status", "1");
+        statusCell.className = "obus-live-status pending";
+        statusCell.textContent = "-";
 
         row.appendChild(checkboxCell);
         row.appendChild(companyCell);
@@ -1398,6 +1615,10 @@
         row.appendChild(fullNameCell);
         row.appendChild(statusCell);
         bulkResultsBody.appendChild(row);
+        if (rowKey) {
+          bulkCheckRowByKey.set(rowKey, row);
+        }
+        setCreateRowStatus(row, statusState.text, statusState.kind, statusState.detail);
       });
 
       if (bulkResultsSection) {
@@ -1420,6 +1641,62 @@
         cell.removeAttribute("title");
         cell.classList.remove("has-detail");
       }
+    };
+    const updateBulkCheckRowStatusByKey = (key) => {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) return;
+      const row = bulkCheckRowByKey.get(normalizedKey);
+      const item = bulkCheckItemByKey.get(normalizedKey);
+      if (!row || !item) return;
+      const checkbox = row.querySelector("[data-obus-bulk-row-select='1']");
+      if (checkbox instanceof HTMLInputElement) {
+        const canCreate = isBulkMissingCandidate(item);
+        checkbox.disabled = !canCreate;
+        checkbox.checked = canCreate && bulkSelectedCreateKeys.has(normalizedKey);
+      }
+      const statusState = getBulkCheckStatusState(item);
+      setCreateRowStatus(row, statusState.text, statusState.kind, statusState.detail);
+    };
+    const setBulkCheckItemLiveState = (key, { text = "", kind = "", detail = "" } = {}) => {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) return;
+      const item = bulkCheckItemByKey.get(normalizedKey);
+      if (!item) return;
+
+      item.liveStatusText = String(text || "").trim();
+      item.liveStatusKind = String(kind || "").trim();
+      item.liveStatusDetail = String(detail || "").trim();
+      if (item.liveStatusKind === "success") {
+        bulkSelectedCreateKeys.delete(normalizedKey);
+      }
+      updateBulkCheckRowStatusByKey(normalizedKey);
+      updateBulkSelectAllState();
+      updateBulkCreateButtonState();
+    };
+    const markBulkCreateTargetsQueued = (items) => {
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const key = String(item?.key || "").trim();
+        if (!key) return;
+        setBulkCheckItemLiveState(key, {
+          text: "Sırada",
+          kind: "queued",
+          detail: ""
+        });
+      });
+    };
+    const markBulkCreateTargetsFailedIfPending = (items, errorText) => {
+      const fallbackError = String(errorText || "").trim() || "İşlem tamamlanamadı.";
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const key = String(item?.key || "").trim();
+        const currentItem = bulkCheckItemByKey.get(key);
+        const currentKind = String(currentItem?.liveStatusKind || "").trim();
+        if (!key || currentKind === "success" || currentKind === "failure") return;
+        setBulkCheckItemLiveState(key, {
+          text: fallbackError,
+          kind: "failure",
+          detail: fallbackError
+        });
+      });
     };
     const renderCreateLiveRows = (items) => {
       liveRowByKey.clear();
@@ -1448,6 +1725,25 @@
     };
     const applyCreateEventToRow = (eventItem) => {
       const key = String(eventItem?.key || "").trim();
+      if (isBulkMode) {
+        if (!key) return;
+        if (eventItem?.ok === true) {
+          setBulkCheckItemLiveState(key, {
+            text: "OK",
+            kind: "success",
+            detail: String(eventItem?.message || "Kullanıcı oluşturuldu.").trim()
+          });
+        } else {
+          const errorText = String(eventItem?.error || "İşlem başarısız").trim();
+          const errorDetail = String(eventItem?.errorDetail || errorText).trim();
+          setBulkCheckItemLiveState(key, {
+            text: errorText,
+            kind: "failure",
+            detail: errorDetail
+          });
+        }
+        return;
+      }
       const row = liveRowByKey.get(key);
       if (!row) return;
       if (eventItem?.ok === true) {
@@ -1706,11 +2002,11 @@
       }
 
       bulkTemplateSaveOpenBtn?.addEventListener("click", () => {
-        openBulkTemplateModal("save");
+        void openBulkTemplateModal("save");
       });
 
       bulkTemplateLoadOpenBtn?.addEventListener("click", () => {
-        openBulkTemplateModal("load");
+        void openBulkTemplateModal("load");
       });
 
       bulkTemplateCloseBtn?.addEventListener("click", () => {
@@ -1723,7 +2019,7 @@
         }
       });
 
-      bulkTemplateForm?.addEventListener("submit", (event) => {
+      bulkTemplateForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const name = String(bulkTemplateNameInput?.value || "").trim();
         if (!name) {
@@ -1746,22 +2042,17 @@
           if (!shouldOverwrite) return;
         }
 
-        const now = Date.now();
-        const existing = existingIndex >= 0 ? bulkTemplates[existingIndex] : null;
-        const nextTemplate = {
-          id: existing?.id || `tpl-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        setBulkTemplateStatus("Şablon kaydediliyor...", "");
+        const saveResult = await saveObusBulkUserTemplate(bulkTemplatesApiUrl, {
           name,
-          createdAt: Number(existing?.createdAt || now),
-          updatedAt: now,
           entries
-        };
-        if (existingIndex >= 0) {
-          bulkTemplates.splice(existingIndex, 1, nextTemplate);
-        } else {
-          bulkTemplates.unshift(nextTemplate);
+        });
+        if (saveResult.error || !saveResult.item) {
+          setBulkTemplateStatus(saveResult.error || "Şablon kaydedilemedi.", "error");
+          return;
         }
-        bulkTemplates.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-        if (!persistBulkTemplates()) return;
+
+        upsertBulkTemplate(saveResult.item);
         renderBulkTemplateList();
         setBulkTemplateStatus(`'${name}' şablonu kaydedildi.`, "success");
       });
@@ -1857,6 +2148,7 @@
             }
 
             const items = Array.isArray(startData.items) ? startData.items : [];
+            markBulkCreateTargetsQueued(selectedTargets);
             renderCreateLiveRows(items);
             setLiveCounters({
               processed: 0,
@@ -1867,6 +2159,7 @@
 
             const finalState = await pollLiveJob(startData.jobId, applyCreateEventToRow);
             if (finalState?.error) {
+              markBulkCreateTargetsFailedIfPending(selectedTargets, finalState.error);
               setLiveMessage(finalState.error, "error");
             } else if (Number(finalState?.failureCount || 0) > 0) {
               setLiveMessage("Toplu oluşturma tamamlandı. Bazı kayıtlar oluşturulamadı.", "error");
@@ -1874,6 +2167,10 @@
               setLiveMessage("Toplu oluşturma tamamlandı. Seçili yok kullanıcılar oluşturuldu.", "success");
             }
           } catch (err) {
+            markBulkCreateTargetsFailedIfPending(
+              selectedTargets,
+              err?.message || "Toplu kullanıcı oluşturma başlatılamadı."
+            );
             setLiveMessage(err?.message || "Toplu kullanıcı oluşturma başlatılamadı.", "error");
           } finally {
             form.dataset.liveSubmitting = "0";
@@ -1951,7 +2248,7 @@
               throw new Error(getApiErrorMessage(checkResponse, checkData, "Toplu kullanıcı sorgusu başlatılamadı"));
             }
 
-            bulkCheckItems = Array.isArray(checkData.items) ? checkData.items : [];
+            setBulkCheckItems(Array.isArray(checkData.items) ? checkData.items : []);
             bulkSelectedCreateKeys.clear();
             bulkCheckItems.forEach((item) => {
               if (isBulkMissingCandidate(item)) {
