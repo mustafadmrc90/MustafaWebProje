@@ -3251,6 +3251,19 @@ async function loadJourneySearchCompanies() {
   };
 }
 
+function buildJourneySearchStationsRequestBody({ sessionId = "", deviceId = "", usePlaceholders = false } = {}) {
+  return {
+    data: null,
+    token: null,
+    "device-session": {
+      "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
+      "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
+    },
+    date: JOURNEY_SEARCH_REQUEST_DATE,
+    language: JOURNEY_SEARCH_REQUEST_LANGUAGE
+  };
+}
+
 function collectJourneySearchStationArrays(node, collector, depth = 0) {
   if (depth > 6 || node === null || node === undefined) return;
 
@@ -3340,6 +3353,7 @@ async function fetchJourneySearchStations({ company } = {}) {
   const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
   const requestUrl = buildJourneySearchStationsUrl(baseClusterUrl, clusterLabel);
   const companyRef = `${partnerCode || "code?"}${clusterLabel ? ` / ${clusterLabel}` : ""}`;
+  const requestBodyTemplate = JSON.stringify(buildJourneySearchStationsRequestBody({ usePlaceholders: true }), null, 2);
 
   if (!partnerCode) {
     return {
@@ -3348,7 +3362,9 @@ async function fetchJourneySearchStations({ company } = {}) {
       status: null,
       requestUrl,
       step: "validation",
-      detail: `Firma=${companyRef}`
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
     };
   }
 
@@ -3359,7 +3375,9 @@ async function fetchJourneySearchStations({ company } = {}) {
       status: null,
       requestUrl: "",
       step: "validation",
-      detail: `Firma=${companyRef}`
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
     };
   }
 
@@ -3378,20 +3396,17 @@ async function fetchJourneySearchStations({ company } = {}) {
         detail: buildObusServiceTraceText(sessionResult.debug, sessionResult.error, {
           bodyMaxLen: 120,
           responseMaxLen: 180
-        })
+        }),
+        requestBody: requestBodyTemplate,
+        responseBody: String(sessionResult?.debug?.responseBody || sessionResult.error || "").trim()
       };
     }
 
-    const body = {
-      data: null,
-      token: null,
-      "device-session": {
-        "session-id": String(sessionResult.sessionId || "").trim(),
-        "device-id": String(sessionResult.deviceId || "").trim()
-      },
-      date: JOURNEY_SEARCH_REQUEST_DATE,
-      language: JOURNEY_SEARCH_REQUEST_LANGUAGE
-    };
+    const body = buildJourneySearchStationsRequestBody({
+      sessionId: sessionResult.sessionId,
+      deviceId: sessionResult.deviceId
+    });
+    const requestBodyText = JSON.stringify(body, null, 2);
 
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -3407,6 +3422,8 @@ async function fetchJourneySearchStations({ company } = {}) {
 
     const raw = await response.text();
     const parsed = parseJsonSafe(raw);
+    const responseBodyText =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
     const getStationsTrace = buildObusServiceTraceEntry({
       service: "GetStations",
       url: requestUrl,
@@ -3436,7 +3453,9 @@ async function fetchJourneySearchStations({ company } = {}) {
         detail: buildObusServiceTraceText(getStationsTrace, responseErrorText, {
           bodyMaxLen: 120,
           responseMaxLen: 220
-        })
+        }),
+        requestBody: requestBodyText,
+        responseBody: responseBodyText || ""
       };
     }
 
@@ -3450,7 +3469,9 @@ async function fetchJourneySearchStations({ company } = {}) {
         detail: buildObusServiceTraceText(getStationsTrace, responseErrorText, {
           bodyMaxLen: 120,
           responseMaxLen: 220
-        })
+        }),
+        requestBody: requestBodyText,
+        responseBody: responseBodyText || ""
       };
     }
 
@@ -3465,7 +3486,9 @@ async function fetchJourneySearchStations({ company } = {}) {
         detail: buildObusServiceTraceText(getStationsTrace, "İstasyon listesi boş veya beklenen formatta değil.", {
           bodyMaxLen: 120,
           responseMaxLen: 220
-        })
+        }),
+        requestBody: requestBodyText,
+        responseBody: responseBodyText || ""
       };
     }
 
@@ -3475,7 +3498,9 @@ async function fetchJourneySearchStations({ company } = {}) {
       status: response.status,
       requestUrl,
       step: "done",
-      detail: `Firma=${companyRef} | istasyon=${items.length} | url=${truncateObusDebugText(requestUrl, 120)}`
+      detail: `Firma=${companyRef} | istasyon=${items.length} | url=${truncateObusDebugText(requestUrl, 120)}`,
+      requestBody: requestBodyText,
+      responseBody: responseBodyText || ""
     };
   } catch (err) {
     const errorTrace = buildObusServiceTraceEntry({
@@ -3504,7 +3529,9 @@ async function fetchJourneySearchStations({ company } = {}) {
       detail: buildObusServiceTraceText(errorTrace, err?.message || "İstek gönderilemedi.", {
         bodyMaxLen: 120,
         responseMaxLen: 220
-      })
+      }),
+      requestBody: requestBodyTemplate,
+      responseBody: ""
     };
   } finally {
     clearTimeout(timeout);
@@ -13043,6 +13070,9 @@ app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey
         step: String(result.step || "").trim(),
         details: String(result.detail || "").trim(),
         requestUrl: result.requestUrl || "",
+        requestBody: String(result.requestBody || "").trim(),
+        responseBody: String(result.responseBody || "").trim(),
+        status: Number.isFinite(Number(result.status)) ? Number(result.status) : null,
         totalCount: 0
       });
     }
@@ -13052,7 +13082,10 @@ app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey
       items: Array.isArray(result.items) ? result.items : [],
       totalCount: Array.isArray(result.items) ? result.items.length : 0,
       requestUrl: result.requestUrl || "",
-      details: String(result.detail || "").trim()
+      details: String(result.detail || "").trim(),
+      requestBody: String(result.requestBody || "").trim(),
+      responseBody: String(result.responseBody || "").trim(),
+      status: Number.isFinite(Number(result.status)) ? Number(result.status) : null
     });
   } catch (err) {
     console.error("Journey search stations error:", err);
@@ -13271,7 +13304,8 @@ app.get("/general/journey-search", requireAuth, requireMenuAccess("journey-searc
     active: "journey-search",
     filters,
     companies,
-    partnerError
+    partnerError,
+    requestBodyTemplate: JSON.stringify(buildJourneySearchStationsRequestBody({ usePlaceholders: true }), null, 2)
   });
 });
 

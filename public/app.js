@@ -1073,17 +1073,38 @@
     if (form.dataset.bound === "1") return;
     form.dataset.bound = "1";
 
+    const serviceButtons = Array.from(form.querySelectorAll("[data-journey-search-service-button]"));
+    const servicePanels = Array.from(form.querySelectorAll("[data-journey-search-service-panel]"));
     const companySelect = form.querySelector("#journey-search-company");
     const originSelect = form.querySelector("#journey-search-origin");
     const destinationSelect = form.querySelector("#journey-search-destination");
     const showIdCheckbox = form.querySelector("#journey-search-show-id");
+    const requestBodyEl = form.querySelector("[data-journey-search-request-body='1']");
+    const responseBodyEl = form.querySelector("[data-journey-search-response-body='1']");
+    const httpBadgeEl = form.querySelector("[data-journey-search-http='1']");
+    const urlLineEl = form.querySelector("[data-journey-search-url='1']");
     const statusEl = form.querySelector("[data-journey-search-status='1']");
-    if (!companySelect || !originSelect || !destinationSelect || !showIdCheckbox || !statusEl) return;
+    if (
+      serviceButtons.length === 0 ||
+      !companySelect ||
+      !originSelect ||
+      !destinationSelect ||
+      !showIdCheckbox ||
+      !requestBodyEl ||
+      !responseBodyEl ||
+      !httpBadgeEl ||
+      !urlLineEl ||
+      !statusEl
+    ) {
+      return;
+    }
 
     let selectedOriginValue = String(originSelect.dataset.selectedValue || "").trim();
     let selectedDestinationValue = String(destinationSelect.dataset.selectedValue || "").trim();
     let requestSequence = 0;
     let loadedStationItems = [];
+    let activeServiceKey = "";
+    const requestBodyTemplate = String(requestBodyEl.textContent || "{}").trim() || "{}";
 
     const setStatus = (message, kind = "muted") => {
       statusEl.textContent = String(message || "").trim();
@@ -1096,6 +1117,37 @@
         return;
       }
       statusEl.className = "journey-search-status muted";
+    };
+
+    const setIoState = ({
+      requestBody = requestBodyTemplate,
+      responseBody = "Henüz response yok.",
+      requestUrl = "",
+      status = null
+    } = {}) => {
+      requestBodyEl.textContent = String(requestBody || "").trim() || "{}";
+      responseBodyEl.textContent = String(responseBody || "").trim() || "Henüz response yok.";
+      const parsedStatus = Number.parseInt(String(status ?? "").trim(), 10);
+      if (Number.isFinite(parsedStatus) && parsedStatus > 0) {
+        httpBadgeEl.textContent = `HTTP ${parsedStatus}`;
+        httpBadgeEl.className = "pill";
+      } else {
+        httpBadgeEl.textContent = "HTTP -";
+        httpBadgeEl.className = "pill muted";
+      }
+      urlLineEl.textContent = `URL: ${String(requestUrl || "").trim() || "-"}`;
+    };
+
+    const activateService = (serviceKey) => {
+      activeServiceKey = String(serviceKey || "").trim();
+      serviceButtons.forEach((button) => {
+        const isActive = String(button.dataset.journeySearchServiceButton || "").trim() === activeServiceKey;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      servicePanels.forEach((panel) => {
+        panel.hidden = String(panel.dataset.journeySearchServicePanel || "").trim() !== activeServiceKey;
+      });
     };
 
     const normalizeRawErrorPreview = (text) =>
@@ -1207,12 +1259,24 @@
 
       if (!companyValue || companyValue === "__partner_error__") {
         resetStationSelects("Önce firma seçin");
+        setIoState({
+          requestBody: requestBodyTemplate,
+          responseBody: "Henüz response yok.",
+          requestUrl: "",
+          status: null
+        });
         setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
         return;
       }
 
       fillSelect(originSelect, [], "İstasyonlar yükleniyor...", "");
       fillSelect(destinationSelect, [], "İstasyonlar yükleniyor...", "");
+      setIoState({
+        requestBody: requestBodyTemplate,
+        responseBody: "Response bekleniyor...",
+        requestUrl: "",
+        status: null
+      });
       setStatus("İstasyonlar yükleniyor...", "muted");
 
       try {
@@ -1229,6 +1293,12 @@
         const { data, rawText } = await parseJourneyStationsApiResponse(response);
 
         if (currentSequence !== requestSequence) return;
+        setIoState({
+          requestBody: String(data?.requestBody || requestBodyTemplate).trim() || requestBodyTemplate,
+          responseBody: String(data?.responseBody || rawText || "").trim() || "Henüz response yok.",
+          requestUrl: String(data?.requestUrl || "").trim(),
+          status: data?.status ?? response.status ?? null
+        });
         if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
           throw new Error(buildJourneyStationsErrorMessage(response, data, rawText));
         }
@@ -1276,10 +1346,24 @@
       renderLoadedStations();
     });
 
+    serviceButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        activateService(button.dataset.journeySearchServiceButton || "");
+      });
+    });
+
+    activateService(serviceButtons[0]?.dataset?.journeySearchServiceButton || "getstation");
+
     if (String(companySelect.value || "").trim()) {
       loadStations();
     } else {
       resetStationSelects("Önce firma seçin");
+      setIoState({
+        requestBody: requestBodyTemplate,
+        responseBody: "Henüz response yok.",
+        requestUrl: "",
+        status: null
+      });
       setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
     }
   };

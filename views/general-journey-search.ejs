@@ -26,7 +26,7 @@
             </span>
             <span>Sefer Sorgula</span>
           </h1>
-          <p>Firma, kalkış ve varış seçim alanları hazırlandı.</p>
+          <p>Servis panelinden `GetStation` akışını açıp istek ve yanıtı aynı ekranda izleyin.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -37,59 +37,101 @@
         <div class="alert inline-alert"><%= partnerError %></div>
       <% } %>
 
-      <section class="table-card panel-card allowed-lines-section">
+      <section class="table-card panel-card journey-search-page-card">
         <div class="table-head">
-          <h2>Sefer Filtreleri</h2>
+          <h2>Sefer Workbench</h2>
         </div>
 
-        <div class="journey-search-form" data-journey-search-form="1">
-          <div class="journey-search-grid">
-            <label class="journey-search-field">
-              <span class="journey-search-label-row">
-                <span>Firma</span>
-              </span>
-              <select name="company" id="journey-search-company">
-                <% companies.forEach((item) => { %>
-                  <option
-                    value="<%= item.value %>"
-                    <%= item.disabled ? "disabled" : "" %>
-                    <%= filters.company === item.value ? "selected" : "" %>
-                  >
-                    <%= item.label %>
-                  </option>
-                <% }) %>
-              </select>
-            </label>
+        <div class="journey-search-workbench" data-journey-search-form="1">
+          <aside class="journey-search-service-nav">
+            <div class="journey-search-service-nav-head">
+              <span class="journey-search-service-nav-title">Servisler</span>
+              <span class="pill muted">1</span>
+            </div>
+            <button
+              type="button"
+              class="journey-search-service-button active"
+              data-journey-search-service-button="getstation"
+              aria-pressed="true"
+            >
+              <span class="journey-search-service-name">GetStation</span>
+              <span class="journey-search-service-meta">Firma bazlı istasyon yükleme</span>
+            </button>
+          </aside>
 
-            <label class="journey-search-field">
-              <span class="journey-search-label-row">
-                <span>Kalkış</span>
-              </span>
-              <select name="origin" id="journey-search-origin" data-selected-value="<%= filters.origin %>">
-                <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
-              </select>
-            </label>
+          <section class="journey-search-config-card" data-journey-search-service-panel="getstation">
+            <div class="journey-search-card-head">
+              <h3>GetStation Parametreleri</h3>
+            </div>
 
-            <label class="journey-search-field">
-              <span class="journey-search-label-row">
-                <span>Varış</span>
-                <span class="journey-search-toggle">
-                  <input type="checkbox" id="journey-search-show-id" />
-                  <span>ID'li göster</span>
+            <div class="journey-search-fields">
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Firma</span>
                 </span>
-              </span>
-              <select
-                name="destination"
-                id="journey-search-destination"
-                data-selected-value="<%= filters.destination %>"
-              >
-                <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
-              </select>
-            </label>
-          </div>
+                <select name="company" id="journey-search-company">
+                  <% companies.forEach((item) => { %>
+                    <option
+                      value="<%= item.value %>"
+                      <%= item.disabled ? "disabled" : "" %>
+                      <%= filters.company === item.value ? "selected" : "" %>
+                    >
+                      <%= item.label %>
+                    </option>
+                  <% }) %>
+                </select>
+              </label>
+
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Kalkış</span>
+                </span>
+                <select name="origin" id="journey-search-origin" data-selected-value="<%= filters.origin %>">
+                  <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
+                </select>
+              </label>
+
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Varış</span>
+                  <span class="journey-search-toggle">
+                    <input type="checkbox" id="journey-search-show-id" />
+                    <span>ID'li göster</span>
+                  </span>
+                </span>
+                <select
+                  name="destination"
+                  id="journey-search-destination"
+                  data-selected-value="<%= filters.destination %>"
+                >
+                  <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="journey-search-io-column" data-journey-search-service-panel="getstation">
+            <article class="journey-search-io-card">
+              <div class="journey-search-card-head">
+                <h3>İstek Body</h3>
+              </div>
+              <pre class="allowed-lines-debug-pre" data-journey-search-request-body="1"><%= requestBodyTemplate %></pre>
+            </article>
+
+            <article class="journey-search-io-card">
+              <div class="journey-search-card-head">
+                <h3>Response</h3>
+                <div class="journey-search-response-meta">
+                  <span class="pill muted" data-journey-search-http="1">HTTP -</span>
+                </div>
+              </div>
+              <div class="journey-search-url-line" data-journey-search-url="1">URL: -</div>
+              <pre class="allowed-lines-debug-pre" data-journey-search-response-body="1">Henüz response yok.</pre>
+            </article>
+          </section>
 
           <div class="journey-search-status muted" data-journey-search-status="1">
-            Firma seçince kalkış ve varış listesi yüklenecek.
+            Soldaki `GetStation` servisi ile firma bazlı istasyon listesi yüklenir.
           </div>
         </div>
       </section>

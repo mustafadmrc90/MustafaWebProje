@@ -2678,17 +2678,100 @@ button.ghost {
   margin-top: 12px;
 }
 
-.journey-search-form {
+.journey-search-page-card {
+  padding-bottom: 18px;
+}
+
+.journey-search-workbench {
   display: grid;
+  grid-template-columns: 180px minmax(240px, 280px) minmax(340px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.journey-search-service-nav,
+.journey-search-config-card,
+.journey-search-io-card {
+  border: 1px solid #d7e0ec;
+  border-radius: 16px;
+  background: #f7f9fc;
+  padding: 14px;
+}
+
+.journey-search-service-nav {
+  display: grid;
+  gap: 10px;
+}
+
+.journey-search-service-nav-head,
+.journey-search-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.journey-search-grid {
+.journey-search-service-nav-title,
+.journey-search-card-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #4f6176;
+}
+
+.journey-search-service-button {
   display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 210px));
-  gap: 10px 12px;
-  align-items: start;
-  justify-content: start;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #c5d3e2;
+  background: #fff;
+  color: #1f2735;
+  box-shadow: none;
+}
+
+.journey-search-service-button:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: #9eb4cc;
+}
+
+.journey-search-service-button.active {
+  background: #1f5fa9;
+  border-color: #1f5fa9;
+  color: #fff;
+}
+
+.journey-search-service-name {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: none;
+  color: inherit;
+}
+
+.journey-search-service-meta {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: inherit;
+  opacity: 0.82;
+}
+
+.journey-search-config-card,
+.journey-search-io-column {
+  min-width: 0;
+}
+
+.journey-search-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
 .journey-search-field {
@@ -2733,14 +2816,13 @@ button.ghost {
 .journey-search-field select {
   border-radius: 10px;
   border: 1px solid #b9c6d7;
-  background: #f7f9fc;
+  background: #fff;
   padding: 8px 10px;
   font-size: 13px;
   min-height: 36px;
   color: #1f2735;
   width: 100%;
   min-width: 0;
-  max-width: 210px;
 }
 
 .journey-search-field select:focus {
@@ -2749,7 +2831,26 @@ button.ghost {
   background: #fff;
 }
 
+.journey-search-io-column {
+  display: grid;
+  gap: 12px;
+}
+
+.journey-search-response-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.journey-search-url-line {
+  margin: 10px 0 8px;
+  font-size: 12px;
+  color: #5f6b7a;
+  word-break: break-all;
+}
+
 .journey-search-status {
+  grid-column: 1 / -1;
   min-height: 20px;
   white-space: pre-line;
 }
@@ -4807,7 +4908,7 @@ button.ghost {
     grid-template-columns: 1fr;
   }
 
-  .journey-search-grid {
+  .journey-search-workbench {
     grid-template-columns: 1fr;
   }
 
