@@ -1079,10 +1079,18 @@
     const originSelect = form.querySelector("#journey-search-origin");
     const destinationSelect = form.querySelector("#journey-search-destination");
     const showIdCheckbox = form.querySelector("#journey-search-show-id");
-    const requestBodyEl = form.querySelector("[data-journey-search-request-body='1']");
-    const responseBodyEl = form.querySelector("[data-journey-search-response-body='1']");
-    const httpBadgeEl = form.querySelector("[data-journey-search-http='1']");
-    const urlLineEl = form.querySelector("[data-journey-search-url='1']");
+    const journeysCompanySelect = form.querySelector("#journey-search-journeys-company");
+    const journeysOriginSelect = form.querySelector("#journey-search-journeys-origin");
+    const journeysDestinationSelect = form.querySelector("#journey-search-journeys-destination");
+    const journeysDateInput = form.querySelector("#journey-search-journeys-date");
+    const requestBodyEl = form.querySelector("[data-journey-search-request-body='getstation']");
+    const responseBodyEl = form.querySelector("[data-journey-search-response-body='getstation']");
+    const httpBadgeEl = form.querySelector("[data-journey-search-http='getstation']");
+    const urlLineEl = form.querySelector("[data-journey-search-url='getstation']");
+    const journeysRequestBodyEl = form.querySelector("[data-journey-search-request-body='getjourneys']");
+    const journeysResponseBodyEl = form.querySelector("[data-journey-search-response-body='getjourneys']");
+    const journeysHttpBadgeEl = form.querySelector("[data-journey-search-http='getjourneys']");
+    const journeysUrlLineEl = form.querySelector("[data-journey-search-url='getjourneys']");
     const statusEl = form.querySelector("[data-journey-search-status='1']");
     if (
       serviceButtons.length === 0 ||
@@ -1090,6 +1098,14 @@
       !originSelect ||
       !destinationSelect ||
       !showIdCheckbox ||
+      !journeysCompanySelect ||
+      !journeysOriginSelect ||
+      !journeysDestinationSelect ||
+      !journeysDateInput ||
+      !journeysRequestBodyEl ||
+      !journeysResponseBodyEl ||
+      !journeysHttpBadgeEl ||
+      !journeysUrlLineEl ||
       !requestBodyEl ||
       !responseBodyEl ||
       !httpBadgeEl ||
@@ -1101,10 +1117,28 @@
 
     let selectedOriginValue = String(originSelect.dataset.selectedValue || "").trim();
     let selectedDestinationValue = String(destinationSelect.dataset.selectedValue || "").trim();
+    let selectedJourneyOriginId = "";
+    let selectedJourneyDestinationId = "";
+    let selectedJourneysDate = String(journeysDateInput.value || "").trim();
     let requestSequence = 0;
+    let journeysRequestSequence = 0;
     let loadedStationItems = [];
     let activeServiceKey = "";
-    const requestBodyTemplate = String(requestBodyEl.textContent || "{}").trim() || "{}";
+    const stationRequestBodyTemplate = String(requestBodyEl.textContent || "{}").trim() || "{}";
+    const ioTargets = {
+      getstation: {
+        requestBodyEl,
+        responseBodyEl,
+        httpBadgeEl,
+        urlLineEl
+      },
+      getjourneys: {
+        requestBodyEl: journeysRequestBodyEl,
+        responseBodyEl: journeysResponseBodyEl,
+        httpBadgeEl: journeysHttpBadgeEl,
+        urlLineEl: journeysUrlLineEl
+      }
+    };
 
     const setStatus = (message, kind = "muted") => {
       statusEl.textContent = String(message || "").trim();
@@ -1119,23 +1153,23 @@
       statusEl.className = "journey-search-status muted";
     };
 
-    const setIoState = ({
-      requestBody = requestBodyTemplate,
-      responseBody = "Henüz response yok.",
-      requestUrl = "",
-      status = null
-    } = {}) => {
-      requestBodyEl.textContent = String(requestBody || "").trim() || "{}";
-      responseBodyEl.textContent = String(responseBody || "").trim() || "Henüz response yok.";
+    const setIoState = (serviceKey, { requestBody, responseBody = "Henüz response yok.", requestUrl = "", status = null } = {}) => {
+      const target = ioTargets[serviceKey];
+      if (!target) return;
+      const fallbackBody = serviceKey === "getstation" ? stationRequestBodyTemplate : "";
+      const normalizedRequestBody = String(requestBody ?? fallbackBody).trim() || fallbackBody || "";
+      const normalizedResponseBody = String(responseBody || "").trim() || "Henüz response yok.";
       const parsedStatus = Number.parseInt(String(status ?? "").trim(), 10);
+      target.requestBodyEl.textContent = normalizedRequestBody;
+      target.responseBodyEl.textContent = normalizedResponseBody;
       if (Number.isFinite(parsedStatus) && parsedStatus > 0) {
-        httpBadgeEl.textContent = `HTTP ${parsedStatus}`;
-        httpBadgeEl.className = "pill";
+        target.httpBadgeEl.textContent = `HTTP ${parsedStatus}`;
+        target.httpBadgeEl.className = "pill";
       } else {
-        httpBadgeEl.textContent = "HTTP -";
-        httpBadgeEl.className = "pill muted";
+        target.httpBadgeEl.textContent = "HTTP -";
+        target.httpBadgeEl.className = "pill muted";
       }
-      urlLineEl.textContent = `URL: ${String(requestUrl || "").trim() || "-"}`;
+      target.urlLineEl.textContent = `URL: ${String(requestUrl || "").trim() || "-"}`;
     };
 
     const activateService = (serviceKey) => {
@@ -1148,6 +1182,215 @@
       servicePanels.forEach((panel) => {
         panel.hidden = String(panel.dataset.journeySearchServicePanel || "").trim() !== activeServiceKey;
       });
+      const applyServiceHint = () => {
+        if (activeServiceKey === "getjourneys") {
+          if (!companySelect.value) {
+            setStatus("GetJourneys akışı için önce GetStation bölümünde firma seçin.", "error");
+            return;
+          }
+          if (!selectedJourneyOriginId || !selectedJourneyDestinationId) {
+            setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "muted");
+            return;
+          }
+          if (!selectedJourneysDate) {
+            setStatus("GetJourneys için tarih seçin.", "muted");
+            return;
+          }
+          setStatus("Tarih seçildikten sonra GetJourneys isteği gönderilecek.", "muted");
+          return;
+        }
+        if (!companySelect.value) {
+          setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
+          return;
+        }
+        if (loadedStationItems.length === 0) {
+          setStatus("İstasyonlar yükleniyor...", "muted");
+          return;
+        }
+        setStatus(`${loadedStationItems.length} istasyon yüklendi.`, "success");
+      };
+      applyServiceHint();
+    };
+
+    const getStationSelectedId = (selectEl) => {
+      const selectedOption = selectEl.selectedOptions?.[0];
+      if (!selectedOption) return String(selectEl.value || "").trim();
+      return String(selectedOption.dataset?.stationId || selectEl.value || "").trim();
+    };
+
+    const buildJourneysSelectLabel = (item) => {
+      const id = String(item?.id || item?.value || "").trim();
+      const name = String(item?.name || item?.label || "").trim();
+      if (id && name) {
+        return `${id} - ${name}`;
+      }
+      return name || id;
+    };
+
+    const fillJourneysSelect = (selectEl, items, placeholder, selectedId = "") => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      const targetValue = String(selectedId || "").trim();
+      const fragment = document.createDocumentFragment();
+      const placeholderOption = document.createElement("option");
+      placeholderOption.value = "";
+      placeholderOption.textContent = placeholder || "Seçiniz";
+      fragment.appendChild(placeholderOption);
+
+      let hasMatch = false;
+      normalizedItems.forEach((item) => {
+        const value = String(item?.id || item?.value || "").trim();
+        const label = buildJourneysSelectLabel(item);
+        if (!value || !label) return;
+
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        option.dataset.stationId = String(item?.id || "").trim();
+        if (targetValue && targetValue === value) {
+          option.selected = true;
+          hasMatch = true;
+        }
+        fragment.appendChild(option);
+      });
+
+      placeholderOption.selected = !hasMatch;
+      selectEl.innerHTML = "";
+      selectEl.appendChild(fragment);
+    };
+
+    const renderJourneysStationSelects = () => {
+      if (!Array.isArray(loadedStationItems) || loadedStationItems.length === 0) {
+        fillJourneysSelect(journeysOriginSelect, [], "Önce firma seçin", "");
+        fillJourneysSelect(journeysDestinationSelect, [], "Önce firma seçin", "");
+        return;
+      }
+      fillJourneysSelect(journeysOriginSelect, loadedStationItems, "Kalkış seçiniz", selectedJourneyOriginId);
+      fillJourneysSelect(
+        journeysDestinationSelect,
+        loadedStationItems,
+        "Varış seçiniz",
+        selectedJourneyDestinationId
+      );
+    };
+
+    const buildJourneysDateRange = (dateValue) => {
+      const trimmed = String(dateValue || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return null;
+      }
+      return {
+        from: `${trimmed}T00:00:00.000Z`,
+        to: `${trimmed}T23:59:59.000Z`
+      };
+    };
+
+    const buildJourneySearchErrorMessage = (response, data, rawText) => {
+      const lines = [];
+      const baseMessage = String(data?.error || "").trim() || `GetJourneys alınamadı (${response?.status || 0})`;
+      lines.push(baseMessage);
+
+      if (data?.step) {
+        lines.push(`Adım: ${String(data.step)}`);
+      }
+      if (data?.requestUrl) {
+        lines.push(`URL: ${String(data.requestUrl)}`);
+      }
+      if (data?.details) {
+        lines.push(`Detay: ${String(data.details)}`);
+      } else {
+        const preview = normalizeRawErrorPreview(rawText);
+        if (preview) {
+          lines.push(`Ham yanıt: ${preview}`);
+        }
+      }
+
+      return lines.join("\n");
+    };
+
+    const maybeTriggerGetJourneysRequest = () => {
+      if (activeServiceKey !== "getjourneys") return;
+      if (!companySelect.value) {
+        setStatus("GetJourneys akışı için önce firma seçin.", "error");
+        return;
+      }
+      if (!selectedJourneyOriginId || !selectedJourneyDestinationId) {
+        setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "muted");
+        return;
+      }
+      if (!selectedJourneysDate) {
+        setStatus("GetJourneys için tarih seçin.", "muted");
+        return;
+      }
+      performGetJourneysRequest();
+    };
+
+    const performGetJourneysRequest = async () => {
+      const companyValue = String(companySelect.value || "").trim();
+      const originId = selectedJourneyOriginId || String(journeysOriginSelect.value || "").trim();
+      const destinationId = selectedJourneyDestinationId || String(journeysDestinationSelect.value || "").trim();
+      const dateValue = String(journeysDateInput.value || "").trim();
+      const dateRange = buildJourneysDateRange(dateValue);
+
+      if (!companyValue) {
+        setStatus("GetJourneys akışı için önce firma seçin.", "error");
+        return;
+      }
+      if (!originId || !destinationId) {
+        setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "error");
+        return;
+      }
+      if (!dateRange) {
+        setStatus("Geçerli bir tarih seçin.", "error");
+        return;
+      }
+
+      const currentSequence = ++journeysRequestSequence;
+      setIoState("getjourneys", {
+        requestBody: "İstek hazırlanıyor...",
+        responseBody: "Response bekleniyor...",
+        requestUrl: "",
+        status: null
+      });
+      setStatus("GetJourneys isteği gönderiliyor...", "muted");
+
+      try {
+        const response = await fetch("/api/journey-search/journeys", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            company: companyValue,
+            origin: originId,
+            destination: destinationId,
+            date: dateValue
+          })
+        });
+        const { data, rawText } = await parseJourneyStationsApiResponse(response);
+        if (currentSequence !== journeysRequestSequence) return;
+
+        const requestBodyValue = String(data?.requestBody || "").trim();
+        const responseBodyValue = String(data?.responseBody || rawText || "").trim() || "Henüz response yok.";
+        const requestUrlValue = String(data?.requestUrl || "").trim();
+        const statusValue = data?.status ?? response.status ?? null;
+
+        setIoState("getjourneys", {
+          requestBody: requestBodyValue,
+          responseBody: responseBodyValue,
+          requestUrl: requestUrlValue,
+          status: statusValue
+        });
+
+        if (!response.ok || !data?.ok) {
+          throw new Error(buildJourneySearchErrorMessage(response, data, rawText));
+        }
+
+        setStatus("GetJourneys yanıtı alındı.", "success");
+      } catch (err) {
+        if (currentSequence !== journeysRequestSequence) return;
+        setStatus(err?.message || "GetJourneys isteği başarısız.", "error");
+      }
     };
 
     const normalizeRawErrorPreview = (text) =>
@@ -1241,16 +1484,26 @@
       selectEl.appendChild(fragment);
     };
 
+    const syncJourneysCompanySelection = () => {
+      if (!journeysCompanySelect) return;
+      journeysCompanySelect.value = companySelect.value || "";
+    };
+
     const resetStationSelects = (placeholder) => {
       loadedStationItems = [];
+      selectedJourneyOriginId = "";
+      selectedJourneyDestinationId = "";
       fillSelect(originSelect, [], placeholder || "Önce firma seçin", "");
       fillSelect(destinationSelect, [], placeholder || "Önce firma seçin", "");
+      renderJourneysStationSelects();
+      syncJourneysCompanySelection();
     };
 
     const renderLoadedStations = () => {
       if (!Array.isArray(loadedStationItems) || loadedStationItems.length === 0) return;
       fillSelect(originSelect, loadedStationItems, "Kalkış seçiniz", selectedOriginValue);
       fillSelect(destinationSelect, loadedStationItems, "Varış seçiniz", selectedDestinationValue);
+      renderJourneysStationSelects();
     };
 
     const loadStations = async () => {
@@ -1259,8 +1512,8 @@
 
       if (!companyValue || companyValue === "__partner_error__") {
         resetStationSelects("Önce firma seçin");
-        setIoState({
-          requestBody: requestBodyTemplate,
+        setIoState("getstation", {
+          requestBody: stationRequestBodyTemplate,
           responseBody: "Henüz response yok.",
           requestUrl: "",
           status: null
@@ -1271,8 +1524,8 @@
 
       fillSelect(originSelect, [], "İstasyonlar yükleniyor...", "");
       fillSelect(destinationSelect, [], "İstasyonlar yükleniyor...", "");
-      setIoState({
-        requestBody: requestBodyTemplate,
+      setIoState("getstation", {
+        requestBody: stationRequestBodyTemplate,
         responseBody: "Response bekleniyor...",
         requestUrl: "",
         status: null
@@ -1293,8 +1546,8 @@
         const { data, rawText } = await parseJourneyStationsApiResponse(response);
 
         if (currentSequence !== requestSequence) return;
-        setIoState({
-          requestBody: String(data?.requestBody || requestBodyTemplate).trim() || requestBodyTemplate,
+        setIoState("getstation", {
+          requestBody: String(data?.requestBody || stationRequestBodyTemplate).trim() || stationRequestBodyTemplate,
           responseBody: String(data?.responseBody || rawText || "").trim() || "Henüz response yok.",
           requestUrl: String(data?.requestUrl || "").trim(),
           status: data?.status ?? response.status ?? null
@@ -1320,6 +1573,7 @@
 
         loadedStationItems = items;
         renderLoadedStations();
+        syncJourneysCompanySelection();
         setStatus(`${items.length} istasyon yüklendi.`, "success");
       } catch (err) {
         if (currentSequence !== requestSequence) return;
@@ -1331,19 +1585,43 @@
     companySelect.addEventListener("change", () => {
       selectedOriginValue = "";
       selectedDestinationValue = "";
+      selectedJourneyOriginId = "";
+      selectedJourneyDestinationId = "";
+      selectedJourneysDate = String(journeysDateInput.value || "").trim();
       loadStations();
     });
 
     originSelect.addEventListener("change", () => {
       selectedOriginValue = String(originSelect.value || "").trim();
+      selectedJourneyOriginId = getStationSelectedId(originSelect);
+      renderJourneysStationSelects();
+      maybeTriggerGetJourneysRequest();
     });
 
     destinationSelect.addEventListener("change", () => {
       selectedDestinationValue = String(destinationSelect.value || "").trim();
+      selectedJourneyDestinationId = getStationSelectedId(destinationSelect);
+      renderJourneysStationSelects();
+      maybeTriggerGetJourneysRequest();
     });
 
     showIdCheckbox.addEventListener("change", () => {
       renderLoadedStations();
+    });
+
+    journeysOriginSelect.addEventListener("change", () => {
+      selectedJourneyOriginId = String(journeysOriginSelect.value || "").trim();
+      maybeTriggerGetJourneysRequest();
+    });
+
+    journeysDestinationSelect.addEventListener("change", () => {
+      selectedJourneyDestinationId = String(journeysDestinationSelect.value || "").trim();
+      maybeTriggerGetJourneysRequest();
+    });
+
+    journeysDateInput.addEventListener("change", () => {
+      selectedJourneysDate = String(journeysDateInput.value || "").trim();
+      maybeTriggerGetJourneysRequest();
     });
 
     serviceButtons.forEach((button) => {
@@ -1354,12 +1632,13 @@
 
     activateService(serviceButtons[0]?.dataset?.journeySearchServiceButton || "getstation");
 
+    syncJourneysCompanySelection();
     if (String(companySelect.value || "").trim()) {
       loadStations();
     } else {
       resetStationSelects("Önce firma seçin");
-      setIoState({
-        requestBody: requestBodyTemplate,
+      setIoState("getstation", {
+        requestBody: stationRequestBodyTemplate,
         responseBody: "Henüz response yok.",
         requestUrl: "",
         status: null

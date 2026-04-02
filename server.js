@@ -2895,6 +2895,64 @@ function buildJourneySearchStationsUrl(companyUrl, clusterLabel = "") {
   }
 }
 
+function buildJourneySearchGetJourneysUrl(companyUrl, clusterLabel = "") {
+  const fallbackUrl = buildUrlForCluster(PARTNERS_API_URL, clusterLabel);
+  const normalizedBaseUrl = normalizeTargetUrl(companyUrl) || normalizeTargetUrl(fallbackUrl);
+  if (!normalizedBaseUrl) return "";
+
+  try {
+    const parsed = new URL(String(normalizedBaseUrl || ""));
+    const pathname = String(parsed.pathname || "/");
+    const apiMatch = pathname.match(/^(.+?\/api\/?)/i);
+    const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
+    const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
+    parsed.pathname = normalizeApiPath(`${apiPrefix}web/getjourneys`, "/api/web/getjourneys");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildJourneySearchJourneysRequestBody({
+  origin = "",
+  destination = "",
+  from = "",
+  to = "",
+  sessionId = "",
+  deviceId = "",
+  usePlaceholders = false
+} = {}) {
+  const normalizedOrigin = typeof origin === "number" ? origin : String(origin || "").trim();
+  const normalizedDestination = typeof destination === "number" ? destination : String(destination || "").trim();
+  return {
+    data: {
+      origin: normalizedOrigin,
+      destination: normalizedDestination,
+      from: String(from || "").trim() || JOURNEY_SEARCH_REQUEST_DATE,
+      to: String(to || "").trim() || JOURNEY_SEARCH_REQUEST_DATE
+    },
+    "device-session": {
+      "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
+      "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
+    },
+    date: JOURNEY_SEARCH_REQUEST_DATE,
+    language: JOURNEY_SEARCH_REQUEST_LANGUAGE
+  };
+}
+
+function buildJourneySearchDateRange(dateValue) {
+  const normalized = String(dateValue || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+  return {
+    from: `${normalized}T00:00:00.000Z`,
+    to: `${normalized}T23:59:59.000Z`
+  };
+}
+
 function normalizeApiPath(input, fallbackPath) {
   const fallback = String(fallbackPath || "").trim() || "/";
   const raw = String(input || "").trim();
@@ -3523,6 +3581,198 @@ async function fetchJourneySearchStations({ company } = {}) {
     return {
       items: [],
       error: err?.name === "AbortError" ? "İstasyon listesi zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.",
+      status: null,
+      requestUrl,
+      step: "exception",
+      detail: buildObusServiceTraceText(errorTrace, err?.message || "İstek gönderilemedi.", {
+        bodyMaxLen: 120,
+        responseMaxLen: 220
+      }),
+      requestBody: requestBodyTemplate,
+      responseBody: ""
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchJourneySearchJourneys({
+  company,
+  originId = "",
+  destinationId = "",
+  dateRange = {}
+} = {}) {
+  const partnerCode = String(company?.code || "").trim();
+  const clusterLabel = extractClusterLabel(String(company?.cluster || company?.url || "").trim());
+  const companyUrl = normalizeTargetUrl(company?.url || "");
+  const baseClusterUrl = buildUrlForCluster(PARTNERS_API_URL, clusterLabel) || companyUrl;
+  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
+  const requestUrl = buildJourneySearchGetJourneysUrl(baseClusterUrl, clusterLabel);
+  const companyRef = `${partnerCode || "code?"}${clusterLabel ? ` / ${clusterLabel}` : ""}`;
+  const requestBodyTemplate = JSON.stringify(
+    buildJourneySearchJourneysRequestBody({
+      origin: originId,
+      destination: destinationId,
+      from: dateRange.from,
+      to: dateRange.to,
+      usePlaceholders: true
+    }),
+    null,
+    2
+  );
+
+  if (!partnerCode) {
+    return {
+      error: "Seçilen firma için PartnerCode bulunamadı.",
+      status: null,
+      requestUrl,
+      step: "validation",
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
+    };
+  }
+
+  if (!originId || !destinationId) {
+    return {
+      error: "Kalkış ve varış istasyonlarını belirtmelisiniz.",
+      status: null,
+      requestUrl,
+      step: "validation",
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
+    };
+  }
+
+  if (!dateRange?.from || !dateRange?.to) {
+    return {
+      error: "Geçerli bir tarih seçmelisiniz.",
+      status: null,
+      requestUrl,
+      step: "validation",
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
+    };
+  }
+
+  if (!requestUrl) {
+    return {
+      error: "Seçilen firma için cluster URL bulunamadı.",
+      status: null,
+      requestUrl: "",
+      step: "validation",
+      detail: `Firma=${companyRef}`,
+      requestBody: requestBodyTemplate,
+      responseBody: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), JOURNEY_SEARCH_TIMEOUT_MS);
+
+  try {
+    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal);
+    if (sessionResult.error) {
+      return {
+        error: `GetSession başarısız: ${sessionResult.error}`,
+        status: null,
+        requestUrl,
+        step: "getsession",
+        detail: buildObusServiceTraceText(sessionResult.debug, sessionResult.error, {
+          bodyMaxLen: 120,
+          responseMaxLen: 180
+        }),
+        requestBody: requestBodyTemplate,
+        responseBody: String(sessionResult?.debug?.responseBody || sessionResult.error || "").trim()
+      };
+    }
+
+    const body = buildJourneySearchJourneysRequestBody({
+      origin: originId,
+      destination: destinationId,
+      from: dateRange.from,
+      to: dateRange.to,
+      sessionId: sessionResult.sessionId,
+      deviceId: sessionResult.deviceId
+    });
+    const requestBodyText = JSON.stringify(body, null, 2);
+
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: JOURNEY_SEARCH_API_AUTH,
+        PartnerCode: partnerCode
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const responseBodyText =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+    const traceEntry = buildObusServiceTraceEntry({
+      service: "GetJourneys",
+      url: requestUrl,
+      status: response.status,
+      requestBody: body,
+      responseBody: parsed ?? raw,
+      note: `partnerCode=${partnerCode}${clusterLabel ? `, cluster=${clusterLabel}` : ""}`
+    });
+    const responseErrorText =
+      (parsed && typeof parsed === "object" && String(parsed?.message || parsed?.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+
+    if (!response.ok) {
+      return {
+        error: `GetJourneys HTTP ${response.status}: ${responseErrorText}`,
+        status: response.status,
+        requestUrl,
+        step: "getjourneys",
+        detail: buildObusServiceTraceText(traceEntry, responseErrorText, {
+          bodyMaxLen: 120,
+          responseMaxLen: 220
+        }),
+        requestBody: requestBodyText,
+        responseBody: responseBodyText || ""
+      };
+    }
+
+    return {
+      ok: true,
+      status: response.status,
+      requestUrl,
+      step: "done",
+      detail: buildObusServiceTraceText(traceEntry, `Firma=${companyRef}`, {
+        bodyMaxLen: 120,
+        responseMaxLen: 220
+      }),
+      requestBody: requestBodyText,
+      responseBody: responseBodyText || ""
+    };
+  } catch (err) {
+    const errorTrace = buildObusServiceTraceEntry({
+      service: "GetJourneys",
+      url: requestUrl,
+      requestBody: buildJourneySearchJourneysRequestBody({
+        origin: originId,
+        destination: destinationId,
+        from: dateRange?.from,
+        to: dateRange?.to,
+        sessionId: "<runtime>",
+        deviceId: "<runtime>"
+      }),
+      responseBody: "",
+      error: err?.message || "İstek gönderilemedi.",
+      note: `partnerCode=${partnerCode}${clusterLabel ? `, cluster=${clusterLabel}` : ""}`
+    });
+    return {
+      error: err?.name === "AbortError" ? "GetJourneys isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.",
       status: null,
       requestUrl,
       step: "exception",
@@ -13097,6 +13347,90 @@ app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey
         buildObusServiceTraceEntry({
           service: "JourneySearchStationsApi",
           url: "/api/journey-search/stations",
+          requestBody: req.body || {},
+          responseBody: "",
+          error: err?.message || "Bilinmeyen hata"
+        }),
+        err?.message || "Bilinmeyen hata",
+        {
+          bodyMaxLen: 120,
+          responseMaxLen: 180
+        }
+      )
+    });
+  }
+});
+
+app.post("/api/journey-search/journeys", requireAuth, requireMenuAccess("journey-search"), async (req, res) => {
+  try {
+    const selectedCompanyValue = String(req.body?.company || "").trim();
+    if (!selectedCompanyValue) {
+      return res.status(400).json({ ok: false, error: "Firma seçmelisiniz." });
+    }
+
+    const originId = String(req.body?.origin || "").trim();
+    const destinationId = String(req.body?.destination || "").trim();
+    const dateValue = String(req.body?.date || "").trim();
+
+    if (!originId || !destinationId) {
+      return res.status(400).json({ ok: false, error: "Kalkış ve varış seçmelisiniz." });
+    }
+    if (!dateValue) {
+      return res.status(400).json({ ok: false, error: "Tarih girilmesi zorunludur." });
+    }
+
+    const dateRange = buildJourneySearchDateRange(dateValue);
+    if (!dateRange) {
+      return res.status(400).json({ ok: false, error: "Tarih yyyy-aa-gg formatında olmalıdır." });
+    }
+
+    const { companies } = await loadJourneySearchCompanies();
+    const selectedCompany = companies.find(
+      (item) => !item?.disabled && String(item?.value || "") === selectedCompanyValue && item?.meta
+    );
+
+    if (!selectedCompany?.meta) {
+      return res.status(400).json({ ok: false, error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın." });
+    }
+
+    const result = await fetchJourneySearchJourneys({
+      company: selectedCompany.meta,
+      originId,
+      destinationId,
+      dateRange
+    });
+
+    if (result.error) {
+      return res.status(Number.isFinite(Number(result.status)) ? Number(result.status) : 502).json({
+        ok: false,
+        error: result.error,
+        step: String(result.step || "").trim(),
+        details: String(result.detail || "").trim(),
+        requestUrl: result.requestUrl || "",
+        requestBody: String(result.requestBody || "").trim(),
+        responseBody: String(result.responseBody || "").trim(),
+        status: Number.isFinite(Number(result.status)) ? Number(result.status) : null
+      });
+    }
+
+    return res.json({
+      ok: true,
+      requestUrl: result.requestUrl || "",
+      requestBody: String(result.requestBody || "").trim(),
+      responseBody: String(result.responseBody || "").trim(),
+      status: Number.isFinite(Number(result.status)) ? Number(result.status) : null,
+      details: String(result.detail || "").trim()
+    });
+  } catch (err) {
+    console.error("Journey search journeys error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: `GetJourneys isteği tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`,
+      step: "exception",
+      details: buildObusServiceTraceText(
+        buildObusServiceTraceEntry({
+          service: "JourneySearchJourneysApi",
+          url: "/api/journey-search/journeys",
           requestBody: req.body || {},
           responseBody: "",
           error: err?.message || "Bilinmeyen hata"
