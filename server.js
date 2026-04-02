@@ -256,6 +256,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "obus-jobs"
   },
   {
+    key: "journey-search",
+    type: "item",
+    label: "Sefer Sorgula",
+    parentKey: "general",
+    route: "/general/journey-search",
+    routeKey: "journey-search",
+    sortOrder: 17,
+    iconKey: "journey-search"
+  },
+  {
     key: "obus-user-create",
     type: "item",
     label: "Obus Kullanıcı Oluştur",
@@ -1295,6 +1305,7 @@ async function syncSidebarMenusAndPermissions() {
         CASE
           WHEN m.type = 'section' THEN true
           WHEN m.key = 'obus-user-deactivate' THEN true
+          WHEN m.key = 'journey-search' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1330,6 +1341,7 @@ async function ensureSidebarPermissionsForUser(userId) {
         CASE
           WHEN m.type = 'section' THEN true
           WHEN m.key = 'obus-user-deactivate' THEN true
+          WHEN m.key = 'journey-search' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -3177,6 +3189,35 @@ async function loadAuthorizedLinesCompanies() {
   return {
     companies,
     partnerItems,
+    partnerError
+  };
+}
+
+async function loadJourneySearchCompanies() {
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const companies = [{ value: "", label: "Firma seçiniz" }];
+
+  partnerItems.forEach((item) => {
+    const value = buildCompanyOptionValue(item);
+    const label = String(item?.code || "").trim();
+    if (!value || !label) return;
+    companies.push({
+      value,
+      label,
+      meta: item
+    });
+  });
+
+  if (partnerError) {
+    companies.push({
+      value: "__partner_error__",
+      label: `Hata: ${partnerError}`,
+      disabled: true
+    });
+  }
+
+  return {
+    companies,
     partnerError
   };
 }
@@ -12863,6 +12904,23 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
     filters,
     companies,
     report
+  });
+});
+
+app.get("/general/journey-search", requireAuth, requireMenuAccess("journey-search"), async (req, res) => {
+  const { companies, partnerError } = await loadJourneySearchCompanies();
+  const filters = {
+    company: typeof req.query.company === "string" ? req.query.company.trim() : "",
+    origin: typeof req.query.origin === "string" ? req.query.origin.trim() : "",
+    destination: typeof req.query.destination === "string" ? req.query.destination.trim() : ""
+  };
+
+  res.render("general-journey-search", {
+    user: req.session.user,
+    active: "journey-search",
+    filters,
+    companies,
+    partnerError
   });
 });
 

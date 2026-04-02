@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 7h7"></path>
+                <path d="M13 7h7"></path>
+                <path d="M11 5l2 2-2 2"></path>
+                <path d="M20 17h-7"></path>
+                <path d="M11 17H4"></path>
+                <path d="M13 15l-2 2 2 2"></path>
+              </svg>
+            </span>
+            <span>Sefer Sorgula</span>
+          </h1>
+          <p>Firma, kalkış ve varış seçim alanları hazırlandı.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+
+      <% if (partnerError) { %>
+        <div class="alert inline-alert"><%= partnerError %></div>
+      <% } %>
+
+      <section class="table-card panel-card allowed-lines-section">
+        <div class="table-head">
+          <h2>Sefer Filtreleri</h2>
+        </div>
+
+        <div class="allowed-lines-grid">
+          <label class="allowed-lines-field">
+            <span>Firma</span>
+            <select name="company" id="journey-search-company">
+              <% companies.forEach((item) => { %>
+                <option
+                  value="<%= item.value %>"
+                  <%= item.disabled ? "disabled" : "" %>
+                  <%= filters.company === item.value ? "selected" : "" %>
+                >
+                  <%= item.label %>
+                </option>
+              <% }) %>
+            </select>
+            <small class="muted">Liste, Tüm Firmalar ekranındaki partner code verisinden doldurulur.</small>
+          </label>
+
+          <label class="allowed-lines-field">
+            <span>Kalkış</span>
+            <select name="origin" id="journey-search-origin" disabled>
+              <option value="" selected>Kalkış noktaları sonraki adımda bağlanacak</option>
+            </select>
+            <small class="muted">Bu combobox şimdilik placeholder olarak eklendi.</small>
+          </label>
+
+          <label class="allowed-lines-field">
+            <span>Varış</span>
+            <select name="destination" id="journey-search-destination" disabled>
+              <option value="" selected>Varış noktaları sonraki adımda bağlanacak</option>
+            </select>
+            <small class="muted">Bu combobox şimdilik placeholder olarak eklendi.</small>
+          </label>
+        </div>
+      </section>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>
