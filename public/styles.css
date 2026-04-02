@@ -2684,7 +2684,7 @@ button.ghost {
 
 .journey-search-workbench {
   display: grid;
-  grid-template-columns: 180px minmax(240px, 280px) minmax(340px, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -2696,6 +2696,7 @@ button.ghost {
   border-radius: 16px;
   background: #f7f9fc;
   padding: 14px;
+  min-width: 0;
 }
 
 .journey-search-service-nav {
@@ -2763,8 +2764,7 @@ button.ghost {
   opacity: 0.82;
 }
 
-.journey-search-config-card,
-.journey-search-io-column {
+.journey-search-config-card {
   min-width: 0;
 }
 
@@ -2829,11 +2829,6 @@ button.ghost {
   outline: none;
   border-color: #8ca4c0;
   background: #fff;
-}
-
-.journey-search-io-column {
-  display: grid;
-  gap: 12px;
 }
 
 .journey-search-response-meta {
