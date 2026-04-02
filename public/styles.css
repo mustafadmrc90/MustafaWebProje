@@ -2685,9 +2685,10 @@ button.ghost {
 
 .journey-search-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
-  gap: 10px 16px;
+  grid-template-columns: repeat(3, minmax(180px, 210px));
+  gap: 10px 12px;
   align-items: start;
+  justify-content: start;
 }
 
 .journey-search-field {
@@ -2715,6 +2716,7 @@ button.ghost {
   color: #1f2735;
   width: 100%;
   min-width: 0;
+  max-width: 210px;
 }
 
 .journey-search-field select:focus {
@@ -2723,14 +2725,9 @@ button.ghost {
   background: #fff;
 }
 
-.journey-search-field small {
-  display: block;
-  min-height: 32px;
-  line-height: 1.35;
-}
-
 .journey-search-status {
   min-height: 20px;
+  white-space: pre-line;
 }
 
 .jira-board-page .content {

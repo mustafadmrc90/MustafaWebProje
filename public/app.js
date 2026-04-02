@@ -1096,6 +1096,58 @@
       statusEl.className = "journey-search-status muted";
     };
 
+    const normalizeRawErrorPreview = (text) =>
+      String(text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 260);
+
+    const parseJourneyStationsApiResponse = async (response) => {
+      const rawText = await response.text();
+      if (!rawText) {
+        return {
+          data: null,
+          rawText: ""
+        };
+      }
+
+      try {
+        return {
+          data: JSON.parse(rawText),
+          rawText
+        };
+      } catch (err) {
+        return {
+          data: null,
+          rawText
+        };
+      }
+    };
+
+    const buildJourneyStationsErrorMessage = (response, data, rawText) => {
+      const lines = [];
+      const baseMessage = String(data?.error || "").trim() || `İstasyonlar alınamadı (${response?.status || 0})`;
+      lines.push(baseMessage);
+
+      if (data?.step) {
+        lines.push(`Adım: ${String(data.step)}`);
+      }
+      if (data?.requestUrl) {
+        lines.push(`URL: ${String(data.requestUrl)}`);
+      }
+      if (data?.details) {
+        lines.push(`Detay: ${String(data.details)}`);
+      } else {
+        const preview = normalizeRawErrorPreview(rawText);
+        if (preview) {
+          lines.push(`Ham yanıt: ${preview}`);
+        }
+      }
+
+      return lines.join("\n");
+    };
+
     const fillSelect = (selectEl, items, placeholder, selectedValue = "") => {
       const normalizedItems = Array.isArray(items) ? items : [];
       const targetValue = String(selectedValue || "").trim();
@@ -1156,11 +1208,11 @@
             company: companyValue
           })
         });
-        const data = await parseJsonResponse(response);
+        const { data, rawText } = await parseJourneyStationsApiResponse(response);
 
         if (currentSequence !== requestSequence) return;
         if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
-          throw new Error(getApiErrorMessage(response, data, "İstasyonlar alınamadı"));
+          throw new Error(buildJourneyStationsErrorMessage(response, data, rawText));
         }
 
         const items = data.items

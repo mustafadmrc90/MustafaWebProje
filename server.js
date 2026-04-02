@@ -3333,13 +3333,16 @@ async function fetchJourneySearchStations({ company } = {}) {
   const baseClusterUrl = companyUrl || buildUrlForCluster(PARTNERS_API_URL, clusterLabel);
   const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
   const requestUrl = buildJourneySearchStationsUrl(baseClusterUrl, clusterLabel);
+  const companyRef = `${partnerCode || "code?"}${clusterLabel ? ` / ${clusterLabel}` : ""}`;
 
   if (!partnerCode) {
     return {
       items: [],
       error: "Seçilen firma için PartnerCode bulunamadı.",
       status: null,
-      requestUrl
+      requestUrl,
+      step: "validation",
+      detail: `Firma=${companyRef}`
     };
   }
 
@@ -3348,7 +3351,9 @@ async function fetchJourneySearchStations({ company } = {}) {
       items: [],
       error: "Seçilen firma için cluster URL bulunamadı.",
       status: null,
-      requestUrl: ""
+      requestUrl: "",
+      step: "validation",
+      detail: `Firma=${companyRef}`
     };
   }
 
@@ -3360,9 +3365,14 @@ async function fetchJourneySearchStations({ company } = {}) {
     if (sessionResult.error) {
       return {
         items: [],
-        error: sessionResult.error,
+        error: `GetSession başarısız: ${sessionResult.error}`,
         status: null,
-        requestUrl
+        requestUrl,
+        step: "getsession",
+        detail: buildObusServiceTraceText(sessionResult.debug, sessionResult.error, {
+          bodyMaxLen: 120,
+          responseMaxLen: 180
+        })
       };
     }
 
@@ -3391,6 +3401,14 @@ async function fetchJourneySearchStations({ company } = {}) {
 
     const raw = await response.text();
     const parsed = parseJsonSafe(raw);
+    const getStationsTrace = buildObusServiceTraceEntry({
+      service: "GetStations",
+      url: requestUrl,
+      status: response.status,
+      requestBody: body,
+      responseBody: parsed ?? raw,
+      note: `partnerCode=${partnerCode}${clusterLabel ? `, cluster=${clusterLabel}` : ""}`
+    });
     const hasExplicitStatusField =
       parsed &&
       typeof parsed === "object" &&
@@ -3405,9 +3423,14 @@ async function fetchJourneySearchStations({ company } = {}) {
     if (!response.ok) {
       return {
         items: [],
-        error: `HTTP ${response.status}: ${responseErrorText}`,
+        error: `GetStations HTTP ${response.status}: ${responseErrorText}`,
         status: response.status,
-        requestUrl
+        requestUrl,
+        step: "getstations",
+        detail: buildObusServiceTraceText(getStationsTrace, responseErrorText, {
+          bodyMaxLen: 120,
+          responseMaxLen: 220
+        })
       };
     }
 
@@ -3416,7 +3439,12 @@ async function fetchJourneySearchStations({ company } = {}) {
         items: [],
         error: responseErrorText || "İstasyon servisi başarısız döndü.",
         status: response.status,
-        requestUrl
+        requestUrl,
+        step: "getstations",
+        detail: buildObusServiceTraceText(getStationsTrace, responseErrorText, {
+          bodyMaxLen: 120,
+          responseMaxLen: 220
+        })
       };
     }
 
@@ -3424,9 +3452,14 @@ async function fetchJourneySearchStations({ company } = {}) {
     if (items.length === 0) {
       return {
         items: [],
-        error: "Seçilen firma için istasyon bulunamadı.",
+        error: "GetStations yanıtında istasyon bulunamadı.",
         status: response.status,
-        requestUrl
+        requestUrl,
+        step: "parse",
+        detail: buildObusServiceTraceText(getStationsTrace, "İstasyon listesi boş veya beklenen formatta değil.", {
+          bodyMaxLen: 120,
+          responseMaxLen: 220
+        })
       };
     }
 
@@ -3434,14 +3467,38 @@ async function fetchJourneySearchStations({ company } = {}) {
       items,
       error: null,
       status: response.status,
-      requestUrl
+      requestUrl,
+      step: "done",
+      detail: `Firma=${companyRef} | istasyon=${items.length} | url=${truncateObusDebugText(requestUrl, 120)}`
     };
   } catch (err) {
+    const errorTrace = buildObusServiceTraceEntry({
+      service: "GetStations",
+      url: requestUrl,
+      requestBody: {
+        data: null,
+        token: null,
+        "device-session": {
+          "session-id": "<runtime>",
+          "device-id": "<runtime>"
+        },
+        date: JOURNEY_SEARCH_REQUEST_DATE,
+        language: JOURNEY_SEARCH_REQUEST_LANGUAGE
+      },
+      responseBody: "",
+      error: err?.message || "İstek gönderilemedi.",
+      note: `partnerCode=${partnerCode}${clusterLabel ? `, cluster=${clusterLabel}` : ""}`
+    });
     return {
       items: [],
       error: err?.name === "AbortError" ? "İstasyon listesi zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.",
       status: null,
-      requestUrl
+      requestUrl,
+      step: "exception",
+      detail: buildObusServiceTraceText(errorTrace, err?.message || "İstek gönderilemedi.", {
+        bodyMaxLen: 120,
+        responseMaxLen: 220
+      })
     };
   } finally {
     clearTimeout(timeout);
@@ -12977,6 +13034,8 @@ app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey
       return res.status(Number.isFinite(Number(result.status)) ? Number(result.status) : 502).json({
         ok: false,
         error: result.error,
+        step: String(result.step || "").trim(),
+        details: String(result.detail || "").trim(),
         requestUrl: result.requestUrl || "",
         totalCount: 0
       });
@@ -12986,13 +13045,29 @@ app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey
       ok: true,
       items: Array.isArray(result.items) ? result.items : [],
       totalCount: Array.isArray(result.items) ? result.items.length : 0,
-      requestUrl: result.requestUrl || ""
+      requestUrl: result.requestUrl || "",
+      details: String(result.detail || "").trim()
     });
   } catch (err) {
     console.error("Journey search stations error:", err);
     return res.status(500).json({
       ok: false,
-      error: `İstasyon listesi alınamadı: ${err?.message || "Bilinmeyen hata"}`
+      error: `İstasyon listesi alınamadı: ${err?.message || "Bilinmeyen hata"}`,
+      step: "exception",
+      details: buildObusServiceTraceText(
+        buildObusServiceTraceEntry({
+          service: "JourneySearchStationsApi",
+          url: "/api/journey-search/stations",
+          requestBody: req.body || {},
+          responseBody: "",
+          error: err?.message || "Bilinmeyen hata"
+        }),
+        err?.message || "Bilinmeyen hata",
+        {
+          bodyMaxLen: 120,
+          responseMaxLen: 180
+        }
+      )
     });
   }
 });
