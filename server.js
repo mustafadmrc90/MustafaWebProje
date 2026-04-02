@@ -2882,7 +2882,11 @@ function buildJourneySearchStationsUrl(companyUrl, clusterLabel = "") {
 
   try {
     const parsed = new URL(String(normalizedBaseUrl || ""));
-    parsed.pathname = "/web/getstations";
+    const pathname = String(parsed.pathname || "/");
+    const apiMatch = pathname.match(/^(.+?\/api\/?)/i);
+    const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
+    const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
+    parsed.pathname = normalizeApiPath(`${apiPrefix}web/getstations`, "/api/web/getstations");
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
