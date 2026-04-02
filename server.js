@@ -3277,7 +3277,7 @@ function extractJourneySearchStations(payload) {
     list.forEach((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) return;
 
-      const label = formatPartnerCellValue(
+      const name = formatPartnerCellValue(
         readPartnerRawValueByAliases(row, [
           "name",
           "label",
@@ -3292,7 +3292,7 @@ function extractJourneySearchStations(payload) {
           "title"
         ])
       ).trim();
-      const value = formatPartnerCellValue(
+      const id = formatPartnerCellValue(
         readPartnerRawValueByAliases(row, [
           "id",
           "station-id",
@@ -3309,24 +3309,26 @@ function extractJourneySearchStations(payload) {
         ])
       ).trim();
 
-      if (!label || label.startsWith("{") || label.startsWith("[")) return;
+      if (!name || name.startsWith("{") || name.startsWith("[")) return;
 
-      const normalizedValue = value || label;
-      const key = `${normalizedValue.toLocaleLowerCase("tr")}|||${label.toLocaleLowerCase("tr")}`;
+      const normalizedValue = id || name;
+      const key = `${normalizedValue.toLocaleLowerCase("tr")}|||${name.toLocaleLowerCase("tr")}`;
       if (seen.has(key)) return;
       seen.add(key);
 
       items.push({
         value: normalizedValue,
-        label
+        label: name,
+        id,
+        name
       });
     });
   });
 
   return items.sort(
     (a, b) =>
-      String(a.label || "").localeCompare(String(b.label || ""), "tr") ||
-      String(a.value || "").localeCompare(String(b.value || ""), "tr")
+      String(a.name || a.label || "").localeCompare(String(b.name || b.label || ""), "tr") ||
+      String(a.id || a.value || "").localeCompare(String(b.id || b.value || ""), "tr")
   );
 }
 

@@ -45,7 +45,9 @@
         <div class="journey-search-form" data-journey-search-form="1">
           <div class="journey-search-grid">
             <label class="journey-search-field">
-              <span>Firma</span>
+              <span class="journey-search-label-row">
+                <span>Firma</span>
+              </span>
               <select name="company" id="journey-search-company">
                 <% companies.forEach((item) => { %>
                   <option
@@ -60,14 +62,22 @@
             </label>
 
             <label class="journey-search-field">
-              <span>Kalkış</span>
+              <span class="journey-search-label-row">
+                <span>Kalkış</span>
+              </span>
               <select name="origin" id="journey-search-origin" data-selected-value="<%= filters.origin %>">
                 <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
               </select>
             </label>
 
             <label class="journey-search-field">
-              <span>Varış</span>
+              <span class="journey-search-label-row">
+                <span>Varış</span>
+                <span class="journey-search-toggle">
+                  <input type="checkbox" id="journey-search-show-id" />
+                  <span>ID'li göster</span>
+                </span>
+              </span>
               <select
                 name="destination"
                 id="journey-search-destination"

@@ -1076,12 +1076,14 @@
     const companySelect = form.querySelector("#journey-search-company");
     const originSelect = form.querySelector("#journey-search-origin");
     const destinationSelect = form.querySelector("#journey-search-destination");
+    const showIdCheckbox = form.querySelector("#journey-search-show-id");
     const statusEl = form.querySelector("[data-journey-search-status='1']");
-    if (!companySelect || !originSelect || !destinationSelect || !statusEl) return;
+    if (!companySelect || !originSelect || !destinationSelect || !showIdCheckbox || !statusEl) return;
 
     let selectedOriginValue = String(originSelect.dataset.selectedValue || "").trim();
     let selectedDestinationValue = String(destinationSelect.dataset.selectedValue || "").trim();
     let requestSequence = 0;
+    let loadedStationItems = [];
 
     const setStatus = (message, kind = "muted") => {
       statusEl.textContent = String(message || "").trim();
@@ -1148,6 +1150,15 @@
       return lines.join("\n");
     };
 
+    const getJourneyStationLabel = (item) => {
+      const name = String(item?.name || item?.label || "").trim();
+      const id = String(item?.id || "").trim();
+      if (showIdCheckbox.checked && id && name) {
+        return `${id} - ${name}`;
+      }
+      return name || id;
+    };
+
     const fillSelect = (selectEl, items, placeholder, selectedValue = "") => {
       const normalizedItems = Array.isArray(items) ? items : [];
       const targetValue = String(selectedValue || "").trim();
@@ -1160,7 +1171,7 @@
       let hasMatch = false;
       normalizedItems.forEach((item) => {
         const value = String(item?.value || "").trim();
-        const label = String(item?.label || "").trim();
+        const label = getJourneyStationLabel(item);
         if (!value || !label) return;
 
         const option = document.createElement("option");
@@ -1179,8 +1190,15 @@
     };
 
     const resetStationSelects = (placeholder) => {
+      loadedStationItems = [];
       fillSelect(originSelect, [], placeholder || "Önce firma seçin", "");
       fillSelect(destinationSelect, [], placeholder || "Önce firma seçin", "");
+    };
+
+    const renderLoadedStations = () => {
+      if (!Array.isArray(loadedStationItems) || loadedStationItems.length === 0) return;
+      fillSelect(originSelect, loadedStationItems, "Kalkış seçiniz", selectedOriginValue);
+      fillSelect(destinationSelect, loadedStationItems, "Varış seçiniz", selectedDestinationValue);
     };
 
     const loadStations = async () => {
@@ -1218,9 +1236,11 @@
         const items = data.items
           .map((item) => ({
             value: String(item?.value || "").trim(),
-            label: String(item?.label || "").trim()
+            label: String(item?.label || "").trim(),
+            id: String(item?.id || "").trim(),
+            name: String(item?.name || item?.label || "").trim()
           }))
-          .filter((item) => item.value && item.label);
+          .filter((item) => item.value && item.name);
 
         if (!items.length) {
           resetStationSelects("İstasyon bulunamadı");
@@ -1228,8 +1248,8 @@
           return;
         }
 
-        fillSelect(originSelect, items, "Kalkış seçiniz", selectedOriginValue);
-        fillSelect(destinationSelect, items, "Varış seçiniz", selectedDestinationValue);
+        loadedStationItems = items;
+        renderLoadedStations();
         setStatus(`${items.length} istasyon yüklendi.`, "success");
       } catch (err) {
         if (currentSequence !== requestSequence) return;
@@ -1242,6 +1262,18 @@
       selectedOriginValue = "";
       selectedDestinationValue = "";
       loadStations();
+    });
+
+    originSelect.addEventListener("change", () => {
+      selectedOriginValue = String(originSelect.value || "").trim();
+    });
+
+    destinationSelect.addEventListener("change", () => {
+      selectedDestinationValue = String(destinationSelect.value || "").trim();
+    });
+
+    showIdCheckbox.addEventListener("change", () => {
+      renderLoadedStations();
     });
 
     if (String(companySelect.value || "").trim()) {

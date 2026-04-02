@@ -2706,6 +2706,30 @@ button.ghost {
   color: #4f6176;
 }
 
+.journey-search-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 18px;
+}
+
+.journey-search-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #5f6b7a;
+  white-space: nowrap;
+}
+
+.journey-search-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
 .journey-search-field select {
   border-radius: 10px;
   border: 1px solid #b9c6d7;
