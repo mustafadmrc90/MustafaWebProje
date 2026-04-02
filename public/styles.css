@@ -2700,6 +2700,10 @@ button.ghost {
 }
 
 .journey-search-service-nav {
+  grid-column: 1 / 2;
+}
+
+.journey-search-service-nav {
   display: grid;
   gap: 10px;
 }
@@ -2766,6 +2770,7 @@ button.ghost {
 
 .journey-search-config-card {
   min-width: 0;
+  grid-column: 2 / 3;
 }
 
 .journey-search-fields {
@@ -2848,6 +2853,14 @@ button.ghost {
   grid-column: 1 / -1;
   min-height: 20px;
   white-space: pre-line;
+}
+
+.journey-search-io-card--request {
+  grid-column: 3 / 4;
+}
+
+.journey-search-io-card--response {
+  grid-column: 4 / 5;
 }
 
 .jira-board-page .content {

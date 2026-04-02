@@ -57,6 +57,15 @@
               <span class="journey-search-service-name">GetStation</span>
               <span class="journey-search-service-meta">Firma bazlı istasyon yükleme</span>
             </button>
+            <button
+              type="button"
+              class="journey-search-service-button"
+              data-journey-search-service-button="getjourneys"
+              aria-pressed="false"
+            >
+              <span class="journey-search-service-name">GetJourneys</span>
+              <span class="journey-search-service-meta">Firma/Kalkış/Varış/Tarih akışı</span>
+            </button>
           </aside>
 
           <section class="journey-search-config-card" data-journey-search-service-panel="getstation">
@@ -110,14 +119,64 @@
             </div>
           </section>
 
-          <article class="journey-search-io-card" data-journey-search-service-panel="getstation">
+          <section class="journey-search-config-card" data-journey-search-service-panel="getjourneys" hidden>
+            <div class="journey-search-card-head">
+              <h3>GetJourneys Parametreleri</h3>
+            </div>
+
+            <div class="journey-search-fields">
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Firma</span>
+                </span>
+                <select name="journeysCompany" id="journey-search-journeys-company">
+                  <% companies.forEach((item) => { %>
+                    <option
+                      value="<%= item.value %>"
+                      <%= item.disabled ? "disabled" : "" %>
+                      <%= filters.company === item.value ? "selected" : "" %>
+                    >
+                      <%= item.label %>
+                    </option>
+                  <% }) %>
+                </select>
+              </label>
+
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Kalkış</span>
+                </span>
+                <select name="journeysOrigin" id="journey-search-journeys-origin">
+                  <option value="">İlk önce firma seçin</option>
+                </select>
+              </label>
+
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Varış</span>
+                </span>
+                <select name="journeysDestination" id="journey-search-journeys-destination">
+                  <option value="">İlk önce firma seçin</option>
+                </select>
+              </label>
+
+              <label class="journey-search-field">
+                <span class="journey-search-label-row">
+                  <span>Tarih</span>
+                </span>
+                <input type="date" name="journeysDate" id="journey-search-journeys-date" value="" />
+              </label>
+            </div>
+          </section>
+
+          <article class="journey-search-io-card journey-search-io-card--request" data-journey-search-service-panel="getstation">
             <div class="journey-search-card-head">
               <h3>İstek Body</h3>
             </div>
             <pre class="allowed-lines-debug-pre" data-journey-search-request-body="1"><%= requestBodyTemplate %></pre>
           </article>
 
-          <article class="journey-search-io-card" data-journey-search-service-panel="getstation">
+          <article class="journey-search-io-card journey-search-io-card--response" data-journey-search-service-panel="getstation">
             <div class="journey-search-card-head">
               <h3>Response</h3>
               <div class="journey-search-response-meta">
@@ -126,6 +185,28 @@
             </div>
             <div class="journey-search-url-line" data-journey-search-url="1">URL: -</div>
             <pre class="allowed-lines-debug-pre" data-journey-search-response-body="1">Henüz response yok.</pre>
+          </article>
+
+          <article class="journey-search-io-card journey-search-io-card--request" data-journey-search-service-panel="getjourneys" hidden>
+            <div class="journey-search-card-head">
+              <h3>İstek Body</h3>
+            </div>
+            <pre class="allowed-lines-debug-pre">
+              {
+                "company": "FIRMA_KODU",
+                "origin": "KALKIS_ID",
+                "destination": "VARIS_ID",
+                "departureDate": "2026-04-03"
+              }
+            </pre>
+          </article>
+
+          <article class="journey-search-io-card journey-search-io-card--response" data-journey-search-service-panel="getjourneys" hidden>
+            <div class="journey-search-card-head">
+              <h3>Response</h3>
+            </div>
+            <div class="journey-search-url-line">URL: -</div>
+            <pre class="allowed-lines-debug-pre">Henüz response yok.</pre>
           </article>
 
           <div class="journey-search-status muted" data-journey-search-status="1">
