@@ -2678,6 +2678,61 @@ button.ghost {
   margin-top: 12px;
 }
 
+.journey-search-form {
+  display: grid;
+  gap: 12px;
+}
+
+.journey-search-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 10px 16px;
+  align-items: start;
+}
+
+.journey-search-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  align-content: start;
+}
+
+.journey-search-field span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #4f6176;
+}
+
+.journey-search-field select {
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #f7f9fc;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-height: 36px;
+  color: #1f2735;
+  width: 100%;
+  min-width: 0;
+}
+
+.journey-search-field select:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.journey-search-field small {
+  display: block;
+  min-height: 32px;
+  line-height: 1.35;
+}
+
+.journey-search-status {
+  min-height: 20px;
+}
+
 .jira-board-page .content {
   padding-top: 18px;
 }
@@ -4728,6 +4783,10 @@ button.ghost {
   }
 
   .allowed-lines-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .journey-search-grid {
     grid-template-columns: 1fr;
   }
 

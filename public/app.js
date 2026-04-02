@@ -1067,6 +1067,139 @@
     });
   };
 
+  const initJourneySearchForm = () => {
+    const form = document.querySelector("[data-journey-search-form='1']");
+    if (!form) return;
+    if (form.dataset.bound === "1") return;
+    form.dataset.bound = "1";
+
+    const companySelect = form.querySelector("#journey-search-company");
+    const originSelect = form.querySelector("#journey-search-origin");
+    const destinationSelect = form.querySelector("#journey-search-destination");
+    const statusEl = form.querySelector("[data-journey-search-status='1']");
+    if (!companySelect || !originSelect || !destinationSelect || !statusEl) return;
+
+    let selectedOriginValue = String(originSelect.dataset.selectedValue || "").trim();
+    let selectedDestinationValue = String(destinationSelect.dataset.selectedValue || "").trim();
+    let requestSequence = 0;
+
+    const setStatus = (message, kind = "muted") => {
+      statusEl.textContent = String(message || "").trim();
+      if (kind === "error") {
+        statusEl.className = "journey-search-status alert inline-alert";
+        return;
+      }
+      if (kind === "success") {
+        statusEl.className = "journey-search-status inline-success";
+        return;
+      }
+      statusEl.className = "journey-search-status muted";
+    };
+
+    const fillSelect = (selectEl, items, placeholder, selectedValue = "") => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      const targetValue = String(selectedValue || "").trim();
+      const fragment = document.createDocumentFragment();
+      const placeholderOption = document.createElement("option");
+      placeholderOption.value = "";
+      placeholderOption.textContent = placeholder;
+      fragment.appendChild(placeholderOption);
+
+      let hasMatch = false;
+      normalizedItems.forEach((item) => {
+        const value = String(item?.value || "").trim();
+        const label = String(item?.label || "").trim();
+        if (!value || !label) return;
+
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        if (targetValue && targetValue === value) {
+          option.selected = true;
+          hasMatch = true;
+        }
+        fragment.appendChild(option);
+      });
+
+      placeholderOption.selected = !hasMatch;
+      selectEl.innerHTML = "";
+      selectEl.appendChild(fragment);
+    };
+
+    const resetStationSelects = (placeholder) => {
+      fillSelect(originSelect, [], placeholder || "Önce firma seçin", "");
+      fillSelect(destinationSelect, [], placeholder || "Önce firma seçin", "");
+    };
+
+    const loadStations = async () => {
+      const companyValue = String(companySelect.value || "").trim();
+      const currentSequence = ++requestSequence;
+
+      if (!companyValue || companyValue === "__partner_error__") {
+        resetStationSelects("Önce firma seçin");
+        setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
+        return;
+      }
+
+      fillSelect(originSelect, [], "İstasyonlar yükleniyor...", "");
+      fillSelect(destinationSelect, [], "İstasyonlar yükleniyor...", "");
+      setStatus("İstasyonlar yükleniyor...", "muted");
+
+      try {
+        const response = await fetch("/api/journey-search/stations", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            company: companyValue
+          })
+        });
+        const data = await parseJsonResponse(response);
+
+        if (currentSequence !== requestSequence) return;
+        if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
+          throw new Error(getApiErrorMessage(response, data, "İstasyonlar alınamadı"));
+        }
+
+        const items = data.items
+          .map((item) => ({
+            value: String(item?.value || "").trim(),
+            label: String(item?.label || "").trim()
+          }))
+          .filter((item) => item.value && item.label);
+
+        if (!items.length) {
+          resetStationSelects("İstasyon bulunamadı");
+          setStatus("Seçilen firma için istasyon bulunamadı.", "error");
+          return;
+        }
+
+        fillSelect(originSelect, items, "Kalkış seçiniz", selectedOriginValue);
+        fillSelect(destinationSelect, items, "Varış seçiniz", selectedDestinationValue);
+        setStatus(`${items.length} istasyon yüklendi.`, "success");
+      } catch (err) {
+        if (currentSequence !== requestSequence) return;
+        resetStationSelects("İstasyonlar yüklenemedi");
+        setStatus(err?.message || "İstasyonlar alınamadı.", "error");
+      }
+    };
+
+    companySelect.addEventListener("change", () => {
+      selectedOriginValue = "";
+      selectedDestinationValue = "";
+      loadStations();
+    });
+
+    if (String(companySelect.value || "").trim()) {
+      loadStations();
+    } else {
+      resetStationSelects("Önce firma seçin");
+      setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
+    }
+  };
+
   const initObusUserCreateBuilder = () => {
     const form = document.querySelector(".obus-user-create-form");
     if (!form) return;
@@ -3078,6 +3211,7 @@
     initSalesReportLoading();
     initSlackReportLoading();
     initAllowedLinesLoading();
+    initJourneySearchForm();
     initObusUserCreateBuilder();
     initObusUserDeactivateForm();
     initAllCompaniesLoading();

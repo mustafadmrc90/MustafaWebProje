@@ -42,38 +42,48 @@
           <h2>Sefer Filtreleri</h2>
         </div>
 
-        <div class="allowed-lines-grid">
-          <label class="allowed-lines-field">
-            <span>Firma</span>
-            <select name="company" id="journey-search-company">
-              <% companies.forEach((item) => { %>
-                <option
-                  value="<%= item.value %>"
-                  <%= item.disabled ? "disabled" : "" %>
-                  <%= filters.company === item.value ? "selected" : "" %>
-                >
-                  <%= item.label %>
-                </option>
-              <% }) %>
-            </select>
-            <small class="muted">Liste, Tüm Firmalar ekranındaki partner code verisinden doldurulur.</small>
-          </label>
+        <div class="journey-search-form" data-journey-search-form="1">
+          <div class="journey-search-grid">
+            <label class="journey-search-field">
+              <span>Firma</span>
+              <select name="company" id="journey-search-company">
+                <% companies.forEach((item) => { %>
+                  <option
+                    value="<%= item.value %>"
+                    <%= item.disabled ? "disabled" : "" %>
+                    <%= filters.company === item.value ? "selected" : "" %>
+                  >
+                    <%= item.label %>
+                  </option>
+                <% }) %>
+              </select>
+              <small class="muted">Liste, Tüm Firmalar ekranındaki partner code bilgisinden doldurulur.</small>
+            </label>
 
-          <label class="allowed-lines-field">
-            <span>Kalkış</span>
-            <select name="origin" id="journey-search-origin" disabled>
-              <option value="" selected>Kalkış noktaları sonraki adımda bağlanacak</option>
-            </select>
-            <small class="muted">Bu combobox şimdilik placeholder olarak eklendi.</small>
-          </label>
+            <label class="journey-search-field">
+              <span>Kalkış</span>
+              <select name="origin" id="journey-search-origin" data-selected-value="<%= filters.origin %>">
+                <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
+              </select>
+              <small class="muted">Firma seçildiğinde istasyon listesiyle otomatik doldurulur.</small>
+            </label>
 
-          <label class="allowed-lines-field">
-            <span>Varış</span>
-            <select name="destination" id="journey-search-destination" disabled>
-              <option value="" selected>Varış noktaları sonraki adımda bağlanacak</option>
-            </select>
-            <small class="muted">Bu combobox şimdilik placeholder olarak eklendi.</small>
-          </label>
+            <label class="journey-search-field">
+              <span>Varış</span>
+              <select
+                name="destination"
+                id="journey-search-destination"
+                data-selected-value="<%= filters.destination %>"
+              >
+                <option value=""><%= filters.company ? "İstasyonlar yükleniyor..." : "Önce firma seçin" %></option>
+              </select>
+              <small class="muted">Aynı istasyon listesi varış combobox’ına da uygulanır.</small>
+            </label>
+          </div>
+
+          <div class="journey-search-status muted" data-journey-search-status="1">
+            Firma seçince kalkış ve varış listesi yüklenecek.
+          </div>
         </div>
       </section>
     </section>

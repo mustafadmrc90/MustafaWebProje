@@ -103,6 +103,15 @@ const OBUS_JOBS_REQUEST_LANGUAGE =
   String(process.env.OBUS_JOBS_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const OBUS_JOBS_TIMEOUT_MS = Number.parseInt(process.env.OBUS_JOBS_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_JOBS_CLUSTER_CONCURRENCY = Number.parseInt(process.env.OBUS_JOBS_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const JOURNEY_SEARCH_API_AUTH =
+  String(process.env.JOURNEY_SEARCH_API_AUTH || "Basic RXJ0dVNlcmRhclNlbWloRGF2aWROdXJl").trim() ||
+  "Basic RXJ0dVNlcmRhclNlbWloRGF2aWROdXJl";
+const JOURNEY_SEARCH_REQUEST_DATE =
+  String(process.env.JOURNEY_SEARCH_REQUEST_DATE || "2019-12-13T15:11:01.6608738+03:00").trim() ||
+  "2019-12-13T15:11:01.6608738+03:00";
+const JOURNEY_SEARCH_REQUEST_LANGUAGE =
+  String(process.env.JOURNEY_SEARCH_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
+const JOURNEY_SEARCH_TIMEOUT_MS = Number.parseInt(process.env.JOURNEY_SEARCH_TIMEOUT_MS || "90000", 10) || 90000;
 const UETDS_PRICES_TASK_DATA =
   String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e").trim() ||
   "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e";
@@ -2866,6 +2875,22 @@ function buildSessionUrlForPartnerUrl(partnerUrl) {
   }
 }
 
+function buildJourneySearchStationsUrl(companyUrl, clusterLabel = "") {
+  const fallbackUrl = buildUrlForCluster(PARTNERS_API_URL, clusterLabel);
+  const normalizedBaseUrl = normalizeTargetUrl(companyUrl) || normalizeTargetUrl(fallbackUrl);
+  if (!normalizedBaseUrl) return "";
+
+  try {
+    const parsed = new URL(String(normalizedBaseUrl || ""));
+    parsed.pathname = "/web/getstations";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function normalizeApiPath(input, fallbackPath) {
   const fallback = String(fallbackPath || "").trim() || "/";
   const raw = String(input || "").trim();
@@ -3220,6 +3245,207 @@ async function loadJourneySearchCompanies() {
     companies,
     partnerError
   };
+}
+
+function collectJourneySearchStationArrays(node, collector, depth = 0) {
+  if (depth > 6 || node === null || node === undefined) return;
+
+  if (Array.isArray(node)) {
+    if (node.some((item) => item && typeof item === "object" && !Array.isArray(item))) {
+      collector.push(node);
+    }
+    node.forEach((item) => collectJourneySearchStationArrays(item, collector, depth + 1));
+    return;
+  }
+
+  if (typeof node !== "object") return;
+  Object.values(node).forEach((value) => collectJourneySearchStationArrays(value, collector, depth + 1));
+}
+
+function extractJourneySearchStations(payload) {
+  const candidateLists = [];
+  collectJourneySearchStationArrays(payload, candidateLists);
+
+  const seen = new Set();
+  const items = [];
+
+  candidateLists.forEach((list) => {
+    list.forEach((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
+
+      const label = formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, [
+          "name",
+          "label",
+          "station-name",
+          "station_name",
+          "stationname",
+          "city-name",
+          "city_name",
+          "cityname",
+          "description",
+          "text",
+          "title"
+        ])
+      ).trim();
+      const value = formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, [
+          "id",
+          "station-id",
+          "station_id",
+          "stationid",
+          "station-code",
+          "station_code",
+          "stationcode",
+          "code",
+          "value",
+          "city-id",
+          "city_id",
+          "cityid"
+        ])
+      ).trim();
+
+      if (!label || label.startsWith("{") || label.startsWith("[")) return;
+
+      const normalizedValue = value || label;
+      const key = `${normalizedValue.toLocaleLowerCase("tr")}|||${label.toLocaleLowerCase("tr")}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      items.push({
+        value: normalizedValue,
+        label
+      });
+    });
+  });
+
+  return items.sort(
+    (a, b) =>
+      String(a.label || "").localeCompare(String(b.label || ""), "tr") ||
+      String(a.value || "").localeCompare(String(b.value || ""), "tr")
+  );
+}
+
+async function fetchJourneySearchStations({ company } = {}) {
+  const partnerCode = String(company?.code || "").trim();
+  const clusterLabel = extractClusterLabel(String(company?.cluster || company?.url || "").trim());
+  const companyUrl = normalizeTargetUrl(company?.url || "");
+  const baseClusterUrl = companyUrl || buildUrlForCluster(PARTNERS_API_URL, clusterLabel);
+  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
+  const requestUrl = buildJourneySearchStationsUrl(baseClusterUrl, clusterLabel);
+
+  if (!partnerCode) {
+    return {
+      items: [],
+      error: "Seçilen firma için PartnerCode bulunamadı.",
+      status: null,
+      requestUrl
+    };
+  }
+
+  if (!requestUrl) {
+    return {
+      items: [],
+      error: "Seçilen firma için cluster URL bulunamadı.",
+      status: null,
+      requestUrl: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), JOURNEY_SEARCH_TIMEOUT_MS);
+
+  try {
+    const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal);
+    if (sessionResult.error) {
+      return {
+        items: [],
+        error: sessionResult.error,
+        status: null,
+        requestUrl
+      };
+    }
+
+    const body = {
+      data: null,
+      token: null,
+      "device-session": {
+        "session-id": String(sessionResult.sessionId || "").trim(),
+        "device-id": String(sessionResult.deviceId || "").trim()
+      },
+      date: JOURNEY_SEARCH_REQUEST_DATE,
+      language: JOURNEY_SEARCH_REQUEST_LANGUAGE
+    };
+
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: JOURNEY_SEARCH_API_AUTH,
+        PartnerCode: partnerCode
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const hasExplicitStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    const responseErrorText =
+      (parsed &&
+        typeof parsed === "object" &&
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+
+    if (!response.ok) {
+      return {
+        items: [],
+        error: `HTTP ${response.status}: ${responseErrorText}`,
+        status: response.status,
+        requestUrl
+      };
+    }
+
+    if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+      return {
+        items: [],
+        error: responseErrorText || "İstasyon servisi başarısız döndü.",
+        status: response.status,
+        requestUrl
+      };
+    }
+
+    const items = extractJourneySearchStations(parsed);
+    if (items.length === 0) {
+      return {
+        items: [],
+        error: "Seçilen firma için istasyon bulunamadı.",
+        status: response.status,
+        requestUrl
+      };
+    }
+
+    return {
+      items,
+      error: null,
+      status: response.status,
+      requestUrl
+    };
+  } catch (err) {
+    return {
+      items: [],
+      error: err?.name === "AbortError" ? "İstasyon listesi zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.",
+      status: null,
+      requestUrl
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function resolveAuthorizedLinesLoginResultWithBranchFallback({
@@ -12725,6 +12951,50 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
     return res.status(404).json({ ok: false, error: "İşlem bulunamadı veya süresi doldu." });
   }
   return res.json(readObusLiveJobSnapshot(job, cursor));
+});
+
+app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey-search"), async (req, res) => {
+  try {
+    const selectedCompanyValue = String(req.body?.company || "").trim();
+    if (!selectedCompanyValue) {
+      return res.status(400).json({ ok: false, error: "Firma seçmelisiniz." });
+    }
+
+    const { companies } = await loadJourneySearchCompanies();
+    const selectedCompany = companies.find(
+      (item) => !item?.disabled && String(item?.value || "") === selectedCompanyValue && item?.meta
+    );
+
+    if (!selectedCompany?.meta) {
+      return res.status(400).json({ ok: false, error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın." });
+    }
+
+    const result = await fetchJourneySearchStations({
+      company: selectedCompany.meta
+    });
+
+    if (result.error) {
+      return res.status(Number.isFinite(Number(result.status)) ? Number(result.status) : 502).json({
+        ok: false,
+        error: result.error,
+        requestUrl: result.requestUrl || "",
+        totalCount: 0
+      });
+    }
+
+    return res.json({
+      ok: true,
+      items: Array.isArray(result.items) ? result.items : [],
+      totalCount: Array.isArray(result.items) ? result.items.length : 0,
+      requestUrl: result.requestUrl || ""
+    });
+  } catch (err) {
+    console.error("Journey search stations error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: `İstasyon listesi alınamadı: ${err?.message || "Bilinmeyen hata"}`
+    });
+  }
 });
 
 app.get(
