@@ -33,6 +33,19 @@
       <section class="table-card panel-card slack-filter-section">
         <form class="slack-filter-form" method="get" action="/reports/slack-analysis">
           <input type="hidden" name="run" value="1" />
+          <% if (sqlQuery?.requested) { %>
+            <input type="hidden" name="dbRun" value="1" />
+            <input
+              type="hidden"
+              name="dbStartDate"
+              value="<%= sqlQuery?.filters?.startDate || filters.startDate %>"
+            />
+            <input
+              type="hidden"
+              name="dbEndDate"
+              value="<%= sqlQuery?.filters?.endDate || filters.endDate %>"
+            />
+          <% } %>
           <div class="slack-filter-grid">
             <label class="slack-filter-field">
               <span>Başlangıç Tarihi</span>
@@ -79,7 +92,7 @@
                 <input type="hidden" name="dbStartDate" value="<%= sqlQuery?.filters?.startDate || filters.startDate %>" />
                 <input type="hidden" name="dbEndDate" value="<%= sqlQuery?.filters?.endDate || filters.endDate %>" />
                 <input type="hidden" name="rowsJson" value="<%= report.rowsJson %>" />
-                <button type="submit" class="button-link">SQL'e Kaydet</button>
+                <button type="submit" class="button-link">Kaydet</button>
               </form>
             <% } %>
           </div>
@@ -127,7 +140,7 @@
 
       <section class="table-card panel-card slack-sql-section">
         <div class="table-head">
-          <h2>SQL Kayıt Sorgu</h2>
+          <h2>Geçmiş Tarihli Sorgula</h2>
           <div class="table-actions">
             <% if (sqlQuery?.requested) { %>
               <span class="pill"><%= (sqlQuery.rows || []).length %> Kayıt</span>
@@ -137,6 +150,9 @@
 
         <form class="slack-sql-filter-form" method="get" action="/reports/slack-analysis">
           <input type="hidden" name="dbRun" value="1" />
+          <% if (report?.requested) { %>
+            <input type="hidden" name="run" value="1" />
+          <% } %>
           <input type="hidden" name="startDate" value="<%= filters.startDate %>" />
           <input type="hidden" name="endDate" value="<%= filters.endDate %>" />
           <label class="slack-filter-field">
@@ -157,7 +173,7 @@
               required
             />
           </label>
-          <button type="submit" class="button-link ghost">SQL Kayıtlarını Sorgula</button>
+          <button type="submit" class="button-link ghost">Sorgula</button>
         </form>
 
         <% if (sqlQuery?.error) { %>
