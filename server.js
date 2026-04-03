@@ -103,6 +103,9 @@ const OBUS_JOBS_REQUEST_LANGUAGE =
   String(process.env.OBUS_JOBS_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const OBUS_JOBS_TIMEOUT_MS = Number.parseInt(process.env.OBUS_JOBS_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_JOBS_CLUSTER_CONCURRENCY = Number.parseInt(process.env.OBUS_JOBS_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const OBUS_JOBS_DEFAULT_SLACK_MENTION_TARGETS_RAW = String(
+  process.env.OBUS_JOBS_DEFAULT_SLACK_MENTION_TARGETS || "<@U03M90JM0CB>"
+).trim();
 const JOURNEY_SEARCH_API_AUTH =
   String(process.env.JOURNEY_SEARCH_API_AUTH || "Basic RXJ0dVNlcmRhclNlbWloRGF2aWROdXJl").trim() ||
   "Basic RXJ0dVNlcmRhclNlbWloRGF2aWROdXJl";
@@ -436,6 +439,10 @@ const APP_TIME_ZONE = String(process.env.TZ || Intl.DateTimeFormat().resolvedOpt
   .trim() || "Europe/Istanbul";
 const OBUS_JOBS_AUTO_RUN_SOURCE = "obus-jobs-auto";
 const slackReplyReportCache = new Map();
+const slackUserLookupCache = {
+  expiresAt: 0,
+  value: null
+};
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
 const jiraEpicMetaCache = new Map();
@@ -6872,6 +6879,212 @@ function normalizeSlackChannelLabel(value) {
   return String(value || "").trim();
 }
 
+function normalizeSlackUserLookupValue(value) {
+  return String(value || "")
+    .replace(/^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i, "$1")
+    .replace(/^@+/, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("tr");
+}
+
+function isLikelySlackUserId(value) {
+  return /^[uw][a-z0-9]{8,}$/i.test(String(value || "").trim());
+}
+
+function parseSlackMentionTargets(raw) {
+  return String(raw || "")
+    .split(/[\r\n,;]+/)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function dedupeStringList(items = []) {
+  const seen = new Set();
+  const results = [];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const normalized = String(item || "").trim();
+    if (!normalized) return;
+    const key = normalized.toLocaleLowerCase("tr");
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(normalized);
+  });
+  return results;
+}
+
+function buildSlackMentionFallback(rawTarget) {
+  const normalized = String(rawTarget || "").trim();
+  if (!normalized) return "";
+  if (normalized.startsWith("@") || normalized.startsWith("<@")) return normalized;
+  return `@${normalized}`;
+}
+
+function buildSlackUserLookupKeys(member) {
+  const profile = member && typeof member.profile === "object" ? member.profile : {};
+  const values = [
+    member?.id,
+    member?.name,
+    profile.display_name,
+    profile.display_name_normalized,
+    profile.real_name,
+    profile.real_name_normalized,
+    profile.email
+  ];
+  const expanded = [];
+  values.forEach((value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) return;
+    expanded.push(normalized);
+    const roleTrimmed = normalized.split(/\s+-\s+/)[0]?.trim();
+    if (roleTrimmed && roleTrimmed !== normalized) {
+      expanded.push(roleTrimmed);
+    }
+  });
+  return dedupeStringList(expanded).map((value) => normalizeSlackUserLookupValue(value)).filter(Boolean);
+}
+
+function buildSlackUserLookup(members = []) {
+  const byId = new Map();
+  const byKey = new Map();
+  (Array.isArray(members) ? members : []).forEach((member) => {
+    const memberId = String(member?.id || "").trim().toUpperCase();
+    if (!memberId) return;
+    if (!byId.has(memberId)) {
+      byId.set(memberId, member);
+    }
+    buildSlackUserLookupKeys(member).forEach((key) => {
+      if (!byKey.has(key)) {
+        byKey.set(key, member);
+      }
+    });
+  });
+  return {
+    byId,
+    byKey
+  };
+}
+
+async function listSlackUsers(token) {
+  const members = [];
+  let cursor = "";
+
+  do {
+    const data = await slackApiGet("users.list", token, {
+      limit: SLACK_DEFAULT_LIMIT,
+      cursor
+    });
+
+    (Array.isArray(data.members) ? data.members : []).forEach((member) => {
+      if (!member || typeof member !== "object") return;
+      if (!String(member.id || "").trim()) return;
+      if (member.deleted === true) return;
+      members.push(member);
+    });
+
+    cursor = String(data.response_metadata?.next_cursor || "").trim();
+  } while (cursor);
+
+  return members;
+}
+
+async function getSlackUserLookup(token) {
+  if (slackUserLookupCache.value && Number(slackUserLookupCache.expiresAt || 0) > Date.now()) {
+    return slackUserLookupCache.value;
+  }
+
+  const members = await listSlackUsers(token);
+  const lookup = buildSlackUserLookup(members);
+  slackUserLookupCache.value = lookup;
+  slackUserLookupCache.expiresAt = Date.now() + Math.max(1000, SLACK_ANALYSIS_CACHE_TTL_MS);
+  return lookup;
+}
+
+function resolveSlackMentionFromLookup(lookup, rawTarget, lookupError = null) {
+  const normalizedTarget = String(rawTarget || "").trim();
+  const fallbackText = buildSlackMentionFallback(normalizedTarget);
+  if (!normalizedTarget) {
+    return {
+      rawTarget: normalizedTarget,
+      mentionText: "",
+      resolved: false,
+      userId: "",
+      error: lookupError ? summarizeErrorMessage(lookupError) : ""
+    };
+  }
+
+  const explicitMentionMatch = normalizedTarget.match(/^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i);
+  if (explicitMentionMatch?.[1]) {
+    const userId = String(explicitMentionMatch[1] || "").trim().toUpperCase();
+    return {
+      rawTarget: normalizedTarget,
+      mentionText: `<@${userId}>`,
+      resolved: true,
+      userId,
+      error: ""
+    };
+  }
+
+  const directId = normalizedTarget.replace(/^@+/, "").trim().toUpperCase();
+  if (isLikelySlackUserId(directId)) {
+    return {
+      rawTarget: normalizedTarget,
+      mentionText: `<@${directId}>`,
+      resolved: true,
+      userId: directId,
+      error: ""
+    };
+  }
+
+  if (!lookup || !(lookup.byKey instanceof Map)) {
+    return {
+      rawTarget: normalizedTarget,
+      mentionText: fallbackText,
+      resolved: false,
+      userId: "",
+      error: lookupError ? summarizeErrorMessage(lookupError) : ""
+    };
+  }
+
+  const normalizedLookupKey = normalizeSlackUserLookupValue(normalizedTarget);
+  const matchedMember = normalizedLookupKey ? lookup.byKey.get(normalizedLookupKey) : null;
+  const matchedUserId = String(matchedMember?.id || "").trim().toUpperCase();
+  if (!matchedUserId) {
+    return {
+      rawTarget: normalizedTarget,
+      mentionText: fallbackText,
+      resolved: false,
+      userId: "",
+      error: lookupError ? summarizeErrorMessage(lookupError) : ""
+    };
+  }
+
+  return {
+    rawTarget: normalizedTarget,
+    mentionText: `<@${matchedUserId}>`,
+    resolved: true,
+    userId: matchedUserId,
+    error: ""
+  };
+}
+
+async function resolveSlackMentions(token, rawTargets = []) {
+  const uniqueTargets = dedupeStringList(rawTargets);
+  if (!uniqueTargets.length) return [];
+
+  let lookup = null;
+  let lookupError = null;
+  try {
+    lookup = await getSlackUserLookup(token);
+  } catch (err) {
+    lookupError = err;
+  }
+
+  return uniqueTargets.map((target) => resolveSlackMentionFromLookup(lookup, target, lookupError));
+}
+
 function isLikelySlackChannelId(value) {
   return /^[cg][a-z0-9]{8,}$/i.test(String(value || "").trim());
 }
@@ -8225,25 +8438,66 @@ async function saveObusJobsReportToDb({
   }
 }
 
-function buildObusJobsSlackMessage({ report, selectedCompanyMeta, user, saveResult }) {
-  const summary = summarizeObusJobsReport(report);
-  const generatedAt = new Intl.DateTimeFormat("tr-TR", {
-    dateStyle: "short",
-    timeStyle: "medium"
-  }).format(new Date());
-  const companyCode = String(selectedCompanyMeta?.code || "").trim() || "-";
-  const companyId = String(selectedCompanyMeta?.id || "").trim();
-  const companyCluster = String(selectedCompanyMeta?.cluster || "").trim();
+function collectObusJobsSlackMentionTargets(flag) {
+  const values = [];
+  const rawValues = [
+    ...(Array.isArray(flag?.notifyTargets) ? flag.notifyTargets : []),
+    ...(Array.isArray(flag?.mentions) ? flag.mentions : []),
+    flag?.notifyTarget,
+    flag?.mention,
+    flag?.owner,
+    flag?.assignee
+  ];
+
+  rawValues.forEach((value) => {
+    if (Array.isArray(value)) {
+      values.push(...value);
+      return;
+    }
+    values.push(...parseSlackMentionTargets(value));
+  });
+
+  if (!values.length) {
+    values.push(...parseSlackMentionTargets(OBUS_JOBS_DEFAULT_SLACK_MENTION_TARGETS_RAW));
+  }
+
+  return dedupeStringList(values);
+}
+
+async function buildObusJobsSlackMessage({ report, token }) {
   const tableResult = buildObusJobsSlackTable({ report });
   const flaggedCells = Array.isArray(tableResult.flaggedCells) ? tableResult.flaggedCells : [];
   if (!flaggedCells.length) {
-    return { summary: "" };
+    return {
+      summary: "",
+      unresolvedMentionTargets: [],
+      mentionLookupError: ""
+    };
   }
+
+  const rawTargets = dedupeStringList(flaggedCells.flatMap((flag) => collectObusJobsSlackMentionTargets(flag)));
+  const mentionResults = await resolveSlackMentions(token, rawTargets);
+  const mentionByTarget = new Map(
+    mentionResults.map((item) => [String(item.rawTarget || "").trim().toLocaleLowerCase("tr"), item])
+  );
   const lines = [];
   flaggedCells.slice(0, 5).forEach((flag) => {
-    lines.push(`cluster ${flag.cluster} ${flag.jobLabel} job Failed. @Ömer Serdaroğlu - Tech kontrol edebilir misin`);
+    const mentionText = dedupeStringList(
+      collectObusJobsSlackMentionTargets(flag)
+        .map((target) => mentionByTarget.get(String(target || "").trim().toLocaleLowerCase("tr")))
+        .map((result) => String(result?.mentionText || "").trim())
+        .filter(Boolean)
+    ).join(" ");
+    lines.push(
+      `cluster ${flag.cluster} ${flag.jobLabel} job Failed.${mentionText ? ` ${mentionText}` : ""} kontrol edebilir misin?`
+    );
   });
-  return { summary: lines.join("\n") };
+  return {
+    summary: lines.join("\n"),
+    unresolvedMentionTargets: mentionResults.filter((item) => !item.resolved).map((item) => item.rawTarget),
+    mentionLookupError:
+      mentionResults.find((item) => String(item.error || "").trim())?.error || ""
+  };
 }
 
 function buildObusJobsSlackTable({ report }) {
@@ -8316,11 +8570,9 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
   }
 
   const resolvedChannel = await resolveSlackConversationId(token, SLACK_CREW_CHANNEL, SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
-  const message = buildObusJobsSlackMessage({
+  const message = await buildObusJobsSlackMessage({
     report,
-    selectedCompanyMeta,
-    user,
-    saveResult
+    token
   });
   const payload = {
     channel: resolvedChannel.channelId,
@@ -8344,7 +8596,9 @@ async function postObusJobsReportToSlack({ report, selectedCompanyMeta, user, sa
   return {
     channelId: resolvedChannel.channelId,
     channelLabel: resolvedChannel.channelLabel,
-    ts: String(response?.ts || "").trim()
+    ts: String(response?.ts || "").trim(),
+    unresolvedMentionTargets: Array.isArray(message.unresolvedMentionTargets) ? message.unresolvedMentionTargets : [],
+    mentionLookupError: String(message.mentionLookupError || "").trim()
   };
 }
 
@@ -8388,6 +8642,13 @@ async function runObusJobsScheduledScan({ source = "auto" } = {}) {
           saveResult: report.saveResult
         });
         console.log(`[ObusJobsScheduler] Slack bildirimi ${slackResult.channelLabel} kanalına gönderildi.`);
+        if (Array.isArray(slackResult.unresolvedMentionTargets) && slackResult.unresolvedMentionTargets.length > 0) {
+          console.warn(
+            `[ObusJobsScheduler] Mention çözümlenemedi: ${slackResult.unresolvedMentionTargets.join(", ")}${
+              slackResult.mentionLookupError ? ` | ${slackResult.mentionLookupError}` : ""
+            }`
+          );
+        }
       } catch (err) {
         console.error(`[ObusJobsScheduler] Slack bildirimi başarısız: ${summarizeErrorMessage(err)}`);
       }
@@ -13611,6 +13872,13 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
       });
       report.slackResult = slackResult;
       report.successMessages.push(`Slack bildirimi ${slackResult.channelLabel} kanalına gönderildi.`);
+      if (Array.isArray(slackResult.unresolvedMentionTargets) && slackResult.unresolvedMentionTargets.length > 0) {
+        report.warningMessages.push(
+          `Slack mention çözümlenemedi: ${slackResult.unresolvedMentionTargets.join(", ")}${
+            slackResult.mentionLookupError ? ` | ${slackResult.mentionLookupError}` : ""
+          }`
+        );
+      }
     } catch (err) {
       report.warningMessages.push(`Slack bildirimi başarısız: ${summarizeErrorMessage(err)}`);
     }
