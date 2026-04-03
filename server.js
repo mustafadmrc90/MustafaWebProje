@@ -7591,6 +7591,78 @@ function buildSlackReplyReportModel({
   };
 }
 
+function buildSlackSavedReportChartRows(runs = []) {
+  const byUserId = new Map();
+
+  (Array.isArray(runs) ? runs : []).forEach((run) => {
+    const items = Array.isArray(run?.items) ? run.items : [];
+    items.forEach((item) => {
+      const userId = String(item?.userId || "").trim();
+      if (!userId) return;
+
+      const current = byUserId.get(userId) || {
+        userId,
+        name: String(item?.userName || "").trim() || userId,
+        requestCount: 0,
+        replyCount: 0
+      };
+
+      const nextName = String(item?.userName || "").trim();
+      if (nextName) {
+        current.name = nextName;
+      }
+      current.requestCount += toCountInteger(item?.requestCount);
+      current.replyCount += toCountInteger(item?.replyCount);
+      byUserId.set(userId, current);
+    });
+  });
+
+  const rows = Array.from(byUserId.values()).sort(
+    (a, b) =>
+      b.replyCount - a.replyCount || b.requestCount - a.requestCount || a.name.localeCompare(b.name, "tr")
+  );
+  const maxValue = rows.reduce((max, row) => Math.max(max, row.requestCount, row.replyCount), 0);
+  const minVisiblePct = 3;
+
+  return rows.map((row) => {
+    const requestPct =
+      maxValue > 0 && row.requestCount > 0 ? Math.max((row.requestCount / maxValue) * 100, minVisiblePct) : 0;
+    const replyPct =
+      maxValue > 0 && row.replyCount > 0 ? Math.max((row.replyCount / maxValue) * 100, minVisiblePct) : 0;
+
+    return {
+      userId: row.userId,
+      label: row.name,
+      requestCount: row.requestCount,
+      replyCount: row.replyCount,
+      requestText: String(row.requestCount),
+      replyText: String(row.replyCount),
+      requestPct: Number(requestPct.toFixed(2)),
+      replyPct: Number(replyPct.toFixed(2))
+    };
+  });
+}
+
+function buildSlackSqlQueryModel({
+  requested = false,
+  startDate = "",
+  endDate = "",
+  rows = [],
+  error = null
+} = {}) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  return {
+    requested: Boolean(requested),
+    filters: {
+      startDate: normalizeIsoDateInput(startDate) || getTodayIsoDate(),
+      endDate: normalizeIsoDateInput(endDate) || getTodayIsoDate()
+    },
+    rows: normalizedRows,
+    chartRows: buildSlackSavedReportChartRows(normalizedRows),
+    error: error ? String(error) : null
+  };
+}
+
 async function fetchSlackReplyReportForRange(startDate, endDate) {
   const token = String(process.env.SLACK_BOT_TOKEN || "").trim();
   if (!token) {
@@ -14382,15 +14454,11 @@ app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysi
   const dbEndDate = normalizeIsoDateInput(req.query.dbEndDate) || endDate;
 
   let report = buildSlackReplyReportModel({ requested: false });
-  let sqlQuery = {
+  let sqlQuery = buildSlackSqlQueryModel({
     requested: false,
-    filters: {
-      startDate: dbStartDate,
-      endDate: dbEndDate
-    },
-    rows: [],
-    error: null
-  };
+    startDate: dbStartDate,
+    endDate: dbEndDate
+  });
 
   if (shouldFetchReport) {
     const validationError = validateSlackDateRange(startDate, endDate);
@@ -14407,30 +14475,26 @@ app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysi
   if (shouldQuerySql) {
     const dbValidationError = validateSlackDateRange(dbStartDate, dbEndDate);
     if (dbValidationError) {
-      sqlQuery = {
+      sqlQuery = buildSlackSqlQueryModel({
         requested: true,
-        filters: {
-          startDate: dbStartDate,
-          endDate: dbEndDate
-        },
+        startDate: dbStartDate,
+        endDate: dbEndDate,
         rows: [],
         error: dbValidationError
-      };
+      });
     } else {
       const sqlResult = await fetchSlackSavedReports({
         startDate: dbStartDate,
         endDate: dbEndDate,
         limit: 25
       });
-      sqlQuery = {
+      sqlQuery = buildSlackSqlQueryModel({
         requested: true,
-        filters: sqlResult.filters || {
-          startDate: dbStartDate,
-          endDate: dbEndDate
-        },
+        startDate: sqlResult.filters?.startDate || dbStartDate,
+        endDate: sqlResult.filters?.endDate || dbEndDate,
         rows: sqlResult.rows || [],
         error: sqlResult.error || null
-      };
+      });
     }
   }
 
@@ -14682,15 +14746,11 @@ app.post("/reports/slack-analysis/save", requireAuth, requireMenuAccess("slack-a
   const parsedRows = parseJsonSafe(String(req.body.rowsJson || ""));
   const rows = Array.isArray(parsedRows) ? parsedRows : [];
 
-  let sqlQuery = {
+  let sqlQuery = buildSlackSqlQueryModel({
     requested: false,
-    filters: {
-      startDate: dbStartDate,
-      endDate: dbEndDate
-    },
-    rows: [],
-    error: null
-  };
+    startDate: dbStartDate,
+    endDate: dbEndDate
+  });
 
   let report = buildSlackReplyReportModel({
     requested: true,
@@ -14750,15 +14810,13 @@ app.post("/reports/slack-analysis/save", requireAuth, requireMenuAccess("slack-a
     endDate: dbEndDate,
     limit: 25
   });
-  sqlQuery = {
+  sqlQuery = buildSlackSqlQueryModel({
     requested: true,
-    filters: sqlResult.filters || {
-      startDate: dbStartDate,
-      endDate: dbEndDate
-    },
+    startDate: sqlResult.filters?.startDate || dbStartDate,
+    endDate: sqlResult.filters?.endDate || dbEndDate,
     rows: sqlResult.rows || [],
     error: sqlResult.error || null
-  };
+  });
 
   res.render("reports-slack-analysis", {
     user: req.session.user,

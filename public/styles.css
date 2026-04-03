@@ -2501,6 +2501,20 @@ button.ghost {
   cursor: default;
 }
 
+.slack-history-chart-section {
+  margin-top: 16px;
+}
+
+.slack-history-chart-section .table-head {
+  margin-bottom: 10px;
+}
+
+.slack-history-chart-section h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #1f2735;
+}
+
 .allowed-lines-section {
   margin-bottom: 12px;
 }
@@ -4569,6 +4583,14 @@ button.ghost {
 
 .sales-bar-fill.obilet {
   background: #27a36f;
+}
+
+.sales-bar-fill.request {
+  background: #d97706;
+}
+
+.sales-bar-fill.reply {
+  background: #0f766e;
 }
 
 .sales-bar-number {

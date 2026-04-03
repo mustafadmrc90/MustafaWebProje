@@ -184,6 +184,43 @@
           <p class="muted">Seçilen tarih aralığında SQL kaydı bulunamadı.</p>
         <% } %>
 
+        <% if ((sqlQuery.chartRows || []).length > 0) { %>
+          <% const historyFormatter = new Intl.NumberFormat("tr-TR"); %>
+          <div class="slack-history-chart-section">
+            <div class="table-head">
+              <h3>Geçmiş Veri Grafiği</h3>
+              <div class="table-actions">
+                <span class="pill muted">
+                  <%= sqlQuery?.filters?.startDate || "-" %> - <%= sqlQuery?.filters?.endDate || "-" %>
+                </span>
+              </div>
+            </div>
+            <div class="sales-chart slack-history-chart">
+              <% sqlQuery.chartRows.forEach((row) => { %>
+                <article class="sales-chart-row">
+                  <div class="sales-chart-label" title="<%= row.userId %>"><%= row.label %></div>
+                  <div class="sales-chart-bars">
+                    <div class="sales-bar-line">
+                      <span class="sales-bar-name">Talep</span>
+                      <div class="sales-bar-track">
+                        <div class="sales-bar-fill request" style="width: <%= row.requestPct %>%"></div>
+                      </div>
+                      <span class="sales-bar-number"><%= historyFormatter.format(row.requestCount) %></span>
+                    </div>
+                    <div class="sales-bar-line">
+                      <span class="sales-bar-name">Yanıt</span>
+                      <div class="sales-bar-track">
+                        <div class="sales-bar-fill reply" style="width: <%= row.replyPct %>%"></div>
+                      </div>
+                      <span class="sales-bar-number"><%= historyFormatter.format(row.replyCount) %></span>
+                    </div>
+                  </div>
+                </article>
+              <% }) %>
+            </div>
+          </div>
+        <% } %>
+
         <% if ((sqlQuery.rows || []).length > 0) { %>
           <% const formatter = new Intl.NumberFormat("tr-TR"); %>
           <div class="table-scroll">
