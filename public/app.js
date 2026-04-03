@@ -1427,8 +1427,13 @@
 
     const buildJourneySearchErrorMessage = (response, data, rawText) => {
       const lines = [];
-      const baseMessage = String(data?.error || "").trim() || `GetJourneys alınamadı (${response?.status || 0})`;
+      const baseMessage = getApiErrorMessage(response, data, "GetJourneys alınamadı");
       lines.push(baseMessage);
+
+      const shouldHideRawPreview =
+        response?.status === 401 ||
+        (response?.redirected && /\/login(?:$|[?#])/.test(response.url || "")) ||
+        /oturum süresi doldu/i.test(baseMessage);
 
       if (data?.step) {
         lines.push(`Adım: ${String(data.step)}`);
@@ -1438,7 +1443,7 @@
       }
       if (data?.details) {
         lines.push(`Detay: ${String(data.details)}`);
-      } else {
+      } else if (!shouldHideRawPreview) {
         const preview = normalizeRawErrorPreview(rawText);
         if (preview) {
           lines.push(`Ham yanıt: ${preview}`);
@@ -1570,8 +1575,13 @@
 
     const buildJourneyStationsErrorMessage = (response, data, rawText) => {
       const lines = [];
-      const baseMessage = String(data?.error || "").trim() || `İstasyonlar alınamadı (${response?.status || 0})`;
+      const baseMessage = getApiErrorMessage(response, data, "İstasyonlar alınamadı");
       lines.push(baseMessage);
+
+      const shouldHideRawPreview =
+        response?.status === 401 ||
+        (response?.redirected && /\/login(?:$|[?#])/.test(response.url || "")) ||
+        /oturum süresi doldu/i.test(baseMessage);
 
       if (data?.step) {
         lines.push(`Adım: ${String(data.step)}`);
@@ -1581,7 +1591,7 @@
       }
       if (data?.details) {
         lines.push(`Detay: ${String(data.details)}`);
-      } else {
+      } else if (!shouldHideRawPreview) {
         const preview = normalizeRawErrorPreview(rawText);
         if (preview) {
           lines.push(`Ham yanıt: ${preview}`);
