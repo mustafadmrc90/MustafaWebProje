@@ -1203,11 +1203,11 @@
       const applyServiceHint = () => {
         if (activeServiceKey === "getjourneys") {
           if (!companySelect.value) {
-            setStatus("GetJourneys akışı için önce GetStation bölümünde firma seçin.", "error");
+            setStatus("GetJourneys akışı için önce firma seçin.", "error");
             return false;
           }
           if (!selectedJourneyOriginId || !selectedJourneyDestinationId) {
-            setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "muted");
+            setStatus("Kalkış ve varış istasyonlarını seçin.", "muted");
             return false;
           }
           if (!selectedJourneysDate) {
@@ -1243,7 +1243,7 @@
       const id = String(item?.id || item?.value || "").trim();
       const name = String(item?.name || item?.label || "").trim();
       if (id && name) {
-        return `${id} - ${name}`;
+        return `${name} - ${id}`;
       }
       return name || id;
     };
@@ -1455,7 +1455,7 @@
         return;
       }
       if (!selectedJourneyOriginId || !selectedJourneyDestinationId) {
-        setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "muted");
+        setStatus("Kalkış ve varış istasyonlarını seçin.", "muted");
         return;
       }
       if (!selectedJourneysDate) {
@@ -1477,7 +1477,7 @@
         return;
       }
       if (!originId || !destinationId) {
-        setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "error");
+        setStatus("Kalkış ve varış istasyonlarını seçin.", "error");
         return;
       }
       if (!dateRange) {
@@ -1595,7 +1595,7 @@
       const name = String(item?.name || item?.label || "").trim();
       const id = String(item?.id || "").trim();
       if (showIdCheckbox.checked && id && name) {
-        return `${id} - ${name}`;
+        return `${name} - ${id}`;
       }
       return name || id;
     };
@@ -1630,9 +1630,18 @@
       selectEl.appendChild(fragment);
     };
 
-    const syncJourneysCompanySelection = () => {
-      if (!journeysCompanySelect) return;
-      journeysCompanySelect.value = companySelect.value || "";
+    const syncCompanySelection = (value) => {
+      const normalizedValue = String(value || "").trim();
+      companySelect.value = normalizedValue;
+      journeysCompanySelect.value = normalizedValue;
+    };
+
+    const resetCompanyDependentSelections = () => {
+      selectedOriginValue = "";
+      selectedDestinationValue = "";
+      selectedJourneyOriginId = "";
+      selectedJourneyDestinationId = "";
+      selectedJourneysDate = String(journeysDateInput.value || "").trim();
     };
 
     const resetStationSelects = (placeholder) => {
@@ -1643,7 +1652,7 @@
       fillSelect(originSelect, [], placeholder || "Önce firma seçin", "");
       fillSelect(destinationSelect, [], placeholder || "Önce firma seçin", "");
       renderJourneysStationSelects();
-      syncJourneysCompanySelection();
+      syncCompanySelection(companySelect.value || journeysCompanySelect.value || "");
     };
 
     const renderLoadedStations = () => {
@@ -1720,7 +1729,7 @@
 
         loadedStationItems = items;
         renderLoadedStations();
-        syncJourneysCompanySelection();
+        syncCompanySelection(companyValue);
         setStatus(`${items.length} istasyon yüklendi.`, "success");
       } catch (err) {
         if (currentSequence !== requestSequence) return;
@@ -1730,11 +1739,14 @@
     };
 
     companySelect.addEventListener("change", () => {
-      selectedOriginValue = "";
-      selectedDestinationValue = "";
-      selectedJourneyOriginId = "";
-      selectedJourneyDestinationId = "";
-      selectedJourneysDate = String(journeysDateInput.value || "").trim();
+      syncCompanySelection(companySelect.value || "");
+      resetCompanyDependentSelections();
+      loadStations();
+    });
+
+    journeysCompanySelect.addEventListener("change", () => {
+      syncCompanySelection(journeysCompanySelect.value || "");
+      resetCompanyDependentSelections();
       loadStations();
     });
 
@@ -1779,7 +1791,7 @@
 
     activateService(serviceButtons[0]?.dataset?.journeySearchServiceButton || "getstation");
 
-    syncJourneysCompanySelection();
+    syncCompanySelection(companySelect.value || journeysCompanySelect.value || "");
     if (String(companySelect.value || "").trim()) {
       loadStations();
     } else {
