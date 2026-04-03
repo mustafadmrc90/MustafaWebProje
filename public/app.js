@@ -1091,6 +1091,7 @@
     const journeysResponseBodyEl = form.querySelector("[data-journey-search-response-body='getjourneys']");
     const journeysHttpBadgeEl = form.querySelector("[data-journey-search-http='getjourneys']");
     const journeysUrlLineEl = form.querySelector("[data-journey-search-url='getjourneys']");
+    const journeysResultsPanelEl = form.querySelector("[data-journey-search-results-panel='getjourneys']");
     const journeysResultsEl = form.querySelector("[data-journey-search-results='getjourneys']");
     const statusEl = form.querySelector("[data-journey-search-status='1']");
     if (
@@ -1107,6 +1108,7 @@
       !journeysResponseBodyEl ||
       !journeysHttpBadgeEl ||
       !journeysUrlLineEl ||
+      !journeysResultsPanelEl ||
       !journeysResultsEl ||
       !requestBodyEl ||
       !responseBodyEl ||
@@ -1196,6 +1198,8 @@
       servicePanels.forEach((panel) => {
         panel.hidden = String(panel.dataset.journeySearchServicePanel || "").trim() !== activeServiceKey;
       });
+      journeysResultsPanelEl.hidden =
+        activeServiceKey !== "getjourneys" || journeysResultsEl.hidden || journeysResultsEl.childElementCount === 0;
       const applyServiceHint = () => {
         if (activeServiceKey === "getjourneys") {
           if (!companySelect.value) {
@@ -1312,6 +1316,7 @@
     const clearJourneysResults = () => {
       journeysResultsEl.innerHTML = "";
       journeysResultsEl.hidden = true;
+      journeysResultsPanelEl.hidden = true;
     };
 
     const getJourneyRouteStop = (journey, stationId, fallbackIndex) => {
@@ -1385,6 +1390,7 @@
 
       journeysResultsEl.innerHTML = "";
       journeysResultsEl.hidden = false;
+      journeysResultsPanelEl.hidden = activeServiceKey !== "getjourneys";
 
       if (!journeyItems.length) {
         const emptyEl = document.createElement("div");

@@ -2852,10 +2852,15 @@ button.ghost {
   word-break: break-all;
 }
 
+.journey-search-results-panel {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
 .journey-search-results {
   display: grid;
   gap: 10px;
-  margin: 10px 0 12px;
+  margin: 0;
 }
 
 .journey-search-result-empty,
@@ -4971,6 +4976,10 @@ button.ghost {
 
   .journey-search-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .journey-search-results-panel {
+    grid-column: 1 / -1;
   }
 
   .journey-search-result-row {
