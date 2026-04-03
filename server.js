@@ -198,7 +198,7 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
 const SLACK_ANALYSIS_TARGET_CHANNELS_RAW = String(
-  process.env.SLACK_ANALYSIS_TARGET_CHANNELS || "obus-isler"
+  process.env.SLACK_ANALYSIS_TARGET_CHANNELS || "G03M9294B50"
 ).trim();
 const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
 const SLACK_CREW_CHANNEL = String(process.env.SLACK_CREW_CHANNEL || "corp-crew").trim() || "corp-crew";
