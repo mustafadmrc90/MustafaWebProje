@@ -7806,13 +7806,15 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
       }
 
       const threadRoots = (messagesResult.messages || []).filter((message) => {
+        const messageTs = String(message?.ts || "").trim();
+        const messageUserId = String(message?.user || "").trim();
+        const isEligibleExternalRoot = Boolean(messageTs && messageUserId && !selectedIds.has(messageUserId));
+
         if (shouldCountSlackMessage(message)) {
-          const messageTs = String(message.ts || "").trim();
           const threadTs = String(message.thread_ts || "").trim();
-          const messageUserId = String(message.user || "").trim();
           const isThreadReply = Boolean(threadTs && threadTs !== messageTs);
           // Talep sayısına sadece seçili 7 kişi dışındaki kullanıcıların başlattığı konuşmaları dahil et.
-          if (messageTs && !isThreadReply && messageUserId && !selectedIds.has(messageUserId)) {
+          if (isEligibleExternalRoot && !isThreadReply) {
             const requestKey = `${channelId}:${messageTs}`;
             if (!seenRequestMessages.has(requestKey)) {
               seenRequestMessages.add(requestKey);
@@ -7823,7 +7825,8 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
         }
 
         const replyCount = Number(message?.reply_count || 0);
-        return Number.isFinite(replyCount) && replyCount > 0 && String(message?.ts || "").trim();
+        // Yanıt sayısına sadece seçili kullanıcılar dışındaki kişilerin açtığı thread'leri dahil et.
+        return isEligibleExternalRoot && Number.isFinite(replyCount) && replyCount > 0;
       });
 
       if (threadRoots.length > maxThreadsPerChannel) {
