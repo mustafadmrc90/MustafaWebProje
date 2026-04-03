@@ -1091,6 +1091,7 @@
     const journeysResponseBodyEl = form.querySelector("[data-journey-search-response-body='getjourneys']");
     const journeysHttpBadgeEl = form.querySelector("[data-journey-search-http='getjourneys']");
     const journeysUrlLineEl = form.querySelector("[data-journey-search-url='getjourneys']");
+    const journeysResultsEl = form.querySelector("[data-journey-search-results='getjourneys']");
     const statusEl = form.querySelector("[data-journey-search-status='1']");
     if (
       serviceButtons.length === 0 ||
@@ -1106,6 +1107,7 @@
       !journeysResponseBodyEl ||
       !journeysHttpBadgeEl ||
       !journeysUrlLineEl ||
+      !journeysResultsEl ||
       !requestBodyEl ||
       !responseBodyEl ||
       !httpBadgeEl ||
@@ -1113,6 +1115,18 @@
       !statusEl
     ) {
       return;
+    }
+
+    const formatDateInputValue = (date) => {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+      const year = String(date.getFullYear());
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+
+    if (!String(journeysDateInput.value || "").trim()) {
+      journeysDateInput.value = formatDateInputValue(new Date());
     }
 
     let selectedOriginValue = String(originSelect.dataset.selectedValue || "").trim();
@@ -1186,30 +1200,33 @@
         if (activeServiceKey === "getjourneys") {
           if (!companySelect.value) {
             setStatus("GetJourneys akışı için önce GetStation bölümünde firma seçin.", "error");
-            return;
+            return false;
           }
           if (!selectedJourneyOriginId || !selectedJourneyDestinationId) {
             setStatus("Kalkış ve varış istasyonlarını GetStation bölümünde seçin.", "muted");
-            return;
+            return false;
           }
           if (!selectedJourneysDate) {
             setStatus("GetJourneys için tarih seçin.", "muted");
-            return;
+            return false;
           }
-          setStatus("Tarih seçildikten sonra GetJourneys isteği gönderilecek.", "muted");
-          return;
+          setStatus("GetJourneys isteği hazırlanıyor...", "muted");
+          return true;
         }
         if (!companySelect.value) {
           setStatus("Firma seçince kalkış ve varış listesi yüklenecek.", "muted");
-          return;
+          return false;
         }
         if (loadedStationItems.length === 0) {
           setStatus("İstasyonlar yükleniyor...", "muted");
-          return;
+          return false;
         }
         setStatus(`${loadedStationItems.length} istasyon yüklendi.`, "success");
+        return false;
       };
-      applyServiceHint();
+      if (applyServiceHint()) {
+        maybeTriggerGetJourneysRequest();
+      }
     };
 
     const getStationSelectedId = (selectEl) => {
@@ -1284,6 +1301,124 @@
       };
     };
 
+    const parseJsonSafe = (value) => {
+      try {
+        return JSON.parse(String(value || ""));
+      } catch (err) {
+        return null;
+      }
+    };
+
+    const clearJourneysResults = () => {
+      journeysResultsEl.innerHTML = "";
+      journeysResultsEl.hidden = true;
+    };
+
+    const getJourneyRouteStop = (journey, stationId, fallbackIndex) => {
+      const routeItems = Array.isArray(journey?.route) ? journey.route : [];
+      const targetId = String(stationId || "").trim();
+      if (targetId) {
+        const matchedStop = routeItems.find((item) => {
+          const itemId = String(item?.id || "").trim();
+          const originalOriginId = String(item?.["original-origin-id"] || "").trim();
+          return itemId === targetId || originalOriginId === targetId;
+        });
+        if (matchedStop) {
+          return matchedStop;
+        }
+      }
+      if (Number.isInteger(fallbackIndex) && fallbackIndex >= 0 && fallbackIndex < routeItems.length) {
+        return routeItems[fallbackIndex];
+      }
+      return null;
+    };
+
+    const getJourneyHourValue = (timeValue) => {
+      const trimmed = String(timeValue || "").trim();
+      const dateMatch = trimmed.match(/T(\d{2}:\d{2})/);
+      if (dateMatch?.[1]) {
+        return dateMatch[1];
+      }
+      const plainMatch = trimmed.match(/^(\d{2}:\d{2})/);
+      return plainMatch?.[1] || "-";
+    };
+
+    const getJourneyPriceValue = (amount, currency) => {
+      if (amount === null || amount === undefined || amount === "") {
+        return "-";
+      }
+      const parsedAmount = Number(amount);
+      const normalizedCurrency = String(currency || "").trim();
+      if (Number.isFinite(parsedAmount)) {
+        const renderedAmount = parsedAmount.toLocaleString("tr-TR");
+        return normalizedCurrency ? `${renderedAmount} ${normalizedCurrency}` : renderedAmount;
+      }
+      const fallbackAmount = String(amount).trim();
+      return normalizedCurrency ? `${fallbackAmount} ${normalizedCurrency}` : fallbackAmount || "-";
+    };
+
+    const createJourneyResultCell = (label, value) => {
+      const cell = document.createElement("div");
+      cell.className = "journey-search-result-cell";
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "journey-search-result-label";
+      labelEl.textContent = label;
+
+      const valueEl = document.createElement("span");
+      valueEl.className = "journey-search-result-value";
+      valueEl.textContent = String(value || "").trim() || "-";
+
+      cell.appendChild(labelEl);
+      cell.appendChild(valueEl);
+      return cell;
+    };
+
+    const renderJourneysResults = (responseBodyText, { originId = "", destinationId = "" } = {}) => {
+      const parsedResponse = parseJsonSafe(responseBodyText);
+      if (!Array.isArray(parsedResponse?.data)) {
+        clearJourneysResults();
+        return;
+      }
+
+      const journeyItems = parsedResponse.data;
+
+      journeysResultsEl.innerHTML = "";
+      journeysResultsEl.hidden = false;
+
+      if (!journeyItems.length) {
+        const emptyEl = document.createElement("div");
+        emptyEl.className = "journey-search-result-empty";
+        emptyEl.textContent = "Response içinde listelenecek sefer bulunamadı.";
+        journeysResultsEl.appendChild(emptyEl);
+        return;
+      }
+
+      journeyItems.forEach((journey) => {
+        const routeItems = Array.isArray(journey?.route) ? journey.route : [];
+        const departureStop = getJourneyRouteStop(journey, originId, 0);
+        const arrivalStop = getJourneyRouteStop(
+          journey,
+          destinationId,
+          routeItems.length > 0 ? routeItems.length - 1 : -1
+        );
+        const rowEl = document.createElement("div");
+        rowEl.className = "journey-search-result-row";
+
+        rowEl.appendChild(createJourneyResultCell("Saat", getJourneyHourValue(departureStop?.time)));
+        rowEl.appendChild(createJourneyResultCell("Kalkış", departureStop?.name));
+        rowEl.appendChild(createJourneyResultCell("Varış", arrivalStop?.name));
+        rowEl.appendChild(
+          createJourneyResultCell("Araç Tipi", String(journey?.bus?.type || journey?.type || "").trim())
+        );
+        rowEl.appendChild(
+          createJourneyResultCell("Ücret", getJourneyPriceValue(journey?.price?.internet, journey?.price?.currency))
+        );
+
+        journeysResultsEl.appendChild(rowEl);
+      });
+    };
+
     const buildJourneySearchErrorMessage = (response, data, rawText) => {
       const lines = [];
       const baseMessage = String(data?.error || "").trim() || `GetJourneys alınamadı (${response?.status || 0})`;
@@ -1345,6 +1480,7 @@
       }
 
       const currentSequence = ++journeysRequestSequence;
+      clearJourneysResults();
       setIoState("getjourneys", {
         requestBody: "İstek hazırlanıyor...",
         responseBody: "Response bekleniyor...",
@@ -1380,6 +1516,10 @@
           responseBody: responseBodyValue,
           requestUrl: requestUrlValue,
           status: statusValue
+        });
+        renderJourneysResults(responseBodyValue, {
+          originId,
+          destinationId
         });
 
         if (!response.ok || !data?.ok) {
@@ -1493,6 +1633,7 @@
       loadedStationItems = [];
       selectedJourneyOriginId = "";
       selectedJourneyDestinationId = "";
+      clearJourneysResults();
       fillSelect(originSelect, [], placeholder || "Önce firma seçin", "");
       fillSelect(destinationSelect, [], placeholder || "Önce firma seçin", "");
       renderJourneysStationSelects();
