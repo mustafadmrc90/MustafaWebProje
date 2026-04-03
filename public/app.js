@@ -1418,7 +1418,7 @@
           createJourneyResultCell("Araç Tipi", String(journey?.bus?.type || journey?.type || "").trim())
         );
         rowEl.appendChild(
-          createJourneyResultCell("Ücret", getJourneyPriceValue(journey?.price?.internet, journey?.price?.currency))
+          createJourneyResultCell("Fiyat", getJourneyPriceValue(journey?.price?.internet, journey?.price?.currency))
         );
 
         journeysResultsEl.appendChild(rowEl);
