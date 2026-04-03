@@ -197,6 +197,9 @@ const SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_THREADS_PER_CHANNEL || "120", 10) || 120;
 const SLACK_ANALYSIS_MAX_REPLY_PAGES =
   Number.parseInt(process.env.SLACK_ANALYSIS_MAX_REPLY_PAGES || "6", 10) || 6;
+const SLACK_ANALYSIS_TARGET_CHANNELS_RAW = String(
+  process.env.SLACK_ANALYSIS_TARGET_CHANNELS || "obus-isler"
+).trim();
 const SLACK_ANALYSIS_AUTO_SAVE_TIME = String(process.env.SLACK_ANALYSIS_AUTO_SAVE_TIME || "23:59").trim();
 const SLACK_CREW_CHANNEL = String(process.env.SLACK_CREW_CHANNEL || "corp-crew").trim() || "corp-crew";
 const SLACK_CORP_REQUEST_TAG = String(process.env.SLACK_CORP_REQUEST_TAG || "@corpproduct")
@@ -7136,6 +7139,7 @@ function getPreferredSlackChannelFilterLabels(filterSet, channels = []) {
 }
 
 const SLACK_CORP_REQUEST_CHANNEL_FILTER = parseSlackChannelFilter(SLACK_CORP_REQUEST_CHANNELS_RAW);
+const SLACK_ANALYSIS_TARGET_CHANNEL_FILTER = parseSlackChannelFilter(SLACK_ANALYSIS_TARGET_CHANNELS_RAW);
 
 function getMandatorySlackChannelColumns(channels = []) {
   const mergedFilter = new Set([
@@ -7150,6 +7154,13 @@ function shouldApplyCorpRequestRuleForChannel(channelId, channelName) {
   const id = normalizeSlackChannelLabel(channelId).toLowerCase();
   const name = normalizeSlackChannelLabel(channelName).toLowerCase();
   return SLACK_CORP_REQUEST_CHANNEL_FILTER.has(id) || SLACK_CORP_REQUEST_CHANNEL_FILTER.has(name);
+}
+
+function shouldAnalyzeSlackChannel(channelId, channelName) {
+  if (!SLACK_ANALYSIS_TARGET_CHANNEL_FILTER.size) return true;
+  const id = normalizeSlackChannelLabel(channelId).toLowerCase();
+  const name = normalizeSlackChannelLabel(channelName).toLowerCase();
+  return SLACK_ANALYSIS_TARGET_CHANNEL_FILTER.has(id) || SLACK_ANALYSIS_TARGET_CHANNEL_FILTER.has(name);
 }
 
 function messageContainsCorpRequestTag(message, tagValue = SLACK_CORP_REQUEST_TAG) {
@@ -7171,9 +7182,12 @@ function normalizeSlackChannelTypes(raw) {
 }
 
 function getSlackReplyReportCacheKey(startDate, endDate) {
-  const version = "v6";
+  const version = "v7";
   const channelTypes = normalizeSlackChannelTypes(SLACK_ANALYSIS_CHANNEL_TYPES_RAW);
   const corpChannels = Array.from(SLACK_CORP_REQUEST_CHANNEL_FILTER.values()).sort((a, b) => a.localeCompare(b, "tr"));
+  const targetChannels = Array.from(SLACK_ANALYSIS_TARGET_CHANNEL_FILTER.values()).sort((a, b) =>
+    a.localeCompare(b, "tr")
+  );
   const requiredColumns = SLACK_REQUIRED_CHANNEL_COLUMNS.slice().sort((a, b) => a.localeCompare(b, "tr"));
   return [
     version,
@@ -7181,6 +7195,7 @@ function getSlackReplyReportCacheKey(startDate, endDate) {
     endDate || "",
     SLACK_SELECTED_USERS.map((item) => item.id).join(","),
     channelTypes,
+    targetChannels.join(","),
     String(SLACK_ANALYSIS_MAX_CHANNELS || ""),
     String(SLACK_CORP_REQUEST_TAG || ""),
     corpChannels.join(","),
@@ -7662,6 +7677,16 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
     });
   }
 
+  channels = channels.filter((channel) => shouldAnalyzeSlackChannel(channel?.id, channel?.name));
+  if (!channels.length) {
+    return buildSlackReplyReportModel({
+      requested: true,
+      rows: [],
+      source: "Slack API",
+      notice: `Analiz için uygun kanal bulunamadı. Hedef: ${SLACK_ANALYSIS_TARGET_CHANNELS_RAW || "-"}`
+    });
+  }
+
   let warningCount = 0;
   const warningSamples = [];
   const addWarning = (message) => {
@@ -7868,37 +7893,12 @@ async function fetchSlackReplyReportForRange(startDate, endDate) {
   const requestCountByUserId = new Map(
     SLACK_SELECTED_USERS.map((item) => [item.id, totalRequestCount])
   );
-  const preferredChannelColumns = getMandatorySlackChannelColumns(channels);
-  const channelColumnsSet = new Set(channelRequestCountByName.keys());
-  preferredChannelColumns.forEach((channelName) => {
-    const normalizedName = normalizeSlackChannelLabel(channelName);
-    if (normalizedName) channelColumnsSet.add(normalizedName);
-  });
-  scannedChannelNames.forEach((channelName) => {
-    const normalizedName = normalizeSlackChannelLabel(channelName);
-    if (normalizedName) channelColumnsSet.add(normalizedName);
-  });
-  channelReplyByUserId.forEach((channelMap) => {
-    if (!(channelMap instanceof Map)) return;
-    channelMap.forEach((_, channelName) => {
-      const normalizedName = normalizeSlackChannelLabel(channelName);
-      if (normalizedName) channelColumnsSet.add(normalizedName);
-    });
-  });
-  const preferredChannelKeySet = new Set(
-    preferredChannelColumns.map((item) => normalizeSlackChannelLabel(item).toLowerCase()).filter(Boolean)
-  );
-  const remainingChannelColumns = Array.from(channelColumnsSet)
-    .map((item) => normalizeSlackChannelLabel(item))
-    .filter((item) => item && !preferredChannelKeySet.has(item.toLowerCase()))
-    .sort((a, b) => a.localeCompare(b, "tr"));
-  const channelColumns = [...preferredChannelColumns, ...remainingChannelColumns];
   const rows = buildSlackReplyRowsFromCounts(
     replyCountByUserId,
     requestCountByUserId,
     nameByUserId,
     channelReplyByUserId,
-    channelColumns
+    []
   );
   const noticeParts = [];
 
