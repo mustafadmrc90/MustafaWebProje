@@ -115,8 +115,12 @@ const JOURNEY_SEARCH_REQUEST_DATE =
 const JOURNEY_SEARCH_REQUEST_LANGUAGE =
   String(process.env.JOURNEY_SEARCH_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const JOURNEY_SEARCH_TIMEOUT_MS = Number.parseInt(process.env.JOURNEY_SEARCH_TIMEOUT_MS || "90000", 10) || 90000;
-const UETDS_PRICES_TASK_DATA =
-  String(process.env.UETDS_PRICES_TASK_DATA || "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e").trim() ||
+const UETDS_PRICES_TASK_HINT =
+  String(
+    process.env.UETDS_PRICES_TASK_HINT ||
+      process.env.UETDS_PRICES_TASK_DATA ||
+      "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e"
+  ).trim() ||
   "AddAllFeeSchedule-f888ccc1-7a94-496d-9ceb-c96f08ccc70e";
 const UETDS_PRICES_REQUEST_DATE =
   String(process.env.UETDS_PRICES_REQUEST_DATE || "2019-12-23T11:33:00").trim() || "2019-12-23T11:33:00";
@@ -10222,6 +10226,310 @@ function extractObusJobsItems(payload) {
     .filter(Boolean);
 }
 
+function extractScheduledTaskNameHint(taskHint = "") {
+  const raw = String(taskHint || "").trim();
+  if (!raw) return "";
+
+  const match = raw.match(/^(.*)-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+  return String(match?.[1] || raw).trim();
+}
+
+function buildUetdsScheduledTaskHintCandidates(taskHint = "") {
+  const candidates = [String(taskHint || "").trim(), extractScheduledTaskNameHint(taskHint)];
+  const seen = new Set();
+
+  return candidates
+    .map((value) => String(value || "").trim())
+    .filter((value) => {
+      const normalized = normalizeTokenName(value);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function scoreScheduledTaskMatch(value = "", normalizedHints = []) {
+  const normalizedValue = normalizeTokenName(value);
+  if (!normalizedValue) return 0;
+
+  let bestScore = 0;
+  normalizedHints.forEach((hint, index) => {
+    if (!hint) return;
+    const indexPenalty = index * 4;
+    if (normalizedValue === hint) {
+      bestScore = Math.max(bestScore, 120 - indexPenalty);
+      return;
+    }
+    if (normalizedValue.startsWith(hint)) {
+      bestScore = Math.max(bestScore, 90 - indexPenalty);
+      return;
+    }
+    if (normalizedValue.includes(hint)) {
+      bestScore = Math.max(bestScore, 60 - indexPenalty);
+    }
+  });
+
+  return bestScore;
+}
+
+function buildScheduledTaskSampleText(jobs = [], maxCount = 5) {
+  return (Array.isArray(jobs) ? jobs : [])
+    .slice(0, maxCount)
+    .map((job) => String(job?.columnName || job?.id || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function resolveUetdsScheduledTaskItem(jobs = [], taskHint = UETDS_PRICES_TASK_HINT) {
+  const items = (Array.isArray(jobs) ? jobs : []).filter((job) => String(job?.id || "").trim());
+  if (items.length === 0) {
+    return {
+      item: null,
+      error: "getscheduledtasks boş döndü."
+    };
+  }
+
+  const hintCandidates = buildUetdsScheduledTaskHintCandidates(taskHint);
+  const normalizedHints = hintCandidates.map((item) => normalizeTokenName(item)).filter(Boolean);
+  if (normalizedHints.length === 0) {
+    return {
+      item: null,
+      error: "UETDS scheduled task eşleştirme anahtarı boş."
+    };
+  }
+
+  const scoredItems = items
+    .map((job) => {
+      const id = String(job?.id || "").trim();
+      const label = String(job?.columnName || "").trim();
+      return {
+        job,
+        score: Math.max(scoreScheduledTaskMatch(id, normalizedHints), scoreScheduledTaskMatch(label, normalizedHints)),
+        textLength: `${label} ${id}`.trim().length
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      if (left.textLength !== right.textLength) return left.textLength - right.textLength;
+      return String(left.job?.id || "").localeCompare(String(right.job?.id || ""), "tr", {
+        numeric: true,
+        sensitivity: "base"
+      });
+    });
+
+  if (scoredItems.length === 0) {
+    const hintText = hintCandidates.join(" / ");
+    const sampleText = buildScheduledTaskSampleText(items);
+    return {
+      item: null,
+      error: `UETDS scheduled task bulunamadı. Hint=${hintText || "-"}.${sampleText ? ` Örnek tasklar: ${sampleText}` : ""}`
+    };
+  }
+
+  const [bestMatch, nextMatch] = scoredItems;
+  const bestMatchId = String(bestMatch?.job?.id || "").trim();
+  const nextMatchId = String(nextMatch?.job?.id || "").trim();
+  if (
+    nextMatch &&
+    nextMatch.score === bestMatch.score &&
+    bestMatchId &&
+    nextMatchId &&
+    bestMatchId !== nextMatchId
+  ) {
+    const ambiguousItems = scoredItems
+      .filter((item) => item.score === bestMatch.score)
+      .slice(0, 3)
+      .map((item) => String(item.job?.columnName || item.job?.id || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    return {
+      item: null,
+      error: `Birden fazla scheduled task eşleşti: ${ambiguousItems || `${bestMatchId}, ${nextMatchId}`}`
+    };
+  }
+
+  return {
+    item: bestMatch.job,
+    error: null
+  };
+}
+
+async function fetchObusScheduledTasksReport({ endpointUrl, sessionId, deviceId, token }) {
+  const requestUrl = buildObusJobsUrl(endpointUrl || OBUS_JOBS_API_URL);
+  const normalizedRequestUrl = normalizeTargetUrl(requestUrl);
+  if (!normalizedRequestUrl) {
+    return {
+      requested: true,
+      status: null,
+      error: "getscheduledtasks URL oluşturulamadı.",
+      requestUrl: requestUrl || "",
+      requestBody: "{}",
+      responseBody: "",
+      jobs: []
+    };
+  }
+
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+
+  if (!normalizedSessionId || !normalizedDeviceId) {
+    return {
+      requested: true,
+      status: null,
+      error: "getscheduledtasks için session/device bilgisi bulunamadı.",
+      requestUrl: normalizedRequestUrl,
+      requestBody: "{}",
+      responseBody: "",
+      jobs: []
+    };
+  }
+
+  if (!normalizedToken) {
+    return {
+      requested: true,
+      status: null,
+      error: "getscheduledtasks için token zorunludur.",
+      requestUrl: normalizedRequestUrl,
+      requestBody: "{}",
+      responseBody: "",
+      jobs: []
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBUS_JOBS_TIMEOUT_MS);
+  let requestBody = "{}";
+
+  try {
+    const body = buildObusJobsRequestBody({
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      token: normalizedToken
+    });
+    requestBody = JSON.stringify(body, null, 2);
+
+    const response = await fetch(normalizedRequestUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: PARTNERS_API_AUTH
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const responseBody =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        requested: true,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        requestUrl: normalizedRequestUrl,
+        requestBody,
+        responseBody: responseBody || "{}",
+        jobs: []
+      };
+    }
+
+    const hasExplicitStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+      const reason =
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+      return {
+        requested: true,
+        status: response.status,
+        error: reason,
+        requestUrl: normalizedRequestUrl,
+        requestBody,
+        responseBody: responseBody || "{}",
+        jobs: []
+      };
+    }
+
+    return {
+      requested: true,
+      status: response.status,
+      error: null,
+      requestUrl: normalizedRequestUrl,
+      requestBody,
+      responseBody: responseBody || "{}",
+      jobs: extractObusJobsItems(parsed)
+    };
+  } catch (err) {
+    return {
+      requested: true,
+      status: null,
+      error: err?.message || "getscheduledtasks isteği gönderilemedi.",
+      requestUrl: normalizedRequestUrl,
+      requestBody,
+      responseBody: "",
+      jobs: []
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveUetdsPricesTaskData({ endpointUrl, sessionId, deviceId, token }) {
+  const scheduledTasksReport = await fetchObusScheduledTasksReport({
+    endpointUrl,
+    sessionId,
+    deviceId,
+    token
+  });
+
+  if (scheduledTasksReport.error) {
+    return {
+      ok: false,
+      error: scheduledTasksReport.error,
+      requestUrl: scheduledTasksReport.requestUrl,
+      requestBody: scheduledTasksReport.requestBody,
+      responseBody: scheduledTasksReport.responseBody,
+      status: scheduledTasksReport.status,
+      taskData: ""
+    };
+  }
+
+  const taskMatch = resolveUetdsScheduledTaskItem(scheduledTasksReport.jobs, UETDS_PRICES_TASK_HINT);
+  if (!taskMatch?.item) {
+    return {
+      ok: false,
+      error: taskMatch?.error || "UETDS scheduled task bulunamadı.",
+      requestUrl: scheduledTasksReport.requestUrl,
+      requestBody: scheduledTasksReport.requestBody,
+      responseBody: scheduledTasksReport.responseBody,
+      status: scheduledTasksReport.status,
+      taskData: ""
+    };
+  }
+
+  return {
+    ok: true,
+    error: null,
+    requestUrl: scheduledTasksReport.requestUrl,
+    requestBody: scheduledTasksReport.requestBody,
+    responseBody: scheduledTasksReport.responseBody,
+    status: scheduledTasksReport.status,
+    taskData: String(taskMatch.item.id || "").trim()
+  };
+}
+
 function buildObusJobsTableModel(clusterResults) {
   const jobIds = Array.from(
     new Set(
@@ -10311,9 +10619,9 @@ function buildClusterCompanyCandidates(partnerItems = []) {
   return map;
 }
 
-function buildUetdsPricesRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
+function buildUetdsPricesRequestBody({ taskData = "", sessionId = "", deviceId = "", token = "" } = {}) {
   return {
-    data: UETDS_PRICES_TASK_DATA,
+    data: String(taskData || "").trim(),
     "device-session": {
       "session-id": String(sessionId || "").trim(),
       "device-id": String(deviceId || "").trim()
@@ -10878,7 +11186,30 @@ async function fetchUetdsPricesUpdateReport({ endpointUrl, sessionId, deviceId, 
   let requestBody = "{}";
 
   try {
+    const taskResolution = await resolveUetdsPricesTaskData({
+      endpointUrl: normalizedEndpointUrl,
+      sessionId: normalizedSessionId,
+      deviceId: normalizedDeviceId,
+      token: normalizedToken
+    });
+    if (!taskResolution.ok || !taskResolution.taskData) {
+      return {
+        requested: true,
+        status: taskResolution.status,
+        error: taskResolution.error || "UETDS scheduled task bulunamadı.",
+        userMessage: "",
+        requestUrl: taskResolution.requestUrl || buildObusJobsUrl(normalizedEndpointUrl),
+        requestBody: taskResolution.requestBody || "{}",
+        responseBody: taskResolution.responseBody || "",
+        sessionId: normalizedSessionId,
+        deviceId: normalizedDeviceId,
+        branchId: "",
+        loginToken: normalizedToken
+      };
+    }
+
     const body = buildUetdsPricesRequestBody({
+      taskData: taskResolution.taskData,
       sessionId: normalizedSessionId,
       deviceId: normalizedDeviceId,
       token: normalizedToken
