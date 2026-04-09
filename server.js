@@ -11645,11 +11645,24 @@ function buildPartnerCodeLookupFromAllCompaniesRows(rows) {
   };
 }
 
+function parseAllCompaniesPartnerStatus(row) {
+  const statusRaw = readPartnerRawValueByAliases(row, ["status", "status-code", "status_code"]);
+  if (statusRaw === null || statusRaw === undefined || String(statusRaw).trim() === "") {
+    return null;
+  }
+
+  const parsed = Number.parseInt(String(statusRaw).trim(), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildObusUserDeactivateScanTargets(cacheRows) {
   const rows = Array.isArray(cacheRows) ? cacheRows : [];
   const byKey = new Map();
 
   rows.forEach((row) => {
+    const status = parseAllCompaniesPartnerStatus(row);
+    if (status !== null && status !== 1) return;
+
     const cluster = extractClusterLabel(String(row?.source || "").trim());
     const partnerCode = String(row?.code || "").trim();
     const partnerId = String(row?.id || "").trim();
@@ -11689,6 +11702,42 @@ function buildObusUserDeactivateScanTargets(cacheRows) {
     if (byCode !== 0) return byCode;
     return String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
   });
+}
+
+async function loadObusUserDeactivateCompanyRows() {
+  const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: false });
+  const liveRows = Array.isArray(liveResult?.rows) ? liveResult.rows : [];
+  const sourceError = String(liveResult?.error || "").trim();
+
+  if (liveRows.length === 0) {
+    return {
+      rows: [],
+      clusterCount: Number.isFinite(Number(liveResult?.clusterCount)) ? Number(liveResult.clusterCount) : 0,
+      error: sourceError || "Aktif firma listesi alınamadı."
+    };
+  }
+
+  const { report: mergedReport, obusCacheError } = await attachKnownObusMerkezSubeIdsToAllCompaniesReport({
+    columns: Array.isArray(liveResult?.columns) ? liveResult.columns : [],
+    rows: liveRows,
+    clusterCount: Number.isFinite(Number(liveResult?.clusterCount)) ? Number(liveResult.clusterCount) : 0,
+    error: liveResult?.error || null
+  });
+  const mergedRows = Array.isArray(mergedReport?.rows) ? mergedReport.rows : liveRows;
+  const errorParts = [];
+
+  if (sourceError) {
+    errorParts.push(`Canlı firma listesi uyarısı: ${sourceError}`);
+  }
+  if (obusCacheError) {
+    errorParts.push(`SQL eşleme uyarısı: ${obusCacheError}`);
+  }
+
+  return {
+    rows: mergedRows,
+    clusterCount: Number.isFinite(Number(liveResult?.clusterCount)) ? Number(liveResult.clusterCount) : 0,
+    error: errorParts.length > 0 ? errorParts.join(" ") : null
+  };
 }
 
 function extractObusUsersWithoutPermissionsRows(
@@ -11937,16 +11986,18 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
     };
   }
 
-  const cacheResult = await fetchAllCompaniesRowsFromCache();
-  const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
-  const codeLookup = buildPartnerCodeLookupFromAllCompaniesRows(cacheRows);
-  const scanTargets = buildObusUserDeactivateScanTargets(cacheRows);
+  const companyRowsResult = await loadObusUserDeactivateCompanyRows();
+  const companyRows = Array.isArray(companyRowsResult?.rows) ? companyRowsResult.rows : [];
+  const codeLookup = buildPartnerCodeLookupFromAllCompaniesRows(companyRows);
+  const scanTargets = buildObusUserDeactivateScanTargets(companyRows);
 
   if (scanTargets.length === 0) {
     return {
       items: [],
-      error: "SQL tablosunda taranacak firma bulunamadı.",
-      clusterCount: 0
+      error: companyRowsResult?.error || "Taranacak aktif firma bulunamadı.",
+      clusterCount: Number.isFinite(Number(companyRowsResult?.clusterCount))
+        ? Number(companyRowsResult.clusterCount)
+        : 0
     };
   }
 
@@ -11997,8 +12048,8 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   });
 
   const errorParts = [];
-  if (cacheResult?.error) {
-    errorParts.push(`SQL eşleme uyarısı: ${cacheResult.error}`);
+  if (companyRowsResult?.error) {
+    errorParts.push(String(companyRowsResult.error).trim());
   }
   if (errors.length > 0) {
     const sample = errors.slice(0, 2).join(" | ");
