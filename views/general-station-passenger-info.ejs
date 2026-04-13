@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout station-passenger-info-page">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <div class="station-passenger-mobile-shell">
+        <div class="station-passenger-mobile-status">
+          <span class="station-passenger-mobile-badge">Mobil Ekran</span>
+          <span class="station-passenger-mobile-caption">Telefon boyutuna otomatik uyarlanır</span>
+        </div>
+
+        <section class="station-passenger-mobile-screen">
+          <header class="page-header">
+            <div class="page-title">
+              <h1>
+                <span class="page-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M6 18v-6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v6"></path>
+                    <path d="M4 18h16"></path>
+                    <path d="M8 10V6"></path>
+                    <path d="M16 10V6"></path>
+                    <path d="M8 6h8"></path>
+                    <circle cx="12" cy="14" r="2"></circle>
+                  </svg>
+                </span>
+                <span>Durak Yolcu Bilgisi</span>
+              </h1>
+              <p>Bu ekran mobil telefon boyutlarına göre çalışacak şekilde otomatik uyarlanır.</p>
+            </div>
+            <div class="page-actions">
+              <div class="user-pill"><%= user.displayName %></div>
+            </div>
+          </header>
+
+          <section class="table-card panel-card">
+            <div class="empty-state">
+              <div class="empty-icon">DY</div>
+              <strong>Ekran hazır.</strong>
+              <p class="muted">İçerik geldikçe kartlar, boşluklar ve başlıklar telefon ekran genişliğine göre otomatik ayarlanacak.</p>
+            </div>
+          </section>
+        </section>
+      </div>
+    </section>
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

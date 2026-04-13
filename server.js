@@ -285,6 +285,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "journey-search"
   },
   {
+    key: "station-passenger-info",
+    type: "item",
+    label: "Durak Yolcu Bilgisi",
+    parentKey: "general",
+    route: "/general/station-passenger-info",
+    routeKey: "station-passenger-info",
+    sortOrder: 18,
+    iconKey: "station-passenger-info"
+  },
+  {
     key: "obus-user-create",
     type: "item",
     label: "Obus Kullanıcı Oluştur",
@@ -1219,6 +1229,7 @@ function ensureCriticalSidebarRows(rows) {
   upsertFromRegistry("obus-user-create");
   upsertFromRegistry("obus-user-create-bulk");
   upsertFromRegistry("obus-user-deactivate");
+  upsertFromRegistry("station-passenger-info");
 
   return normalizedRows;
 }
@@ -14365,6 +14376,13 @@ app.get("/general/journey-search", requireAuth, requireMenuAccess("journey-searc
     companies,
     partnerError,
     requestBodyTemplate: JSON.stringify(buildJourneySearchStationsRequestBody({ usePlaceholders: true }), null, 2)
+  });
+});
+
+app.get("/general/station-passenger-info", requireAuth, requireMenuAccess("station-passenger-info"), (req, res) => {
+  res.render("general-station-passenger-info", {
+    user: req.session.user,
+    active: "station-passenger-info"
   });
 });
 

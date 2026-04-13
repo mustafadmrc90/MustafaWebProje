@@ -4224,6 +4224,133 @@ button.ghost {
   border-radius: 8px;
 }
 
+.station-passenger-info-page .content {
+  display: flex;
+  justify-content: center;
+  padding: 24px 20px 36px;
+}
+
+.station-passenger-mobile-shell {
+  width: min(100%, 520px);
+  display: grid;
+  gap: 14px;
+}
+
+.station-passenger-mobile-status {
+  width: min(100%, 430px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #66768a;
+  font-size: 12px;
+}
+
+.station-passenger-mobile-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 107, 220, 0.1);
+  color: #0f6bdc;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.station-passenger-mobile-caption {
+  color: #76879a;
+}
+
+.station-passenger-mobile-screen {
+  width: min(100%, 430px);
+  min-height: min(820px, calc(100dvh - 48px));
+  margin: 0 auto;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  border-radius: 30px;
+  border: 1px solid #d9e3f0;
+  background:
+    radial-gradient(circle at top center, rgba(126, 180, 255, 0.16) 0%, rgba(126, 180, 255, 0) 34%),
+    linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%);
+  box-shadow:
+    0 28px 64px rgba(19, 31, 52, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  position: relative;
+  overflow: hidden;
+}
+
+.station-passenger-mobile-screen::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 88px;
+  height: 5px;
+  border-radius: 999px;
+  background: #cad5e4;
+}
+
+.station-passenger-info-page .page-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 0;
+  padding-top: 12px;
+}
+
+.station-passenger-info-page .page-title h1 {
+  font-size: clamp(20px, 5vw, 28px);
+  line-height: 1.1;
+}
+
+.station-passenger-info-page .page-title p {
+  max-width: 32ch;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.station-passenger-info-page .page-actions {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.station-passenger-info-page .user-pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-passenger-info-page .table-card {
+  padding: 12px;
+  border-radius: 22px;
+  box-shadow: 0 16px 40px rgba(21, 34, 56, 0.08);
+}
+
+.station-passenger-info-page .empty-state {
+  margin-top: 0;
+  min-height: 220px;
+  padding: 20px 18px;
+  border-radius: 18px;
+  border: 1px solid #dfe8f5;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 248, 255, 0.96) 100%),
+    #f4f6fb;
+}
+
+.station-passenger-info-page .empty-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  box-shadow: 0 12px 24px rgba(15, 107, 220, 0.18);
+}
+
 .obus-user-create-bulk-page .obus-user-create-grid {
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap: 8px 10px;
@@ -4974,6 +5101,20 @@ button.ghost {
     width: 100%;
   }
 
+  .station-passenger-info-page .content {
+    padding: 14px 12px 28px;
+  }
+
+  .station-passenger-mobile-status,
+  .station-passenger-mobile-screen {
+    width: 100%;
+  }
+
+  .station-passenger-mobile-screen {
+    min-height: auto;
+    border-radius: 24px;
+  }
+
   .sales-filter-grid input,
   .sales-filter-grid select {
     width: 100%;
@@ -5096,5 +5237,24 @@ button.ghost {
   .menti-chatgpt-messages {
     min-height: 34vh;
     max-height: 34vh;
+  }
+}
+
+@media (max-width: 420px) {
+  .station-passenger-info-page .page-title h1 {
+    font-size: 18px;
+  }
+
+  .station-passenger-mobile-screen {
+    padding-inline: 12px;
+  }
+
+  .station-passenger-info-page .table-card {
+    padding: 10px;
+  }
+
+  .station-passenger-info-page .empty-state {
+    min-height: 190px;
+    padding: 16px;
   }
 }
