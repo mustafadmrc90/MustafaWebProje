@@ -4333,6 +4333,65 @@ button.ghost {
   box-shadow: 0 16px 40px rgba(21, 34, 56, 0.08);
 }
 
+.station-passenger-plate-card {
+  display: grid;
+  gap: 10px;
+}
+
+.station-passenger-field {
+  display: grid;
+  gap: 8px;
+}
+
+.station-passenger-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #637487;
+}
+
+.station-passenger-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.station-passenger-field input[type="text"] {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #cfdceb;
+  border-radius: 14px;
+  background: #fdfefe;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #1f2735;
+  text-transform: uppercase;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.station-passenger-field input[type="text"]::placeholder {
+  color: #98a7b8;
+  letter-spacing: 0.04em;
+}
+
+.station-passenger-field input[type="text"]:focus {
+  border-color: #0f6bdc;
+  box-shadow: 0 0 0 4px rgba(15, 107, 220, 0.12);
+}
+
+.station-passenger-go-button {
+  min-height: 46px;
+  padding-inline: 18px;
+  white-space: nowrap;
+  border-radius: 14px;
+  box-shadow: 0 14px 28px rgba(217, 119, 87, 0.18);
+}
+
 .station-passenger-info-page .empty-state {
   margin-top: 0;
   min-height: 220px;
@@ -5245,12 +5304,20 @@ button.ghost {
     font-size: 18px;
   }
 
+  .station-passenger-field-row {
+    grid-template-columns: 1fr;
+  }
+
   .station-passenger-mobile-screen {
     padding-inline: 12px;
   }
 
   .station-passenger-info-page .table-card {
     padding: 10px;
+  }
+
+  .station-passenger-go-button {
+    width: 100%;
   }
 
   .station-passenger-info-page .empty-state {
