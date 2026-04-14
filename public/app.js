@@ -1816,6 +1816,210 @@
     }
   };
 
+  const initStationPassengerInfoPage = () => {
+    const page = document.querySelector("[data-station-passenger-page='1']");
+    if (!page) return;
+    if (page.dataset.bound === "1") return;
+    page.dataset.bound = "1";
+
+    const plateInput = page.querySelector("[data-station-passenger-plate-input]");
+    const goButton = page.querySelector("[data-station-passenger-go-button]");
+    const statusEl = page.querySelector("[data-station-passenger-status]");
+    const resultsListEl = page.querySelector("[data-station-passenger-results-list]");
+    const resultsCountEl = page.querySelector("[data-station-passenger-results-count]");
+    if (!plateInput || !goButton || !statusEl || !resultsListEl || !resultsCountEl) return;
+
+    let requestSequence = 0;
+    let selectedResultIndex = -1;
+    let resultItems = [];
+
+    const normalizePlateDisplay = (value) =>
+      String(value || "")
+        .toLocaleUpperCase("tr")
+        .replace(/[^0-9A-Z]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const setStatus = (message, kind = "muted") => {
+      statusEl.textContent = String(message || "").trim();
+      if (kind === "error") {
+        statusEl.className = "station-passenger-results-status alert inline-alert";
+        return;
+      }
+      if (kind === "success") {
+        statusEl.className = "station-passenger-results-status inline-success";
+        return;
+      }
+      statusEl.className = "station-passenger-results-status muted";
+    };
+
+    const setCount = (count) => {
+      const normalizedCount = Math.max(0, Number.parseInt(String(count || "0"), 10) || 0);
+      resultsCountEl.textContent = String(normalizedCount);
+      resultsCountEl.className = normalizedCount > 0 ? "pill" : "pill muted";
+    };
+
+    const setSelectedResultIndex = (index) => {
+      selectedResultIndex = Number.isInteger(index) ? index : -1;
+      resultsListEl.querySelectorAll("[data-station-passenger-result-button='1']").forEach((buttonEl) => {
+        const buttonIndex = Number.parseInt(buttonEl.dataset.stationPassengerResultIndex || "-1", 10);
+        buttonEl.classList.toggle("is-selected", buttonIndex === selectedResultIndex);
+      });
+    };
+
+    const renderEmptyResults = (message) => {
+      resultsListEl.innerHTML = "";
+      const emptyEl = document.createElement("div");
+      emptyEl.className = "station-passenger-results-empty";
+      emptyEl.textContent = String(message || "").trim() || "Henüz listelenecek sefer yok.";
+      resultsListEl.appendChild(emptyEl);
+      resultItems = [];
+      setCount(0);
+      setSelectedResultIndex(-1);
+    };
+
+    const renderResults = (items) => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      resultItems = normalizedItems;
+      resultsListEl.innerHTML = "";
+
+      if (normalizedItems.length === 0) {
+        renderEmptyResults("Bu plakaya ait sefer bulunamadı.");
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      normalizedItems.forEach((item, index) => {
+        const rowButton = document.createElement("button");
+        rowButton.type = "button";
+        rowButton.className = "station-passenger-result-button";
+        rowButton.dataset.stationPassengerResultButton = "1";
+        rowButton.dataset.stationPassengerResultIndex = String(index);
+
+        const timeEl = document.createElement("span");
+        timeEl.className = "station-passenger-result-time";
+        timeEl.textContent = String(item?.departureTime || "").trim() || "-";
+
+        const routeWrapEl = document.createElement("span");
+        routeWrapEl.className = "station-passenger-result-route";
+
+        const routeLabelEl = document.createElement("span");
+        routeLabelEl.className = "station-passenger-result-route-label";
+        routeLabelEl.textContent = "Route Info";
+
+        const routeValueEl = document.createElement("span");
+        routeValueEl.className = "station-passenger-result-route-value";
+        routeValueEl.textContent = String(item?.routeInfo || "").trim() || "-";
+
+        routeWrapEl.appendChild(routeLabelEl);
+        routeWrapEl.appendChild(routeValueEl);
+        rowButton.appendChild(timeEl);
+        rowButton.appendChild(routeWrapEl);
+        fragment.appendChild(rowButton);
+      });
+
+      resultsListEl.appendChild(fragment);
+      setCount(normalizedItems.length);
+      setSelectedResultIndex(-1);
+    };
+
+    const runSearch = async () => {
+      const displayPlate = normalizePlateDisplay(plateInput.value);
+      if (!displayPlate.replace(/\s+/g, "")) {
+        setStatus("Plaka girilmesi zorunludur.", "error");
+        renderEmptyResults("Arama yapmak için plaka girin.");
+        return;
+      }
+
+      plateInput.value = displayPlate;
+      const currentRequest = ++requestSequence;
+      goButton.disabled = true;
+      setStatus("Sefer aranıyor...", "muted");
+      renderEmptyResults("Sefer aranıyor...");
+
+      try {
+        const response = await fetch("/api/station-passenger-info/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            plate: displayPlate
+          })
+        });
+        const data = await parseJsonResponse(response);
+        if (currentRequest !== requestSequence) return;
+
+        if (!response.ok || data?.ok === false) {
+          const message = getApiErrorMessage(response, data, "Plaka araması başarısız");
+          setStatus(message, "error");
+          renderEmptyResults("Bu plakaya ait sefer bulunamadı.");
+          return;
+        }
+
+        const items = Array.isArray(data?.items) ? data.items : [];
+        renderResults(items);
+
+        if (items.length === 0) {
+          const searchedPlate = normalizePlateDisplay(data?.searchedPlate || displayPlate) || displayPlate;
+          setStatus(`${searchedPlate} için sefer bulunamadı.`, "muted");
+          return;
+        }
+
+        const sourceCompany = String(data?.sourceCompany || "").trim();
+        setStatus(
+          sourceCompany ? `${items.length} sefer bulundu. Kaynak firma: ${sourceCompany}.` : `${items.length} sefer bulundu.`,
+          "success"
+        );
+      } catch (err) {
+        if (currentRequest !== requestSequence) return;
+        setStatus(err?.message || "Plaka araması başarısız.", "error");
+        renderEmptyResults("Arama sırasında hata oluştu.");
+      } finally {
+        if (currentRequest === requestSequence) {
+          goButton.disabled = false;
+        }
+      }
+    };
+
+    plateInput.addEventListener("input", () => {
+      const normalized = String(plateInput.value || "")
+        .toLocaleUpperCase("tr")
+        .replace(/[^0-9A-Z\s]/g, " ")
+        .replace(/\s{2,}/g, " ");
+      if (plateInput.value !== normalized) {
+        plateInput.value = normalized;
+      }
+    });
+
+    plateInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      runSearch();
+    });
+
+    goButton.addEventListener("click", () => {
+      runSearch();
+    });
+
+    resultsListEl.addEventListener("click", (event) => {
+      const resultButton = event.target.closest("[data-station-passenger-result-button='1']");
+      if (!resultButton) return;
+      const nextIndex = Number.parseInt(resultButton.dataset.stationPassengerResultIndex || "-1", 10);
+      if (!Number.isInteger(nextIndex) || !resultItems[nextIndex]) return;
+      setSelectedResultIndex(nextIndex);
+      window.dispatchEvent(
+        new CustomEvent("station-passenger-result-selected", {
+          detail: {
+            index: nextIndex,
+            item: resultItems[nextIndex]
+          }
+        })
+      );
+    });
+  };
+
   const initObusUserCreateBuilder = () => {
     const form = document.querySelector(".obus-user-create-form");
     if (!form) return;
@@ -3828,6 +4032,7 @@
     initSlackReportLoading();
     initAllowedLinesLoading();
     initJourneySearchForm();
+    initStationPassengerInfoPage();
     initObusUserCreateBuilder();
     initObusUserDeactivateForm();
     initAllCompaniesLoading();

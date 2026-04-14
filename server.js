@@ -170,6 +170,18 @@ const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
 );
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
+const STATION_PASSENGER_INFO_API_URL =
+  process.env.STATION_PASSENGER_INFO_API_URL ||
+  "https://api-coreprod-cluster3.obus.com.tr/api/Inventory/GetDailyJourneySummaries";
+const STATION_PASSENGER_INFO_API_AUTH =
+  String(process.env.STATION_PASSENGER_INFO_API_AUTH || INVENTORY_BRANCHES_API_AUTH).trim() ||
+  INVENTORY_BRANCHES_API_AUTH;
+const STATION_PASSENGER_INFO_REQUEST_LANGUAGE =
+  String(process.env.STATION_PASSENGER_INFO_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
+const STATION_PASSENGER_INFO_TIMEOUT_MS =
+  Number.parseInt(process.env.STATION_PASSENGER_INFO_TIMEOUT_MS || "45000", 10) || 45000;
+const STATION_PASSENGER_INFO_COMPANY_CONCURRENCY =
+  Number.parseInt(process.env.STATION_PASSENGER_INFO_COMPANY_CONCURRENCY || "4", 10) || 4;
 const ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY =
   Number.parseInt(
     process.env.ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY || String(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || 4),
@@ -2531,7 +2543,10 @@ function isSuccessStatusPayload(payload) {
   if (!payload || typeof payload !== "object") return false;
 
   const statusText = String(payload.status || "").trim().toLowerCase();
-  if (statusText === "success") return true;
+  if (statusText === "success" || statusText === "ok" || statusText === "1") return true;
+
+  const statusValue = Number(payload.status);
+  if (Number.isFinite(statusValue) && statusValue === 1) return true;
 
   if (payload.success === true) return true;
 
@@ -3872,6 +3887,827 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     tokenMissingDetail: mergedDetail,
     rawLoginBody: String(retryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
     loginUrl: String(retryResult?.loginUrl || initialResult?.loginUrl || "").trim()
+  };
+}
+
+function normalizeStationPassengerPlate(value) {
+  return String(value || "")
+    .toLocaleUpperCase("tr")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function formatStationPassengerPlateDisplay(value) {
+  return String(value || "")
+    .toLocaleUpperCase("tr")
+    .replace(/[^A-Z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildStationPassengerRequestDateParts(date = new Date()) {
+  const isoDate = formatDateToIsoInTimeZone(date, APP_TIME_ZONE) || formatDateToIsoLocal(date);
+  return {
+    isoDate,
+    obusDate: isoDate ? `${isoDate} 00:00:00` : ""
+  };
+}
+
+function buildStationPassengerDailySummariesRequestBody({ sessionId = "", deviceId = "", token = "", dateValue = "" } = {}) {
+  const normalizedDateValue = String(dateValue || "").trim();
+  return {
+    data: normalizedDateValue,
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    date: normalizedDateValue ? `${normalizedDateValue} 00:00:00` : "",
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE,
+    token: String(token || "").trim()
+  };
+}
+
+function extractStationPassengerTextValue(value) {
+  const text = formatPartnerCellValue(value).trim();
+  if (!text || /^(null|undefined)$/i.test(text)) return "";
+  if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+    return "";
+  }
+  return text;
+}
+
+function readStationPassengerTextByAliases(node, aliases = [], maxDepth = 3) {
+  if (!node || typeof node !== "object") return "";
+  const direct = extractStationPassengerTextValue(readPartnerRawValueByAliases(node, aliases));
+  if (direct) return direct;
+  return extractStationPassengerTextValue(getDeepValueByNormalizedKey(node, aliases, maxDepth));
+}
+
+function formatStationPassengerDepartureTime(value) {
+  const text = extractStationPassengerTextValue(value);
+  if (!text) return "";
+  const dateMatch = text.match(/(?:T|\s)(\d{2}:\d{2})(?::\d{2})?/);
+  if (dateMatch?.[1]) return dateMatch[1];
+  const plainMatch = text.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/);
+  if (plainMatch?.[1]) return plainMatch[1];
+  return text;
+}
+
+function extractStationPassengerDepartureTime(node) {
+  if (!node || typeof node !== "object") return "";
+  const primaryAliases = [
+    "departure-time",
+    "departure_time",
+    "departuretime",
+    "departure-hour",
+    "departure_hour",
+    "departurehour",
+    "journey-time",
+    "journey_time",
+    "journeytime",
+    "start-time",
+    "start_time",
+    "starttime",
+    "time",
+    "hour"
+  ];
+  const primaryValue = readPartnerRawValueByAliases(node, primaryAliases) || getDeepValueByNormalizedKey(node, primaryAliases, 3);
+  const primaryTime = formatStationPassengerDepartureTime(primaryValue);
+  if (primaryTime) return primaryTime;
+
+  return formatStationPassengerDepartureTime(
+    getDeepValueByNormalizedKey(
+      node,
+      [
+        "departure-date-time",
+        "departure_date_time",
+        "departuredatetime",
+        "departure-date",
+        "departure_date",
+        "departuredate",
+        "start-date-time",
+        "start_date_time",
+        "startdatetime"
+      ],
+      3
+    )
+  );
+}
+
+function buildStationPassengerRouteInfoFromRouteValue(routeValue) {
+  if (Array.isArray(routeValue)) {
+    const stopNames = routeValue
+      .map((item) =>
+        readStationPassengerTextByAliases(
+          item,
+          [
+            "name",
+            "label",
+            "station-name",
+            "station_name",
+            "stationname",
+            "location-name",
+            "location_name",
+            "locationname",
+            "city-name",
+            "city_name",
+            "cityname"
+          ],
+          1
+        )
+      )
+      .filter(Boolean);
+    if (stopNames.length >= 2) {
+      return `${stopNames[0]} -> ${stopNames[stopNames.length - 1]}`;
+    }
+    if (stopNames.length === 1) {
+      return stopNames[0];
+    }
+    return "";
+  }
+
+  if (routeValue && typeof routeValue === "object") {
+    const origin = readStationPassengerTextByAliases(
+      routeValue,
+      [
+        "origin-name",
+        "origin_name",
+        "originname",
+        "from-name",
+        "from_name",
+        "fromname",
+        "departure-station-name",
+        "departure_station_name",
+        "departurestationname",
+        "origin",
+        "from"
+      ],
+      2
+    );
+    const destination = readStationPassengerTextByAliases(
+      routeValue,
+      [
+        "destination-name",
+        "destination_name",
+        "destinationname",
+        "to-name",
+        "to_name",
+        "toname",
+        "arrival-station-name",
+        "arrival_station_name",
+        "arrivalstationname",
+        "destination",
+        "to"
+      ],
+      2
+    );
+    if (origin && destination) return `${origin} -> ${destination}`;
+    if (origin || destination) return origin || destination;
+  }
+
+  return extractStationPassengerTextValue(routeValue);
+}
+
+function extractStationPassengerRouteInfo(node) {
+  if (!node || typeof node !== "object") return "";
+
+  const directRoute = readStationPassengerTextByAliases(
+    node,
+    [
+      "route-info",
+      "route_info",
+      "routeinfo",
+      "route-name",
+      "route_name",
+      "routename",
+      "line-name",
+      "line_name",
+      "linename",
+      "line-info",
+      "line_info",
+      "lineinfo"
+    ],
+    3
+  );
+  if (directRoute) return directRoute;
+
+  const origin = readStationPassengerTextByAliases(
+    node,
+    [
+      "origin-name",
+      "origin_name",
+      "originname",
+      "from-name",
+      "from_name",
+      "fromname",
+      "departure-station-name",
+      "departure_station_name",
+      "departurestationname",
+      "origin",
+      "from"
+    ],
+    3
+  );
+  const destination = readStationPassengerTextByAliases(
+    node,
+    [
+      "destination-name",
+      "destination_name",
+      "destinationname",
+      "to-name",
+      "to_name",
+      "toname",
+      "arrival-station-name",
+      "arrival_station_name",
+      "arrivalstationname",
+      "destination",
+      "to"
+    ],
+    3
+  );
+  if (origin && destination) return `${origin} -> ${destination}`;
+  if (origin || destination) return origin || destination;
+
+  const routeValue = getDeepValueByNormalizedKey(node, ["route", "routes", "journey-route", "journeyroute"], 3);
+  return buildStationPassengerRouteInfoFromRouteValue(routeValue);
+}
+
+function extractStationPassengerJourneyId(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "journey-id",
+      "journey_id",
+      "journeyid",
+      "trip-id",
+      "trip_id",
+      "tripid",
+      "sefer-id",
+      "sefer_id",
+      "seferid",
+      "id"
+    ],
+    2
+  );
+}
+
+function getStationPassengerSortMinutes(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function parseStationPassengerStatusValue(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (Number.isFinite(Number(value))) {
+    const numericValue = Number(value);
+    if (numericValue === 1) return true;
+    if (numericValue === 0) return false;
+  }
+
+  const normalized = String(value || "").trim().toLocaleLowerCase("tr");
+  if (!normalized) return null;
+  if (["true", "1", "ok", "active", "aktif"].includes(normalized)) return true;
+  if (["false", "0", "inactive", "pasif"].includes(normalized)) return false;
+  return null;
+}
+
+function extractStationPassengerJourneyItems(payload, { companyCode = "", cluster = "" } = {}) {
+  const collected = [];
+  const seen = new Set();
+  const visited = new Set();
+
+  const pushCandidate = (node) => {
+    const statusValue =
+      readPartnerRawValueByAliases(node, ["status"]) || getDeepValueByNormalizedKey(node, ["status"], 2);
+    if (parseStationPassengerStatusValue(statusValue) !== true) return;
+
+    const plateText = readStationPassengerTextByAliases(
+      node,
+      [
+        "plate",
+        "plaka",
+        "vehicle-plate",
+        "vehicle_plate",
+        "vehicleplate",
+        "license-plate",
+        "license_plate",
+        "plate-number",
+        "plate_number",
+        "platenumber"
+      ],
+      3
+    );
+    const normalizedPlate = normalizeStationPassengerPlate(plateText);
+    if (!normalizedPlate) return;
+
+    const departureTime = extractStationPassengerDepartureTime(node) || "-";
+    const routeInfo = extractStationPassengerRouteInfo(node) || "-";
+    const journeyId = extractStationPassengerJourneyId(node);
+    const key = [
+      normalizedPlate,
+      String(journeyId || "").trim(),
+      String(departureTime || "").trim(),
+      String(routeInfo || "").trim()
+    ]
+      .join("|||")
+      .toLocaleLowerCase("tr");
+
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    collected.push({
+      id: String(journeyId || "").trim(),
+      plate: formatStationPassengerPlateDisplay(plateText) || String(plateText || "").trim() || normalizedPlate,
+      normalizedPlate,
+      departureTime,
+      routeInfo,
+      companyCode: String(companyCode || "").trim(),
+      cluster: extractClusterLabel(cluster),
+      raw: node
+    });
+  };
+
+  const walk = (node, depth = 0) => {
+    if (depth > 7 || node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed, depth + 1);
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+
+    pushCandidate(node);
+    Object.values(node).forEach((value) => walk(value, depth + 1));
+  };
+
+  walk(payload);
+
+  return collected.sort((a, b) => {
+    const byTime = getStationPassengerSortMinutes(a.departureTime) - getStationPassengerSortMinutes(b.departureTime);
+    if (byTime !== 0) return byTime;
+    const byRoute = String(a.routeInfo || "").localeCompare(String(b.routeInfo || ""), "tr");
+    if (byRoute !== 0) return byRoute;
+    return String(a.plate || "").localeCompare(String(b.plate || ""), "tr");
+  });
+}
+
+async function resolveStationPassengerLoginResult({
+  endpointUrl,
+  companyUrl,
+  partnerCode = "",
+  partnerId = "",
+  username,
+  password,
+  fallbackBranchId = "",
+  allowEmptyPartnerCode = false,
+  loginBranchId = "",
+  authorization = STATION_PASSENGER_INFO_API_AUTH,
+  timeoutMs = STATION_PASSENGER_INFO_TIMEOUT_MS
+}) {
+  const initialResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl,
+    partnerCode,
+    partnerId,
+    username,
+    password,
+    fallbackBranchId,
+    allowEmptyPartnerCode,
+    loginBranchId,
+    authorization,
+    timeoutMs
+  });
+  const initialToken = String(initialResult?.token || "").trim();
+  const obusMerkezBranchKey = String(initialResult?.obusMerkezBranchKey || "").trim();
+
+  if (!(initialResult?.ok === true && !initialToken && obusMerkezBranchKey)) {
+    return initialResult;
+  }
+
+  const retryResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl,
+    companyUrl,
+    partnerCode,
+    partnerId,
+    username,
+    password,
+    fallbackBranchId,
+    allowEmptyPartnerCode,
+    loginBranchId: obusMerkezBranchKey,
+    authorization,
+    timeoutMs
+  });
+  const retryToken = String(retryResult?.token || "").trim();
+  if (retryResult?.ok === true && retryToken) {
+    return retryResult;
+  }
+
+  const mergedDetail = [
+    String(initialResult?.tokenMissingDetail || initialResult?.errorDetail || "").trim(),
+    String(retryResult?.tokenMissingDetail || retryResult?.errorDetail || "").trim()
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  return {
+    ok: false,
+    error: String(retryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
+    errorDetail: mergedDetail,
+    sessionId: String(retryResult?.sessionId || initialResult?.sessionId || "").trim(),
+    deviceId: String(retryResult?.deviceId || initialResult?.deviceId || "").trim(),
+    branchId: String(retryResult?.branchId || initialResult?.branchId || obusMerkezBranchKey || "").trim(),
+    token: retryToken,
+    obusMerkezBranchKey: String(retryResult?.obusMerkezBranchKey || obusMerkezBranchKey || "").trim(),
+    tokenMissingDetail: mergedDetail,
+    rawLoginBody: String(retryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
+    loginUrl: String(retryResult?.loginUrl || initialResult?.loginUrl || "").trim(),
+    serviceLogs: [
+      ...(Array.isArray(initialResult?.serviceLogs) ? initialResult.serviceLogs : []),
+      ...(Array.isArray(retryResult?.serviceLogs) ? retryResult.serviceLogs : [])
+    ],
+    failedServiceLog: retryResult?.failedServiceLog || initialResult?.failedServiceLog || null
+  };
+}
+
+async function fetchStationPassengerDailyJourneySummaries({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  token,
+  plateQuery = "",
+  companyCode = "",
+  cluster = "",
+  authorization = STATION_PASSENGER_INFO_API_AUTH
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+  const normalizedPlateQuery = normalizeStationPassengerPlate(plateQuery);
+  const requestDateParts = buildStationPassengerRequestDateParts(new Date());
+  const requestBody = buildStationPassengerDailySummariesRequestBody({
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    token: normalizedToken,
+    dateValue: requestDateParts.isoDate
+  });
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      items: [],
+      allItemsCount: 0,
+      requestUrl: "",
+      requestDate: requestDateParts.isoDate,
+      error: "GetDailyJourneySummaries URL oluşturulamadı.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId || !normalizedToken) {
+    return {
+      ok: false,
+      items: [],
+      allItemsCount: 0,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: requestDateParts.isoDate,
+      error: "GetDailyJourneySummaries için session/device/token eksik.",
+      detail: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetDailyJourneySummaries",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        items: [],
+        allItemsCount: 0,
+        requestUrl: normalizedEndpointUrl,
+        requestDate: requestDateParts.isoDate,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 140,
+          responseMaxLen: 220
+        })
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          items: [],
+          allItemsCount: 0,
+          requestUrl: normalizedEndpointUrl,
+          requestDate: requestDateParts.isoDate,
+          status: response.status,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 140,
+            responseMaxLen: 220
+          })
+        };
+      }
+    }
+
+    const allItems = extractStationPassengerJourneyItems(parsed ?? raw, {
+      companyCode,
+      cluster
+    });
+    const items = normalizedPlateQuery
+      ? allItems.filter((item) => item.normalizedPlate === normalizedPlateQuery)
+      : allItems;
+
+    return {
+      ok: true,
+      items,
+      allItemsCount: allItems.length,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: requestDateParts.isoDate,
+      status: response.status,
+      error: "",
+      detail: allItems.length
+        ? ""
+        : buildObusServiceTraceText(trace, extractObusApiLogDetail(parsed, raw, ""), {
+            bodyMaxLen: 140,
+            responseMaxLen: 200
+          })
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetDailyJourneySummaries",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "GetDailyJourneySummaries isteği başarısız."
+    });
+    return {
+      ok: false,
+      items: [],
+      allItemsCount: 0,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: requestDateParts.isoDate,
+      error: err?.message || "GetDailyJourneySummaries isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "GetDailyJourneySummaries isteği başarısız.", {
+        bodyMaxLen: 140,
+        responseMaxLen: 180
+      })
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function searchStationPassengerJourneysByPlate(plateQuery) {
+  const normalizedPlate = normalizeStationPassengerPlate(plateQuery);
+  const displayPlate = formatStationPassengerPlateDisplay(plateQuery) || String(plateQuery || "").trim();
+  const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
+  const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
+  const requestDate = buildStationPassengerRequestDateParts(new Date()).isoDate;
+
+  if (!normalizedPlate) {
+    return {
+      ok: false,
+      items: [],
+      requestUrl: endpointUrl,
+      requestDate,
+      error: "Plaka girilmesi zorunludur.",
+      detail: ""
+    };
+  }
+
+  if (!INVENTORY_BRANCHES_LOGIN_USERNAME || !INVENTORY_BRANCHES_LOGIN_PASSWORD) {
+    return {
+      ok: false,
+      items: [],
+      requestUrl: endpointUrl,
+      requestDate,
+      error: "INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD zorunludur.",
+      detail: ""
+    };
+  }
+
+  let lastError = "";
+  let lastDetail = "";
+  let successfulFetchCount = 0;
+
+  const adminLoginResult = await resolveStationPassengerLoginResult({
+    endpointUrl,
+    companyUrl: endpointUrl,
+    partnerCode: "",
+    partnerId: "",
+    username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+    password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+    fallbackBranchId: "",
+    allowEmptyPartnerCode: true,
+    authorization: STATION_PASSENGER_INFO_API_AUTH,
+    timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+  });
+
+  if (adminLoginResult?.ok && String(adminLoginResult.token || "").trim()) {
+    const adminFetchResult = await fetchStationPassengerDailyJourneySummaries({
+      endpointUrl,
+      sessionId: adminLoginResult.sessionId,
+      deviceId: adminLoginResult.deviceId,
+      token: adminLoginResult.token,
+      plateQuery: normalizedPlate,
+      cluster: clusterLabel,
+      authorization: STATION_PASSENGER_INFO_API_AUTH
+    });
+    if (adminFetchResult.ok) {
+      successfulFetchCount += 1;
+      if (adminFetchResult.items.length > 0) {
+        return {
+          ...adminFetchResult,
+          ok: true,
+          searchedPlate: displayPlate,
+          sourceCompany: "",
+          sourceMode: "admin"
+        };
+      }
+    } else {
+      lastError = adminFetchResult.error || lastError;
+      lastDetail = adminFetchResult.detail || lastDetail;
+    }
+  } else {
+    lastError = String(adminLoginResult?.error || "").trim() || lastError;
+    lastDetail =
+      String(adminLoginResult?.errorDetail || adminLoginResult?.tokenMissingDetail || "").trim() || lastDetail;
+  }
+
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const clusterCandidates = shuffleArray(buildClusterCompanyCandidates(partnerItems).get(clusterLabel) || []).filter(
+    (item) => String(item?.code || "").trim()
+  );
+
+  if (clusterCandidates.length === 0) {
+    if (successfulFetchCount > 0) {
+      return {
+        ok: true,
+        items: [],
+        requestUrl: endpointUrl,
+        requestDate,
+        searchedPlate: displayPlate,
+        sourceCompany: "",
+        sourceMode: "admin",
+        detail: lastDetail || String(partnerError || "").trim()
+      };
+    }
+    return {
+      ok: false,
+      items: [],
+      requestUrl: endpointUrl,
+      requestDate,
+      searchedPlate: displayPlate,
+      error:
+        String(partnerError || "").trim() ||
+        "cluster3 için firma listesi bulunamadı. Önce Tüm Firmalar ekranını güncelleyin.",
+      detail: lastDetail
+    };
+  }
+
+  let foundResult = null;
+  let cursor = 0;
+  const workerCount = Math.max(
+    1,
+    Math.min(clusterCandidates.length, toBoundedInt(STATION_PASSENGER_INFO_COMPANY_CONCURRENCY, 4, 1, 12))
+  );
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (!foundResult) {
+      const candidate = clusterCandidates[cursor];
+      cursor += 1;
+      if (!candidate) return;
+
+      const loginResult = await resolveStationPassengerLoginResult({
+        endpointUrl,
+        companyUrl: String(candidate.url || endpointUrl).trim() || endpointUrl,
+        partnerCode: String(candidate.code || "").trim(),
+        partnerId: String(candidate.id || "").trim(),
+        username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+        password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+        fallbackBranchId: String(candidate.branchId || candidate.id || "").trim(),
+        allowEmptyPartnerCode: false,
+        authorization: STATION_PASSENGER_INFO_API_AUTH,
+        timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+      });
+
+      if (!(loginResult?.ok && String(loginResult.token || "").trim())) {
+        lastError = String(loginResult?.error || "").trim() || lastError;
+        lastDetail =
+          String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() || lastDetail;
+        continue;
+      }
+
+      const fetchResult = await fetchStationPassengerDailyJourneySummaries({
+        endpointUrl,
+        sessionId: loginResult.sessionId,
+        deviceId: loginResult.deviceId,
+        token: loginResult.token,
+        plateQuery: normalizedPlate,
+        companyCode: String(candidate.code || "").trim(),
+        cluster: clusterLabel,
+        authorization: STATION_PASSENGER_INFO_API_AUTH
+      });
+
+      if (!fetchResult.ok) {
+        lastError = String(fetchResult.error || "").trim() || lastError;
+        lastDetail = String(fetchResult.detail || "").trim() || lastDetail;
+        continue;
+      }
+
+      successfulFetchCount += 1;
+      if (fetchResult.items.length > 0 && !foundResult) {
+        foundResult = {
+          ...fetchResult,
+          ok: true,
+          searchedPlate: displayPlate,
+          sourceCompany: String(candidate.code || "").trim(),
+          sourceMode: "company"
+        };
+        return;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+
+  if (foundResult) {
+    return foundResult;
+  }
+
+  if (successfulFetchCount > 0) {
+    return {
+      ok: true,
+      items: [],
+      requestUrl: endpointUrl,
+      requestDate,
+      searchedPlate: displayPlate,
+      sourceCompany: "",
+      sourceMode: "company",
+      detail: lastDetail
+    };
+  }
+
+  return {
+    ok: false,
+    items: [],
+    requestUrl: endpointUrl,
+    requestDate,
+    searchedPlate: displayPlate,
+    error: lastError || "Plaka araması için uygun oturum açılamadı.",
+    detail: lastDetail
   };
 }
 
@@ -8859,6 +9695,27 @@ function formatDateToIsoLocal(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDateToIsoInTimeZone(date = new Date(), timeZone = APP_TIME_ZONE) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: String(timeZone || "").trim() || APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(date);
+    const year = String(parts.find((part) => part.type === "year")?.value || "").trim();
+    const month = String(parts.find((part) => part.type === "month")?.value || "").trim();
+    const day = String(parts.find((part) => part.type === "day")?.value || "").trim();
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+  } catch (err) {
+    // Ignore and fallback to local formatting.
+  }
+  return formatDateToIsoLocal(date);
 }
 
 function shiftIsoDateByDays(isoDate, dayDelta) {
@@ -14377,6 +15234,59 @@ app.get("/general/journey-search", requireAuth, requireMenuAccess("journey-searc
     partnerError,
     requestBodyTemplate: JSON.stringify(buildJourneySearchStationsRequestBody({ usePlaceholders: true }), null, 2)
   });
+});
+
+app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("station-passenger-info"), async (req, res) => {
+  try {
+    const plate = String(req.body?.plate || "").trim();
+    if (!plate) {
+      return res.status(400).json({ ok: false, error: "Plaka girilmesi zorunludur." });
+    }
+
+    const result = await searchStationPassengerJourneysByPlate(plate);
+    if (!result.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: String(result.error || "").trim() || "Plaka araması tamamlanamadı.",
+        details: String(result.detail || "").trim(),
+        requestUrl: result.requestUrl || "",
+        requestDate: result.requestDate || "",
+        searchedPlate: result.searchedPlate || plate
+      });
+    }
+
+    return res.json({
+      ok: true,
+      items: Array.isArray(result.items) ? result.items : [],
+      totalCount: Array.isArray(result.items) ? result.items.length : 0,
+      requestUrl: result.requestUrl || "",
+      requestDate: result.requestDate || "",
+      searchedPlate: result.searchedPlate || plate,
+      sourceCompany: result.sourceCompany || "",
+      sourceMode: result.sourceMode || "",
+      details: String(result.detail || "").trim()
+    });
+  } catch (err) {
+    console.error("Station passenger info search error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: `Plaka araması tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`,
+      details: buildObusServiceTraceText(
+        buildObusServiceTraceEntry({
+          service: "StationPassengerInfoApi",
+          url: "/api/station-passenger-info/search",
+          requestBody: req.body || {},
+          responseBody: "",
+          error: err?.message || "Bilinmeyen hata"
+        }),
+        err?.message || "Bilinmeyen hata",
+        {
+          bodyMaxLen: 120,
+          responseMaxLen: 180
+        }
+      )
+    });
+  }
 });
 
 app.get("/general/station-passenger-info", requireAuth, requireMenuAccess("station-passenger-info"), (req, res) => {

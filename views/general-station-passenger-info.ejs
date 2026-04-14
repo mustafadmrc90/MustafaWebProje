@@ -11,12 +11,7 @@
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
-      <div class="station-passenger-mobile-shell">
-        <div class="station-passenger-mobile-status">
-          <span class="station-passenger-mobile-badge">Mobil Ekran</span>
-          <span class="station-passenger-mobile-caption">Telefon boyutuna otomatik uyarlanır</span>
-        </div>
-
+      <div class="station-passenger-mobile-shell" data-station-passenger-page="1">
         <section class="station-passenger-mobile-screen">
           <header class="page-header">
             <div class="page-title">
@@ -33,7 +28,6 @@
                 </span>
                 <span>Durak Yolcu Bilgisi</span>
               </h1>
-              <p>Bu ekran mobil telefon boyutlarına göre çalışacak şekilde otomatik uyarlanır.</p>
             </div>
             <div class="page-actions">
               <div class="user-pill"><%= user.displayName %></div>
@@ -62,11 +56,16 @@
             </label>
           </section>
 
-          <section class="table-card panel-card">
-            <div class="empty-state">
-              <div class="empty-icon">DY</div>
-              <strong>Ekran hazır.</strong>
-              <p class="muted">İçerik geldikçe kartlar, boşluklar ve başlıklar telefon ekran genişliğine göre otomatik ayarlanacak.</p>
+          <section class="table-card panel-card station-passenger-results-card">
+            <div class="station-passenger-results-head">
+              <h2>Seferler</h2>
+              <span class="pill muted" data-station-passenger-results-count>0</span>
+            </div>
+            <div class="station-passenger-results-status muted" data-station-passenger-status>
+              Plakayı yazıp Sefere Git butonuna basın.
+            </div>
+            <div class="station-passenger-results-list" data-station-passenger-results-list>
+              <div class="station-passenger-results-empty">Henüz listelenecek sefer yok.</div>
             </div>
           </section>
         </section>
