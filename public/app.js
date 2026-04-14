@@ -1827,7 +1827,11 @@
     const statusEl = page.querySelector("[data-station-passenger-status]");
     const resultsListEl = page.querySelector("[data-station-passenger-results-list]");
     const resultsCountEl = page.querySelector("[data-station-passenger-results-count]");
-    if (!plateInput || !goButton || !statusEl || !resultsListEl || !resultsCountEl) return;
+    const debugListEl = page.querySelector("[data-station-passenger-debug-list]");
+    const debugCountEl = page.querySelector("[data-station-passenger-debug-count]");
+    if (!plateInput || !goButton || !statusEl || !resultsListEl || !resultsCountEl || !debugListEl || !debugCountEl) {
+      return;
+    }
 
     let requestSequence = 0;
     let selectedResultIndex = -1;
@@ -1857,6 +1861,12 @@
       const normalizedCount = Math.max(0, Number.parseInt(String(count || "0"), 10) || 0);
       resultsCountEl.textContent = String(normalizedCount);
       resultsCountEl.className = normalizedCount > 0 ? "pill" : "pill muted";
+    };
+
+    const setDebugCount = (count) => {
+      const normalizedCount = Math.max(0, Number.parseInt(String(count || "0"), 10) || 0);
+      debugCountEl.textContent = String(normalizedCount);
+      debugCountEl.className = normalizedCount > 0 ? "pill" : "pill muted";
     };
 
     const setSelectedResultIndex = (index) => {
@@ -1923,11 +1933,86 @@
       setSelectedResultIndex(-1);
     };
 
+    const renderDebugSteps = (steps, fallbackMessage = "Henüz debug kaydı yok.") => {
+      const normalizedSteps = Array.isArray(steps)
+        ? steps.filter((step) => step && (step.title || step.detail))
+        : [];
+
+      debugListEl.innerHTML = "";
+
+      if (normalizedSteps.length === 0) {
+        const emptyEl = document.createElement("div");
+        emptyEl.className = "station-passenger-results-empty";
+        emptyEl.textContent = String(fallbackMessage || "").trim() || "Henüz debug kaydı yok.";
+        debugListEl.appendChild(emptyEl);
+        setDebugCount(0);
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      normalizedSteps.forEach((step, index) => {
+        const itemEl = document.createElement("article");
+        itemEl.className = "station-passenger-debug-item";
+
+        const headEl = document.createElement("div");
+        headEl.className = "station-passenger-debug-head";
+
+        const orderEl = document.createElement("span");
+        orderEl.className = "station-passenger-debug-order";
+        orderEl.textContent = String(index + 1);
+
+        const titleEl = document.createElement("strong");
+        titleEl.className = "station-passenger-debug-title";
+        titleEl.textContent = String(step?.title || "").trim() || `Adım ${index + 1}`;
+
+        const badgeEl = document.createElement("span");
+        const normalizedStatus = String(step?.status || "info").trim().toLowerCase();
+        badgeEl.className = `station-passenger-debug-badge is-${normalizedStatus}`;
+        badgeEl.textContent =
+          normalizedStatus === "success"
+            ? "Basarili"
+            : normalizedStatus === "warning"
+              ? "Uyari"
+              : normalizedStatus === "error"
+                ? "Hata"
+                : "Bilgi";
+
+        headEl.appendChild(orderEl);
+        headEl.appendChild(titleEl);
+        headEl.appendChild(badgeEl);
+
+        itemEl.appendChild(headEl);
+
+        const detailText = String(step?.detail || "").trim();
+        if (detailText) {
+          const detailEl = document.createElement("p");
+          detailEl.className = "station-passenger-debug-detail";
+          detailEl.textContent = detailText;
+          itemEl.appendChild(detailEl);
+        }
+
+        fragment.appendChild(itemEl);
+      });
+
+      debugListEl.appendChild(fragment);
+      setDebugCount(normalizedSteps.length);
+    };
+
     const runSearch = async () => {
       const displayPlate = normalizePlateDisplay(plateInput.value);
       if (!displayPlate.replace(/\s+/g, "")) {
         setStatus("Plaka girilmesi zorunludur.", "error");
         renderEmptyResults("Arama yapmak için plaka girin.");
+        renderDebugSteps(
+          [
+            {
+              title: "Girdi Kontrolu",
+              status: "error",
+              detail: "Plaka girilmedigi icin istek gonderilmedi."
+            }
+          ],
+          ""
+        );
         return;
       }
 
@@ -1936,6 +2021,16 @@
       goButton.disabled = true;
       setStatus("Sefer aranıyor...", "muted");
       renderEmptyResults("Sefer aranıyor...");
+      renderDebugSteps(
+        [
+          {
+            title: "Istek Gonderildi",
+            status: "info",
+            detail: `Plaka: ${displayPlate}`
+          }
+        ],
+        ""
+      );
 
       try {
         const response = await fetch("/api/station-passenger-info/search", {
@@ -1950,6 +2045,7 @@
         });
         const data = await parseJsonResponse(response);
         if (currentRequest !== requestSequence) return;
+        renderDebugSteps(data?.debugSteps, "Sunucudan debug adimi gelmedi.");
 
         if (!response.ok || data?.ok === false) {
           const message = getApiErrorMessage(response, data, "Plaka araması başarısız");
@@ -1976,6 +2072,16 @@
         if (currentRequest !== requestSequence) return;
         setStatus(err?.message || "Plaka araması başarısız.", "error");
         renderEmptyResults("Arama sırasında hata oluştu.");
+        renderDebugSteps(
+          [
+            {
+              title: "Tarayici Istegi",
+              status: "error",
+              detail: String(err?.message || "Istek tarayici tarafinda kesildi.").trim()
+            }
+          ],
+          ""
+        );
       } finally {
         if (currentRequest === requestSequence) {
           goButton.disabled = false;

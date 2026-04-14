@@ -3912,6 +3912,29 @@ function buildStationPassengerRequestDateParts(date = new Date()) {
   };
 }
 
+function buildStationPassengerDebugStep({ title = "", status = "info", detail = "" } = {}) {
+  return {
+    title: String(title || "").trim() || "Adım",
+    status: String(status || "").trim() || "info",
+    detail: String(detail || "").trim()
+  };
+}
+
+function formatStationPassengerPlateSampleText(values, limit = 8) {
+  const list = Array.isArray(values) ? values : [];
+  const deduped = [];
+  list.forEach((value) => {
+    const displayValue = formatStationPassengerPlateDisplay(value) || String(value || "").trim();
+    if (!displayValue) return;
+    if (deduped.includes(displayValue)) return;
+    deduped.push(displayValue);
+  });
+  if (deduped.length === 0) return "-";
+  const limited = deduped.slice(0, Math.max(1, Number(limit) || 8));
+  const suffix = deduped.length > limited.length ? ` (+${deduped.length - limited.length})` : "";
+  return `${limited.join(", ")}${suffix}`;
+}
+
 function buildStationPassengerDailySummariesRequestBody({ sessionId = "", deviceId = "", token = "", dateValue = "" } = {}) {
   const normalizedDateValue = String(dateValue || "").trim();
   return {
@@ -4406,14 +4429,21 @@ async function fetchStationPassengerDailyJourneySummaries({
     token: normalizedToken,
     dateValue: requestDateParts.isoDate
   });
+  const requestBodyPreview = {
+    data: requestDateParts.isoDate,
+    date: requestDateParts.obusDate
+  };
 
   if (!normalizedEndpointUrl) {
     return {
       ok: false,
       items: [],
       allItemsCount: 0,
+      sampleRawPlates: [],
+      sampleActivePlates: [],
       requestUrl: "",
       requestDate: requestDateParts.isoDate,
+      requestBodyPreview,
       error: "GetDailyJourneySummaries URL oluşturulamadı.",
       detail: ""
     };
@@ -4424,8 +4454,11 @@ async function fetchStationPassengerDailyJourneySummaries({
       ok: false,
       items: [],
       allItemsCount: 0,
+      sampleRawPlates: [],
+      sampleActivePlates: [],
       requestUrl: normalizedEndpointUrl,
       requestDate: requestDateParts.isoDate,
+      requestBodyPreview,
       error: "GetDailyJourneySummaries için session/device/token eksik.",
       detail: ""
     };
@@ -4470,8 +4503,11 @@ async function fetchStationPassengerDailyJourneySummaries({
         ok: false,
         items: [],
         allItemsCount: 0,
+        sampleRawPlates: [],
+        sampleActivePlates: [],
         requestUrl: normalizedEndpointUrl,
         requestDate: requestDateParts.isoDate,
+        requestBodyPreview,
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
         detail: buildObusServiceTraceText(trace, reason, {
@@ -4490,8 +4526,11 @@ async function fetchStationPassengerDailyJourneySummaries({
           ok: false,
           items: [],
           allItemsCount: 0,
+          sampleRawPlates: [],
+          sampleActivePlates: [],
           requestUrl: normalizedEndpointUrl,
           requestDate: requestDateParts.isoDate,
+          requestBodyPreview,
           status: response.status,
           error: reason,
           detail: buildObusServiceTraceText(trace, reason, {
@@ -4502,10 +4541,12 @@ async function fetchStationPassengerDailyJourneySummaries({
       }
     }
 
+    const sampleRawPlates = collectStationPassengerPlateCandidates(parsed ?? raw);
     const allItems = extractStationPassengerJourneyItems(parsed ?? raw, {
       companyCode,
       cluster
     });
+    const sampleActivePlates = allItems.map((item) => item.plate).filter(Boolean);
     const items = normalizedPlateQuery
       ? allItems.filter((item) => item.normalizedPlate === normalizedPlateQuery)
       : allItems;
@@ -4514,8 +4555,11 @@ async function fetchStationPassengerDailyJourneySummaries({
       ok: true,
       items,
       allItemsCount: allItems.length,
+      sampleRawPlates,
+      sampleActivePlates,
       requestUrl: normalizedEndpointUrl,
       requestDate: requestDateParts.isoDate,
+      requestBodyPreview,
       status: response.status,
       error: "",
       detail: allItems.length
@@ -4537,8 +4581,11 @@ async function fetchStationPassengerDailyJourneySummaries({
       ok: false,
       items: [],
       allItemsCount: 0,
+      sampleRawPlates: [],
+      sampleActivePlates: [],
       requestUrl: normalizedEndpointUrl,
       requestDate: requestDateParts.isoDate,
+      requestBodyPreview,
       error: err?.message || "GetDailyJourneySummaries isteği başarısız.",
       detail: buildObusServiceTraceText(trace, err?.message || "GetDailyJourneySummaries isteği başarısız.", {
         bodyMaxLen: 140,
@@ -4555,7 +4602,15 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
   const displayPlate = formatStationPassengerPlateDisplay(plateQuery) || String(plateQuery || "").trim();
   const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
   const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
-  const requestDate = buildStationPassengerRequestDateParts(new Date()).isoDate;
+  const requestDateParts = buildStationPassengerRequestDateParts(new Date());
+  const requestDate = requestDateParts.isoDate;
+  const debugSteps = [
+    buildStationPassengerDebugStep({
+      title: "İstek Hazırlandı",
+      status: "info",
+      detail: `URL: ${endpointUrl || "-"} | data: ${requestDateParts.isoDate || "-"} | date: ${requestDateParts.obusDate || "-"} | plaka: ${displayPlate || "-"} | normalize: ${normalizedPlate || "-"}`
+    })
+  ];
 
   if (!normalizedPlate) {
     return {
@@ -4564,7 +4619,8 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       requestUrl: endpointUrl,
       requestDate,
       error: "Plaka girilmesi zorunludur.",
-      detail: ""
+      detail: "",
+      debugSteps
     };
   }
 
@@ -4575,7 +4631,8 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       requestUrl: endpointUrl,
       requestDate,
       error: "INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD zorunludur.",
-      detail: ""
+      detail: "",
+      debugSteps
     };
   }
 
@@ -4597,6 +4654,13 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
   });
 
   if (adminLoginResult?.ok && String(adminLoginResult.token || "").trim()) {
+    debugSteps.push(
+      buildStationPassengerDebugStep({
+        title: "Admin UserLogin",
+        status: "success",
+        detail: `GetSession ve UserLogin başarılı. loginUrl: ${String(adminLoginResult.loginUrl || "").trim() || "-"}`
+      })
+    );
     const adminFetchResult = await fetchStationPassengerDailyJourneySummaries({
       endpointUrl,
       sessionId: adminLoginResult.sessionId,
@@ -4608,32 +4672,71 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     });
     if (adminFetchResult.ok) {
       successfulFetchCount += 1;
+      debugSteps.push(
+        buildStationPassengerDebugStep({
+          title: "Admin Günlük Sefer Özeti",
+          status: adminFetchResult.items.length > 0 ? "success" : "warning",
+          detail:
+            `Aktif satır: ${Number(adminFetchResult.allItemsCount || 0)} | Eşleşen: ${Array.isArray(adminFetchResult.items) ? adminFetchResult.items.length : 0} | Ham plakalar: ${formatStationPassengerPlateSampleText(adminFetchResult.sampleRawPlates)} | Aktif plakalar: ${formatStationPassengerPlateSampleText(adminFetchResult.sampleActivePlates)}`
+        })
+      );
       if (adminFetchResult.items.length > 0) {
         return {
           ...adminFetchResult,
           ok: true,
           searchedPlate: displayPlate,
           sourceCompany: "",
-          sourceMode: "admin"
+          sourceMode: "admin",
+          debugSteps
         };
       }
     } else {
       lastError = adminFetchResult.error || lastError;
       lastDetail = adminFetchResult.detail || lastDetail;
+      debugSteps.push(
+        buildStationPassengerDebugStep({
+          title: "Admin Günlük Sefer Özeti",
+          status: "error",
+          detail: String(adminFetchResult.error || adminFetchResult.detail || "İstek başarısız.").trim()
+        })
+      );
     }
   } else {
     lastError = String(adminLoginResult?.error || "").trim() || lastError;
     lastDetail =
       String(adminLoginResult?.errorDetail || adminLoginResult?.tokenMissingDetail || "").trim() || lastDetail;
+    debugSteps.push(
+      buildStationPassengerDebugStep({
+        title: "Admin UserLogin",
+        status: "error",
+        detail: lastDetail || lastError || "UserLogin başarısız."
+      })
+    );
   }
 
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
   const clusterCandidates = shuffleArray(buildClusterCompanyCandidates(partnerItems).get(clusterLabel) || []).filter(
     (item) => String(item?.code || "").trim()
   );
+  debugSteps.push(
+    buildStationPassengerDebugStep({
+      title: "Cluster3 Firma Havuzu",
+      status: clusterCandidates.length > 0 ? "info" : "error",
+      detail: clusterCandidates.length > 0
+        ? `Aday firma sayısı: ${clusterCandidates.length}`
+        : String(partnerError || "").trim() || "Cluster3 için aday firma bulunamadı."
+    })
+  );
 
   if (clusterCandidates.length === 0) {
     if (successfulFetchCount > 0) {
+      debugSteps.push(
+        buildStationPassengerDebugStep({
+          title: "Sonuç",
+          status: "warning",
+          detail: `${displayPlate} için eşleşme bulunamadı. Admin isteği başarılıydı ancak kayıt dönmedi.`
+        })
+      );
       return {
         ok: true,
         items: [],
@@ -4642,7 +4745,8 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
         searchedPlate: displayPlate,
         sourceCompany: "",
         sourceMode: "admin",
-        detail: lastDetail || String(partnerError || "").trim()
+        detail: lastDetail || String(partnerError || "").trim(),
+        debugSteps
       };
     }
     return {
@@ -4654,81 +4758,94 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       error:
         String(partnerError || "").trim() ||
         "cluster3 için firma listesi bulunamadı. Önce Tüm Firmalar ekranını güncelleyin.",
-      detail: lastDetail
+      detail: lastDetail,
+      debugSteps
     };
   }
 
-  let foundResult = null;
-  let cursor = 0;
-  const workerCount = Math.max(
-    1,
-    Math.min(clusterCandidates.length, toBoundedInt(STATION_PASSENGER_INFO_COMPANY_CONCURRENCY, 4, 1, 12))
-  );
+  for (const [index, candidate] of clusterCandidates.entries()) {
+    const candidateLabel = `${String(candidate.code || "").trim() || "firma?"}${candidate.id ? ` / ${candidate.id}` : ""}`;
+    const loginResult = await resolveStationPassengerLoginResult({
+      endpointUrl,
+      companyUrl: String(candidate.url || endpointUrl).trim() || endpointUrl,
+      partnerCode: String(candidate.code || "").trim(),
+      partnerId: String(candidate.id || "").trim(),
+      username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+      password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+      fallbackBranchId: String(candidate.branchId || candidate.id || "").trim(),
+      allowEmptyPartnerCode: false,
+      authorization: STATION_PASSENGER_INFO_API_AUTH,
+      timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+    });
 
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (!foundResult) {
-      const candidate = clusterCandidates[cursor];
-      cursor += 1;
-      if (!candidate) return;
-
-      const loginResult = await resolveStationPassengerLoginResult({
-        endpointUrl,
-        companyUrl: String(candidate.url || endpointUrl).trim() || endpointUrl,
-        partnerCode: String(candidate.code || "").trim(),
-        partnerId: String(candidate.id || "").trim(),
-        username: INVENTORY_BRANCHES_LOGIN_USERNAME,
-        password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
-        fallbackBranchId: String(candidate.branchId || candidate.id || "").trim(),
-        allowEmptyPartnerCode: false,
-        authorization: STATION_PASSENGER_INFO_API_AUTH,
-        timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
-      });
-
-      if (!(loginResult?.ok && String(loginResult.token || "").trim())) {
-        lastError = String(loginResult?.error || "").trim() || lastError;
-        lastDetail =
-          String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() || lastDetail;
-        continue;
-      }
-
-      const fetchResult = await fetchStationPassengerDailyJourneySummaries({
-        endpointUrl,
-        sessionId: loginResult.sessionId,
-        deviceId: loginResult.deviceId,
-        token: loginResult.token,
-        plateQuery: normalizedPlate,
-        companyCode: String(candidate.code || "").trim(),
-        cluster: clusterLabel,
-        authorization: STATION_PASSENGER_INFO_API_AUTH
-      });
-
-      if (!fetchResult.ok) {
-        lastError = String(fetchResult.error || "").trim() || lastError;
-        lastDetail = String(fetchResult.detail || "").trim() || lastDetail;
-        continue;
-      }
-
-      successfulFetchCount += 1;
-      if (fetchResult.items.length > 0 && !foundResult) {
-        foundResult = {
-          ...fetchResult,
-          ok: true,
-          searchedPlate: displayPlate,
-          sourceCompany: String(candidate.code || "").trim(),
-          sourceMode: "company"
-        };
-        return;
-      }
+    if (!(loginResult?.ok && String(loginResult.token || "").trim())) {
+      lastError = String(loginResult?.error || "").trim() || lastError;
+      lastDetail =
+        String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() || lastDetail;
+      debugSteps.push(
+        buildStationPassengerDebugStep({
+          title: `Firma ${index + 1}: ${candidateLabel}`,
+          status: "error",
+          detail: lastDetail || lastError || "UserLogin başarısız."
+        })
+      );
+      continue;
     }
-  });
 
-  await Promise.all(workers);
+    const fetchResult = await fetchStationPassengerDailyJourneySummaries({
+      endpointUrl,
+      sessionId: loginResult.sessionId,
+      deviceId: loginResult.deviceId,
+      token: loginResult.token,
+      plateQuery: normalizedPlate,
+      companyCode: String(candidate.code || "").trim(),
+      cluster: clusterLabel,
+      authorization: STATION_PASSENGER_INFO_API_AUTH
+    });
 
-  if (foundResult) {
-    return foundResult;
+    if (!fetchResult.ok) {
+      lastError = String(fetchResult.error || "").trim() || lastError;
+      lastDetail = String(fetchResult.detail || "").trim() || lastDetail;
+      debugSteps.push(
+        buildStationPassengerDebugStep({
+          title: `Firma ${index + 1}: ${candidateLabel}`,
+          status: "error",
+          detail: String(fetchResult.error || fetchResult.detail || "GetDailyJourneySummaries başarısız.").trim()
+        })
+      );
+      continue;
+    }
+
+    successfulFetchCount += 1;
+    debugSteps.push(
+      buildStationPassengerDebugStep({
+        title: `Firma ${index + 1}: ${candidateLabel}`,
+        status: fetchResult.items.length > 0 ? "success" : "warning",
+        detail:
+          `Body data: ${fetchResult.requestBodyPreview?.data || "-"} | Body date: ${fetchResult.requestBodyPreview?.date || "-"} | Aktif satır: ${Number(fetchResult.allItemsCount || 0)} | Eşleşen: ${Array.isArray(fetchResult.items) ? fetchResult.items.length : 0} | Ham plakalar: ${formatStationPassengerPlateSampleText(fetchResult.sampleRawPlates)} | Aktif plakalar: ${formatStationPassengerPlateSampleText(fetchResult.sampleActivePlates)}`
+      })
+    );
+
+    if (fetchResult.items.length > 0) {
+      return {
+        ...fetchResult,
+        ok: true,
+        searchedPlate: displayPlate,
+        sourceCompany: String(candidate.code || "").trim(),
+        sourceMode: "company",
+        debugSteps
+      };
+    }
   }
 
   if (successfulFetchCount > 0) {
+    debugSteps.push(
+      buildStationPassengerDebugStep({
+        title: "Sonuç",
+        status: "warning",
+        detail: `${displayPlate} için eşleşme bulunamadı. Plaka örneklerini debug panelinden kontrol edin.`
+      })
+    );
     return {
       ok: true,
       items: [],
@@ -4737,10 +4854,18 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       searchedPlate: displayPlate,
       sourceCompany: "",
       sourceMode: "company",
-      detail: lastDetail
+      detail: lastDetail,
+      debugSteps
     };
   }
 
+  debugSteps.push(
+    buildStationPassengerDebugStep({
+      title: "Sonuç",
+      status: "error",
+      detail: lastDetail || lastError || "Plaka araması için uygun oturum açılamadı."
+    })
+  );
   return {
     ok: false,
     items: [],
@@ -4748,7 +4873,8 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     requestDate,
     searchedPlate: displayPlate,
     error: lastError || "Plaka araması için uygun oturum açılamadı.",
-    detail: lastDetail
+    detail: lastDetail,
+    debugSteps
   };
 }
 
@@ -15292,7 +15418,8 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
         details: String(result.detail || "").trim(),
         requestUrl: result.requestUrl || "",
         requestDate: result.requestDate || "",
-        searchedPlate: result.searchedPlate || plate
+        searchedPlate: result.searchedPlate || plate,
+        debugSteps: Array.isArray(result.debugSteps) ? result.debugSteps : []
       });
     }
 
@@ -15305,7 +15432,8 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
       searchedPlate: result.searchedPlate || plate,
       sourceCompany: result.sourceCompany || "",
       sourceMode: result.sourceMode || "",
-      details: String(result.detail || "").trim()
+      details: String(result.detail || "").trim(),
+      debugSteps: Array.isArray(result.debugSteps) ? result.debugSteps : []
     });
   } catch (err) {
     console.error("Station passenger info search error:", err);
@@ -15325,7 +15453,8 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
           bodyMaxLen: 120,
           responseMaxLen: 180
         }
-      )
+      ),
+      debugSteps: []
     });
   }
 });
