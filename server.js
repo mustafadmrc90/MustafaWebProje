@@ -3942,6 +3942,54 @@ function readStationPassengerTextByAliases(node, aliases = [], maxDepth = 3) {
   return extractStationPassengerTextValue(getDeepValueByNormalizedKey(node, aliases, maxDepth));
 }
 
+function collectStationPassengerTextValuesByMatcher(node, matcher, maxDepth = 3, collected = [], visited = new Set()) {
+  if (maxDepth < 0 || node === null || node === undefined) return collected;
+  if (typeof node === "string") {
+    const normalizedText = extractStationPassengerTextValue(node);
+    if (normalizedText) collected.push(normalizedText);
+    return collected;
+  }
+  if (typeof node !== "object") return collected;
+  if (visited.has(node)) return collected;
+  visited.add(node);
+
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectStationPassengerTextValuesByMatcher(item, matcher, maxDepth - 1, collected, visited));
+    return collected;
+  }
+
+  Object.entries(node).forEach(([key, value]) => {
+    const normalizedKey = normalizeTokenName(key);
+    if (matcher(normalizedKey, key, value)) {
+      const textValue = extractStationPassengerTextValue(value);
+      if (textValue) collected.push(textValue);
+    }
+    collectStationPassengerTextValuesByMatcher(value, matcher, maxDepth - 1, collected, visited);
+  });
+
+  return collected;
+}
+
+function collectStationPassengerPlateCandidates(node) {
+  const values = collectStationPassengerTextValuesByMatcher(
+    node,
+    (normalizedKey) =>
+      normalizedKey.includes("plate") ||
+      normalizedKey.includes("plaka") ||
+      normalizedKey.includes("plateno") ||
+      normalizedKey.includes("plakano"),
+    4
+  );
+  const deduped = [];
+  values.forEach((value) => {
+    const normalized = normalizeStationPassengerPlate(value);
+    if (!normalized) return;
+    if (deduped.some((item) => normalizeStationPassengerPlate(item) === normalized)) return;
+    deduped.push(String(value || "").trim());
+  });
+  return deduped;
+}
+
 function formatStationPassengerDepartureTime(value) {
   const text = extractStationPassengerTextValue(value);
   if (!text) return "";
@@ -4183,49 +4231,36 @@ function extractStationPassengerJourneyItems(payload, { companyCode = "", cluste
     if (directStatus === false) return;
     if (!statusScopeActive && directStatus !== true) return;
 
-    const plateText = readStationPassengerTextByAliases(
-      node,
-      [
-        "plate",
-        "plaka",
-        "vehicle-plate",
-        "vehicle_plate",
-        "vehicleplate",
-        "license-plate",
-        "license_plate",
-        "plate-number",
-        "plate_number",
-        "platenumber"
-      ],
-      3
-    );
-    const normalizedPlate = normalizeStationPassengerPlate(plateText);
-    if (!normalizedPlate) return;
-
     const departureTime = extractStationPassengerDepartureTime(node) || "-";
     const routeInfo = extractStationPassengerRouteInfo(node) || "-";
     const journeyId = extractStationPassengerJourneyId(node);
-    const key = [
-      normalizedPlate,
-      String(journeyId || "").trim(),
-      String(departureTime || "").trim(),
-      String(routeInfo || "").trim()
-    ]
-      .join("|||")
-      .toLocaleLowerCase("tr");
+    const plateCandidates = collectStationPassengerPlateCandidates(node);
+    plateCandidates.forEach((plateText) => {
+      const normalizedPlate = normalizeStationPassengerPlate(plateText);
+      if (!normalizedPlate) return;
 
-    if (seen.has(key)) return;
-    seen.add(key);
+      const key = [
+        normalizedPlate,
+        String(journeyId || "").trim(),
+        String(departureTime || "").trim(),
+        String(routeInfo || "").trim()
+      ]
+        .join("|||")
+        .toLocaleLowerCase("tr");
 
-    collected.push({
-      id: String(journeyId || "").trim(),
-      plate: formatStationPassengerPlateDisplay(plateText) || String(plateText || "").trim() || normalizedPlate,
-      normalizedPlate,
-      departureTime,
-      routeInfo,
-      companyCode: String(companyCode || "").trim(),
-      cluster: extractClusterLabel(cluster),
-      raw: node
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      collected.push({
+        id: String(journeyId || "").trim(),
+        plate: formatStationPassengerPlateDisplay(plateText) || String(plateText || "").trim() || normalizedPlate,
+        normalizedPlate,
+        departureTime,
+        routeInfo,
+        companyCode: String(companyCode || "").trim(),
+        cluster: extractClusterLabel(cluster),
+        raw: node
+      });
     });
   };
 
