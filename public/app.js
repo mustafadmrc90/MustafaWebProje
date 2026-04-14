@@ -1905,7 +1905,7 @@
 
         const routeLabelEl = document.createElement("span");
         routeLabelEl.className = "station-passenger-result-route-label";
-        routeLabelEl.textContent = "Route Info";
+        routeLabelEl.textContent = "Sefer Bilgisi";
 
         const routeValueEl = document.createElement("span");
         routeValueEl.className = "station-passenger-result-route-value";

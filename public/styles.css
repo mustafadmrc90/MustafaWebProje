@@ -4412,9 +4412,9 @@ button.ghost {
   background: #fff;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   text-align: left;
   cursor: pointer;
   box-shadow: 0 10px 24px rgba(20, 33, 56, 0.06);
@@ -4432,36 +4432,43 @@ button.ghost {
 }
 
 .station-passenger-result-time {
-  min-width: 72px;
-  padding: 10px 12px;
-  border-radius: 14px;
+  min-width: 58px;
+  padding: 7px 8px;
+  border-radius: 12px;
   background: #0f6bdc;
   color: #fff;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-align: center;
+  white-space: nowrap;
 }
 
 .station-passenger-result-route {
   min-width: 0;
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .station-passenger-result-route-label {
-  font-size: 11px;
+  flex: 0 0 auto;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: #6f8195;
 }
 
 .station-passenger-result-route-value {
-  font-size: 14px;
-  line-height: 1.45;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.2;
   color: #1f2735;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .obus-user-create-bulk-page .obus-user-create-grid {
@@ -5374,10 +5381,13 @@ button.ghost {
   }
 
   .station-passenger-result-button {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px;
   }
 
   .station-passenger-result-time {
-    min-width: 0;
+    min-width: 52px;
+    padding: 6px 7px;
+    font-size: 11px;
   }
 }
