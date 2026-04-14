@@ -4413,7 +4413,7 @@ button.ghost {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
-  align-items: center;
+  align-items: start;
   padding: 10px 12px;
   text-align: left;
   cursor: pointer;
@@ -4442,19 +4442,17 @@ button.ghost {
   letter-spacing: 0.02em;
   text-align: center;
   white-space: nowrap;
+  align-self: center;
 }
 
 .station-passenger-result-route {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  gap: 2px;
   overflow: hidden;
-  white-space: nowrap;
 }
 
 .station-passenger-result-route-label {
-  flex: 0 0 auto;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;

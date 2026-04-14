@@ -1967,11 +1967,7 @@
           return;
         }
 
-        const sourceCompany = String(data?.sourceCompany || "").trim();
-        setStatus(
-          sourceCompany ? `${items.length} sefer bulundu. Kaynak firma: ${sourceCompany}.` : `${items.length} sefer bulundu.`,
-          "success"
-        );
+        setStatus(`${items.length} sefer bulundu.`, "success");
       } catch (err) {
         if (currentRequest !== requestSequence) return;
         setStatus(err?.message || "Plaka araması başarısız.", "error");
