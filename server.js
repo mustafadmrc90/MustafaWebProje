@@ -4179,10 +4179,9 @@ function extractStationPassengerJourneyItems(payload, { companyCode = "", cluste
   const seen = new Set();
   const visited = new Set();
 
-  const pushCandidate = (node) => {
-    const statusValue =
-      readPartnerRawValueByAliases(node, ["status"]) || getDeepValueByNormalizedKey(node, ["status"], 2);
-    if (parseStationPassengerStatusValue(statusValue) !== true) return;
+  const pushCandidate = (node, { statusScopeActive = false, directStatus = null } = {}) => {
+    if (directStatus === false) return;
+    if (!statusScopeActive && directStatus !== true) return;
 
     const plateText = readStationPassengerTextByAliases(
       node,
@@ -4230,14 +4229,14 @@ function extractStationPassengerJourneyItems(payload, { companyCode = "", cluste
     });
   };
 
-  const walk = (node, depth = 0) => {
+  const walk = (node, depth = 0, statusScopeActive = false) => {
     if (depth > 7 || node === null || node === undefined) return;
     if (typeof node === "string") {
       const trimmed = node.trim();
       if (!trimmed) return;
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         const parsed = parseJsonSafe(trimmed);
-        if (parsed !== null) walk(parsed, depth + 1);
+        if (parsed !== null) walk(parsed, depth + 1, statusScopeActive);
       }
       return;
     }
@@ -4245,13 +4244,20 @@ function extractStationPassengerJourneyItems(payload, { companyCode = "", cluste
     if (visited.has(node)) return;
     visited.add(node);
 
+    const directStatus = parseStationPassengerStatusValue(readPartnerRawValueByAliases(node, ["status"]));
+    const nextStatusScopeActive =
+      directStatus === true ? true : directStatus === false ? false : statusScopeActive;
+
     if (Array.isArray(node)) {
-      node.forEach((item) => walk(item, depth + 1));
+      node.forEach((item) => walk(item, depth + 1, nextStatusScopeActive));
       return;
     }
 
-    pushCandidate(node);
-    Object.values(node).forEach((value) => walk(value, depth + 1));
+    pushCandidate(node, {
+      statusScopeActive: nextStatusScopeActive,
+      directStatus
+    });
+    Object.values(node).forEach((value) => walk(value, depth + 1, nextStatusScopeActive));
   };
 
   walk(payload);
