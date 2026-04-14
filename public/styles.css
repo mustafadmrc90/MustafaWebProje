@@ -4392,93 +4392,6 @@ button.ghost {
   gap: 10px;
 }
 
-.station-passenger-debug-card {
-  display: grid;
-  gap: 12px;
-}
-
-.station-passenger-debug-list {
-  display: grid;
-  gap: 10px;
-}
-
-.station-passenger-debug-item {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid #d6e0ee;
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(246, 249, 255, 1) 100%);
-  box-shadow: 0 10px 24px rgba(20, 33, 56, 0.06);
-}
-
-.station-passenger-debug-head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.station-passenger-debug-order {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  background: #0f6bdc;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.station-passenger-debug-title {
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: #1f2735;
-}
-
-.station-passenger-debug-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.station-passenger-debug-badge.is-info {
-  background: rgba(15, 107, 220, 0.12);
-  color: #0f5ec0;
-}
-
-.station-passenger-debug-badge.is-success {
-  background: rgba(33, 150, 83, 0.14);
-  color: #187245;
-}
-
-.station-passenger-debug-badge.is-warning {
-  background: rgba(217, 119, 6, 0.15);
-  color: #9a5a00;
-}
-
-.station-passenger-debug-badge.is-error {
-  background: rgba(198, 40, 40, 0.14);
-  color: #a32222;
-}
-
-.station-passenger-debug-detail {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #5f7184;
-  word-break: break-word;
-}
-
 .station-passenger-results-empty {
   min-height: 140px;
   border: 1px dashed #d3ddea;
@@ -5466,14 +5379,5 @@ button.ghost {
 
   .station-passenger-result-time {
     min-width: 0;
-  }
-
-  .station-passenger-debug-head {
-    grid-template-columns: auto 1fr;
-  }
-
-  .station-passenger-debug-badge {
-    grid-column: 1 / -1;
-    justify-self: flex-start;
   }
 }
