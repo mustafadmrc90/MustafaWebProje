@@ -185,6 +185,14 @@ const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
     process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
       "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations"
   ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations";
+const STATION_PASSENGER_INFO_WEB_STATIONS_API_URL =
+  String(
+    process.env.STATION_PASSENGER_INFO_WEB_STATIONS_API_URL ||
+      "https://api-coreprod-cluster3.obus.com.tr/api/web/getstations"
+  ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/web/getstations";
+const STATION_PASSENGER_INFO_WEB_STATIONS_API_AUTH =
+  String(process.env.STATION_PASSENGER_INFO_WEB_STATIONS_API_AUTH || JOURNEY_SEARCH_API_AUTH).trim() ||
+  JOURNEY_SEARCH_API_AUTH;
 const STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL =
   String(
     process.env.STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL ||
@@ -194,6 +202,8 @@ const STATION_PASSENGER_INFO_TIME_ZONE =
   String(process.env.STATION_PASSENGER_INFO_TIME_ZONE || "Europe/Istanbul").trim() || "Europe/Istanbul";
 const STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS || "900000", 10) || 900000;
+const STATION_PASSENGER_INFO_WEB_STATIONS_CACHE_TTL_MS =
+  Number.parseInt(process.env.STATION_PASSENGER_INFO_WEB_STATIONS_CACHE_TTL_MS || "3600000", 10) || 3600000;
 const STATION_PASSENGER_INFO_TARGET_COMPANY_CODE =
   String(process.env.STATION_PASSENGER_INFO_TARGET_COMPANY_CODE || "envergecgel").trim() || "envergecgel";
 const STATION_PASSENGER_INFO_TARGET_COMPANY_ID =
@@ -491,6 +501,7 @@ const slackUserLookupCache = {
 const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
 const jiraEpicMetaCache = new Map();
+const stationPassengerWebStationsCache = new Map();
 const obusJobsAutoState = {
   timerId: null,
   isRunning: false
@@ -4008,6 +4019,33 @@ function buildStationPassengerJourneyStationsRequestBody({
   };
 }
 
+function formatDateTimeToOffsetPrecisionInTimeZone(
+  date = new Date(),
+  timeZone = STATION_PASSENGER_INFO_TIME_ZONE,
+  offset = "+03:00"
+) {
+  const base = formatDateTimeToSecondPrecisionInTimeZone(date, timeZone);
+  if (!base) return JOURNEY_SEARCH_REQUEST_DATE;
+  return `${base.replace(" ", "T")}.0000000${String(offset || "+03:00").trim() || "+03:00"}`;
+}
+
+function buildStationPassengerWebStationsRequestBody({
+  sessionId = "",
+  deviceId = "",
+  dateValue = ""
+} = {}) {
+  return {
+    data: null,
+    token: null,
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    date: String(dateValue || "").trim() || JOURNEY_SEARCH_REQUEST_DATE,
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE
+  };
+}
+
 function buildStationPassengerPassengerStateHistoryRequestBody({
   journeyId = "",
   sessionId = "",
@@ -4483,6 +4521,50 @@ function extractStationPassengerJourneyStationName(node) {
   );
 }
 
+function getStationPassengerJourneyStationRootPayload(payload) {
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (!trimmed) return null;
+    if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+      return parseJsonSafe(trimmed);
+    }
+    return null;
+  }
+
+  if (!payload || typeof payload !== "object") return null;
+  if (!Array.isArray(payload) && Object.prototype.hasOwnProperty.call(payload, "data")) {
+    return payload.data;
+  }
+  return payload;
+}
+
+function collectStationPassengerJourneyStationBlocks(payload) {
+  const rootPayload = getStationPassengerJourneyStationRootPayload(payload);
+  if (!rootPayload) return [];
+
+  if (Array.isArray(rootPayload)) {
+    return rootPayload.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  }
+
+  if (typeof rootPayload !== "object") return [];
+
+  const directBlocks = Object.entries(rootPayload)
+    .filter(([key, value]) => {
+      const normalizedKey = normalizeTokenName(key);
+      return normalizedKey.startsWith("id") && value && typeof value === "object" && !Array.isArray(value);
+    })
+    .map(([, value]) => value);
+
+  if (directBlocks.length > 0) return directBlocks;
+
+  const nestedData = getDeepValueByNormalizedKey(rootPayload, ["data"], 2);
+  if (nestedData && nestedData !== rootPayload) {
+    return collectStationPassengerJourneyStationBlocks(nestedData);
+  }
+
+  return [];
+}
+
 function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}) {
   const collected = [];
   const seen = new Map();
@@ -4546,6 +4628,21 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
     seen.set(key, collected.length);
     collected.push(candidate);
   };
+
+  const directBlocks = collectStationPassengerJourneyStationBlocks(payload);
+  if (directBlocks.length > 0) {
+    directBlocks.forEach((block) => {
+      pushCandidate(block);
+    });
+    return collected.sort((a, b) => {
+      const orderA = Number.isFinite(a.order) ? a.order : Number.MAX_SAFE_INTEGER;
+      const orderB = Number.isFinite(b.order) ? b.order : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      const byStationId = String(a.stationId || "").localeCompare(String(b.stationId || ""), "tr");
+      if (byStationId !== 0) return byStationId;
+      return String(a.departureTime || "").localeCompare(String(b.departureTime || ""), "tr");
+    });
+  }
 
   const walk = (node, depth = 0) => {
     if (depth > 7 || node === null || node === undefined) return;
@@ -4918,14 +5015,33 @@ function findStationPassengerNextStationAfterRequest(items, requestDate) {
   const requestKey = buildStationPassengerComparableDateTimeKey(requestDate);
   if (!requestKey) return null;
 
-  return (
-    normalizedItems.find((item) => {
-      const departureKey = buildStationPassengerComparableDateTimeKey(
-        item?.departureTime || item?.["departure-time"]
-      );
-      return Boolean(departureKey && departureKey > requestKey);
-    }) || null
-  );
+  return normalizedItems.reduce((bestItem, item) => {
+    const departureKey = buildStationPassengerComparableDateTimeKey(
+      item?.departureTime || item?.["departure-time"]
+    );
+    if (!departureKey || departureKey <= requestKey) {
+      return bestItem;
+    }
+
+    if (!bestItem) return item;
+
+    const bestDepartureKey = buildStationPassengerComparableDateTimeKey(
+      bestItem?.departureTime || bestItem?.["departure-time"]
+    );
+    if (!bestDepartureKey || departureKey < bestDepartureKey) {
+      return item;
+    }
+
+    if (departureKey === bestDepartureKey) {
+      const bestOrder = Number.isFinite(bestItem?.order) ? Number(bestItem.order) : Number.MAX_SAFE_INTEGER;
+      const currentOrder = Number.isFinite(item?.order) ? Number(item.order) : Number.MAX_SAFE_INTEGER;
+      if (currentOrder < bestOrder) {
+        return item;
+      }
+    }
+
+    return bestItem;
+  }, null);
 }
 
 function getStationPassengerSortMinutes(value) {
@@ -5473,6 +5589,184 @@ async function fetchStationPassengerJourneyStations({
       requestDate,
       nextStation: null,
       status: null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function findStationPassengerStationCatalogItem(items, stationId = "") {
+  const normalizedStationId = String(stationId || "").trim();
+  if (!normalizedStationId) return null;
+  const normalizedItems = Array.isArray(items) ? items : [];
+  return (
+    normalizedItems.find((item) => {
+      const candidateId = String(item?.id || item?.value || "").trim();
+      return candidateId === normalizedStationId;
+    }) || null
+  );
+}
+
+async function fetchStationPassengerWebStations({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  authorization = STATION_PASSENGER_INFO_WEB_STATIONS_API_AUTH,
+  partnerCode = STATION_PASSENGER_INFO_TARGET_COMPANY_CODE
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedPartnerCode = String(partnerCode || "").trim() || STATION_PASSENGER_INFO_TARGET_COMPANY_CODE;
+  const cacheKey = normalizedPartnerCode.toLocaleLowerCase("tr");
+  const cached = stationPassengerWebStationsCache.get(cacheKey);
+  if (
+    cached &&
+    cached.expiresAt > Date.now() &&
+    Array.isArray(cached.items) &&
+    cached.items.length > 0
+  ) {
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      items: cached.items,
+      fromCache: true,
+      error: "",
+      detail: ""
+    };
+  }
+
+  const requestDate = formatDateTimeToOffsetPrecisionInTimeZone(new Date(), STATION_PASSENGER_INFO_TIME_ZONE, "+03:00");
+  const requestBody = buildStationPassengerWebStationsRequestBody({
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    dateValue: requestDate
+  });
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      requestUrl: "",
+      items: [],
+      fromCache: false,
+      error: "GetStations URL oluşturulamadı.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      items: [],
+      fromCache: false,
+      error: "GetStations için session/device eksik.",
+      detail: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization,
+        PartnerCode: normalizedPartnerCode
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Web GetStations",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        requestUrl: normalizedEndpointUrl,
+        items: [],
+        fromCache: false,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 140,
+          responseMaxLen: 220
+        })
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          requestUrl: normalizedEndpointUrl,
+          items: [],
+          fromCache: false,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 140,
+            responseMaxLen: 220
+          })
+        };
+      }
+    }
+
+    const items = extractJourneySearchStations(parsed ?? raw);
+    if (items.length > 0) {
+      stationPassengerWebStationsCache.set(cacheKey, {
+        items,
+        expiresAt: Date.now() + Math.max(60000, STATION_PASSENGER_INFO_WEB_STATIONS_CACHE_TTL_MS)
+      });
+    }
+
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      items,
+      fromCache: false,
+      error: "",
+      detail: ""
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Web GetStations",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "GetStations isteği başarısız."
+    });
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      items: [],
+      fromCache: false,
+      error: err?.message || "GetStations isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "GetStations isteği başarısız.", {
+        bodyMaxLen: 140,
+        responseMaxLen: 180
+      })
     };
   } finally {
     clearTimeout(timeout);
@@ -16506,6 +16800,29 @@ app.post(
         });
       }
 
+      let nextStation = fetchResult.nextStation || null;
+      const nextStationId = String(nextStation?.stationId || nextStation?.["station-id"] || "").trim();
+      if (nextStation && nextStationId) {
+        const stationsResult = await fetchStationPassengerWebStations({
+          endpointUrl: STATION_PASSENGER_INFO_WEB_STATIONS_API_URL,
+          sessionId: authContext.sessionId,
+          deviceId: authContext.deviceId,
+          authorization: STATION_PASSENGER_INFO_WEB_STATIONS_API_AUTH,
+          partnerCode: STATION_PASSENGER_INFO_TARGET_COMPANY_CODE
+        });
+        if (stationsResult.ok) {
+          const matchedStation = findStationPassengerStationCatalogItem(stationsResult.items, nextStationId);
+          const resolvedStationName = String(matchedStation?.name || matchedStation?.label || "").trim();
+          if (resolvedStationName) {
+            nextStation = {
+              ...nextStation,
+              stationName: resolvedStationName,
+              "station-name": resolvedStationName
+            };
+          }
+        }
+      }
+
       return res.json({
         ok: true,
         tripId,
@@ -16513,7 +16830,7 @@ app.post(
         items: Array.isArray(fetchResult.items) ? fetchResult.items : [],
         totalCount: Array.isArray(fetchResult.items) ? fetchResult.items.length : 0,
         requestDate: String(fetchResult.requestDate || "").trim(),
-        nextStation: fetchResult.nextStation || null,
+        nextStation,
         usedCachedAuth,
         authRefreshed
       });
