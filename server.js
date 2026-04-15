@@ -180,6 +180,13 @@ const STATION_PASSENGER_INFO_REQUEST_LANGUAGE =
   String(process.env.STATION_PASSENGER_INFO_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const STATION_PASSENGER_INFO_TIMEOUT_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_TIMEOUT_MS || "45000", 10) || 45000;
+const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
+  String(
+    process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
+      "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations"
+  ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations";
+const STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS =
+  Number.parseInt(process.env.STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS || "900000", 10) || 900000;
 const STATION_PASSENGER_INFO_TARGET_COMPANY_CODE =
   String(process.env.STATION_PASSENGER_INFO_TARGET_COMPANY_CODE || "envergecgel").trim() || "envergecgel";
 const STATION_PASSENGER_INFO_TARGET_COMPANY_ID =
@@ -3914,6 +3921,39 @@ function buildStationPassengerRequestDateParts(date = new Date()) {
   };
 }
 
+function formatDateTimeToSecondPrecisionInTimeZone(date = new Date(), timeZone = APP_TIME_ZONE) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: String(timeZone || "").trim() || APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(date);
+    const year = String(parts.find((part) => part.type === "year")?.value || "").trim();
+    const month = String(parts.find((part) => part.type === "month")?.value || "").trim();
+    const day = String(parts.find((part) => part.type === "day")?.value || "").trim();
+    const hour = String(parts.find((part) => part.type === "hour")?.value || "").trim();
+    const minute = String(parts.find((part) => part.type === "minute")?.value || "").trim();
+    const second = String(parts.find((part) => part.type === "second")?.value || "").trim();
+    if (year && month && day && hour && minute && second) {
+      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    }
+  } catch (err) {
+    // Ignore and fallback to local formatting.
+  }
+  const isoDate = formatDateToIsoLocal(date);
+  if (!isoDate) return "";
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${isoDate} ${hour}:${minute}:${second}`;
+}
+
 function buildStationPassengerDailySummariesRequestBody({ sessionId = "", deviceId = "", token = "", dateValue = "" } = {}) {
   const normalizedDateValue = String(dateValue || "").trim();
   return {
@@ -3925,6 +3965,134 @@ function buildStationPassengerDailySummariesRequestBody({ sessionId = "", device
     date: normalizedDateValue ? `${normalizedDateValue} 00:00:00` : "",
     language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE,
     token: String(token || "").trim()
+  };
+}
+
+function normalizeStationPassengerJourneyIdForRequest(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^-?\d+$/.test(text)) {
+    const parsed = Number.parseInt(text, 10);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return text;
+}
+
+function buildStationPassengerJourneyStationsRequestBody({
+  journeyId = "",
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  dateValue = ""
+} = {}) {
+  return {
+    data: normalizeStationPassengerJourneyIdForRequest(journeyId),
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    token: String(token || "").trim(),
+    date: String(dateValue || "").trim(),
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE
+  };
+}
+
+function buildStationPassengerAuthContext({
+  endpointUrl = "",
+  companyCode = "",
+  companyId = "",
+  companyUrl = "",
+  cluster = "",
+  loginResult = null
+} = {}) {
+  return {
+    endpointUrl: String(endpointUrl || "").trim(),
+    companyCode: String(companyCode || "").trim(),
+    companyId: String(companyId || "").trim(),
+    companyUrl: String(companyUrl || "").trim(),
+    cluster: extractClusterLabel(cluster),
+    sessionId: String(loginResult?.sessionId || "").trim(),
+    deviceId: String(loginResult?.deviceId || "").trim(),
+    token: String(loginResult?.token || "").trim(),
+    savedAt: Date.now()
+  };
+}
+
+function normalizeStationPassengerAuthContext(value) {
+  if (!value || typeof value !== "object") return null;
+  const sessionId = String(value.sessionId || "").trim();
+  const deviceId = String(value.deviceId || "").trim();
+  const token = String(value.token || "").trim();
+  if (!sessionId || !deviceId || !token) return null;
+
+  const savedAt = Number.parseInt(String(value.savedAt || ""), 10) || Date.now();
+  return {
+    endpointUrl: String(value.endpointUrl || "").trim(),
+    companyCode: String(value.companyCode || "").trim(),
+    companyId: String(value.companyId || "").trim(),
+    companyUrl: String(value.companyUrl || "").trim(),
+    cluster: extractClusterLabel(value.cluster || value.endpointUrl || value.companyUrl || ""),
+    sessionId,
+    deviceId,
+    token,
+    savedAt
+  };
+}
+
+function getStationPassengerAuthContextFromSession(req) {
+  const authContext = normalizeStationPassengerAuthContext(req?.session?.stationPassengerInfoAuth);
+  if (!authContext) return null;
+  if (authContext.savedAt + Math.max(60000, STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS) <= Date.now()) {
+    if (req?.session?.stationPassengerInfoAuth) {
+      delete req.session.stationPassengerInfoAuth;
+    }
+    return null;
+  }
+  return authContext;
+}
+
+function saveStationPassengerAuthContextToSession(req, authContext) {
+  const normalized = normalizeStationPassengerAuthContext(authContext);
+  if (!req?.session) return;
+  if (!normalized) {
+    delete req.session.stationPassengerInfoAuth;
+    return;
+  }
+  req.session.stationPassengerInfoAuth = normalized;
+}
+
+function clearStationPassengerAuthContextFromSession(req) {
+  if (req?.session?.stationPassengerInfoAuth) {
+    delete req.session.stationPassengerInfoAuth;
+  }
+}
+
+async function resolveStationPassengerTargetCandidate({ endpointUrl = "", clusterLabel = "" } = {}) {
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const targetCode = STATION_PASSENGER_INFO_TARGET_COMPANY_CODE;
+  const targetId = STATION_PASSENGER_INFO_TARGET_COMPANY_ID;
+  const normalizedClusterLabel = extractClusterLabel(clusterLabel || endpointUrl);
+  const targetCandidateFromCache = (Array.isArray(partnerItems) ? partnerItems : []).find((item) => {
+    const itemCode = String(item?.code || "").trim().toLocaleLowerCase("tr");
+    const itemId = String(item?.id || "").trim();
+    const itemCluster = String(item?.cluster || "").trim().toLocaleLowerCase("tr");
+    return (
+      itemCode === targetCode.toLocaleLowerCase("tr") &&
+      itemId === targetId &&
+      (!itemCluster || itemCluster === normalizedClusterLabel)
+    );
+  });
+
+  return {
+    candidate: targetCandidateFromCache || {
+      code: targetCode,
+      id: targetId,
+      cluster: normalizedClusterLabel,
+      url: endpointUrl,
+      branchId: targetId
+    },
+    fromCache: Boolean(targetCandidateFromCache),
+    partnerError: String(partnerError || "").trim()
   };
 }
 
@@ -4201,6 +4369,174 @@ function extractStationPassengerJourneyId(node) {
   );
 }
 
+function parseStationPassengerJourneyStationOrder(value) {
+  const text = String(value || "").trim();
+  if (!/^-?\d+$/.test(text)) return null;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractStationPassengerJourneyStationOrder(node) {
+  if (!node || typeof node !== "object") return null;
+  return parseStationPassengerJourneyStationOrder(
+    readStationPassengerTextByAliases(
+      node,
+      [
+        "order",
+        "sequence",
+        "sort-order",
+        "sort_order",
+        "sortorder"
+      ],
+      2
+    )
+  );
+}
+
+function extractStationPassengerJourneyStationId(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "station-id",
+      "station_id",
+      "stationid",
+      "id"
+    ],
+    2
+  );
+}
+
+function extractStationPassengerJourneyStationDepartureTime(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "departure-time",
+      "departure_time",
+      "departuretime",
+      "time",
+      "date"
+    ],
+    2
+  );
+}
+
+function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}) {
+  const collected = [];
+  const seen = new Set();
+  const visited = new Set();
+
+  const pushCandidate = (node) => {
+    const itemJourneyId = extractStationPassengerJourneyId(node) || String(journeyId || "").trim();
+    const order = extractStationPassengerJourneyStationOrder(node);
+    const stationId = extractStationPassengerJourneyStationId(node);
+    const departureTime = extractStationPassengerJourneyStationDepartureTime(node);
+    const hasUsefulData =
+      Number.isFinite(order) ||
+      Boolean(String(stationId || "").trim()) ||
+      Boolean(String(departureTime || "").trim());
+
+    if (!hasUsefulData) return;
+
+    const key = [
+      String(itemJourneyId || "").trim(),
+      Number.isFinite(order) ? String(order) : "",
+      String(stationId || "").trim(),
+      String(departureTime || "").trim()
+    ]
+      .join("|||")
+      .toLocaleLowerCase("tr");
+
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    collected.push({
+      journeyId: String(itemJourneyId || "").trim(),
+      tripId: String(itemJourneyId || "").trim(),
+      seferId: String(itemJourneyId || "").trim(),
+      "journey-id": String(itemJourneyId || "").trim(),
+      order: Number.isFinite(order) ? order : null,
+      stationId: String(stationId || "").trim(),
+      "station-id": String(stationId || "").trim(),
+      departureTime: String(departureTime || "").trim(),
+      "departure-time": String(departureTime || "").trim(),
+      raw: node
+    });
+  };
+
+  const walk = (node, depth = 0) => {
+    if (depth > 7 || node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed, depth + 1);
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+
+    pushCandidate(node);
+    Object.values(node).forEach((value) => walk(value, depth + 1));
+  };
+
+  walk(payload);
+
+  return collected.sort((a, b) => {
+    const orderA = Number.isFinite(a.order) ? a.order : Number.MAX_SAFE_INTEGER;
+    const orderB = Number.isFinite(b.order) ? b.order : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    const byStationId = String(a.stationId || "").localeCompare(String(b.stationId || ""), "tr");
+    if (byStationId !== 0) return byStationId;
+    return String(a.departureTime || "").localeCompare(String(b.departureTime || ""), "tr");
+  });
+}
+
+function parseStationPassengerComparableDateTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const isoCandidate = text.includes("T") ? text : text.replace(" ", "T");
+  const parsed = new Date(isoCandidate);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+
+  const fallbackMatch = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (!fallbackMatch) return null;
+
+  const year = Number.parseInt(fallbackMatch[1], 10);
+  const month = Number.parseInt(fallbackMatch[2], 10);
+  const day = Number.parseInt(fallbackMatch[3], 10);
+  const hour = Number.parseInt(fallbackMatch[4], 10);
+  const minute = Number.parseInt(fallbackMatch[5], 10);
+  const second = Number.parseInt(fallbackMatch[6] || "0", 10);
+  const fallbackDate = new Date(year, month - 1, day, hour, minute, second);
+  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+}
+
+function findStationPassengerNextStationAfterRequest(items, requestDate) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const requestMoment = parseStationPassengerComparableDateTime(requestDate);
+  if (!requestMoment) return null;
+
+  return (
+    normalizedItems.find((item) => {
+      const departureMoment = parseStationPassengerComparableDateTime(item?.departureTime || item?.["departure-time"]);
+      return Boolean(departureMoment && departureMoment.getTime() > requestMoment.getTime());
+    }) || null
+  );
+}
+
 function getStationPassengerSortMinutes(value) {
   const text = String(value || "").trim();
   const match = text.match(/^(\d{2}):(\d{2})$/);
@@ -4255,6 +4591,9 @@ function extractStationPassengerJourneyItems(payload, { companyCode = "", cluste
 
       collected.push({
         id: String(journeyId || "").trim(),
+        tripId: String(journeyId || "").trim(),
+        journeyId: String(journeyId || "").trim(),
+        seferId: String(journeyId || "").trim(),
         plate: formatStationPassengerPlateDisplay(plateText) || String(plateText || "").trim() || normalizedPlate,
         normalizedPlate,
         departureTime,
@@ -4576,6 +4915,179 @@ async function fetchStationPassengerDailyJourneySummaries({
   }
 }
 
+async function fetchStationPassengerJourneyStations({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  token,
+  journeyId,
+  authorization = STATION_PASSENGER_INFO_API_AUTH
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+  const normalizedJourneyId = String(journeyId || "").trim();
+  const requestDate = formatDateTimeToSecondPrecisionInTimeZone(new Date(), APP_TIME_ZONE);
+  const requestBody = buildStationPassengerJourneyStationsRequestBody({
+    journeyId: normalizedJourneyId,
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    token: normalizedToken,
+    dateValue: requestDate
+  });
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      requestUrl: "",
+      error: "GetJourneyStations URL oluşturulamadı.",
+      detail: "",
+      items: [],
+      requestDate,
+      nextStation: null,
+      status: null
+    };
+  }
+
+  if (!normalizedJourneyId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: "journey-id zorunludur.",
+      detail: "",
+      items: [],
+      requestDate,
+      nextStation: null,
+      status: null
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId || !normalizedToken) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: "GetJourneyStations için session/device/token eksik.",
+      detail: "",
+      items: [],
+      requestDate,
+      nextStation: null,
+      status: null
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetJourneyStations",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        requestUrl: normalizedEndpointUrl,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 140,
+          responseMaxLen: 220
+        }),
+        items: [],
+        requestDate,
+        nextStation: null,
+        status: response.status
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          requestUrl: normalizedEndpointUrl,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 140,
+            responseMaxLen: 220
+          }),
+          items: [],
+          requestDate,
+          nextStation: null,
+          status: response.status
+        };
+      }
+    }
+
+    const items = extractStationPassengerJourneyStations(parsed ?? raw, {
+      journeyId: normalizedJourneyId
+    });
+    const nextStation = findStationPassengerNextStationAfterRequest(items, requestDate);
+
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      error: "",
+      detail: "",
+      items,
+      requestDate,
+      nextStation,
+      status: response.status
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetJourneyStations",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "GetJourneyStations isteği başarısız."
+    });
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: err?.message || "GetJourneyStations isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "GetJourneyStations isteği başarısız.", {
+        bodyMaxLen: 140,
+        responseMaxLen: 180
+      }),
+      items: [],
+      requestDate,
+      nextStation: null,
+      status: null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function searchStationPassengerJourneysByPlate(plateQuery) {
   const normalizedPlate = normalizeStationPassengerPlate(plateQuery);
   const displayPlate = formatStationPassengerPlateDisplay(plateQuery) || String(plateQuery || "").trim();
@@ -4609,25 +5121,13 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     };
   }
 
-  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
-  const targetCandidateFromCache = (Array.isArray(partnerItems) ? partnerItems : []).find((item) => {
-    const itemCode = String(item?.code || "").trim().toLocaleLowerCase("tr");
-    const itemId = String(item?.id || "").trim();
-    const itemCluster = String(item?.cluster || "").trim().toLocaleLowerCase("tr");
-    return (
-      itemCode === targetCode.toLocaleLowerCase("tr") &&
-      itemId === targetId &&
-      (!itemCluster || itemCluster === clusterLabel)
-    );
+  const targetResolution = await resolveStationPassengerTargetCandidate({
+    endpointUrl,
+    clusterLabel
   });
-
-  const targetCandidate = targetCandidateFromCache || {
-    code: targetCode,
-    id: targetId,
-    cluster: clusterLabel,
-    url: endpointUrl,
-    branchId: targetId
-  };
+  const targetCandidate = targetResolution.candidate;
+  const targetCandidateFromCache = targetResolution.fromCache;
+  const partnerError = targetResolution.partnerError;
 
   const loginResult = await resolveStationPassengerLoginResult({
     endpointUrl,
@@ -4692,7 +5192,15 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     searchedPlate: displayPlate,
     sourceCompany: sourceCompanyLabel,
     sourceMode: "company",
-    detail: String(fetchResult.detail || "").trim()
+    detail: String(fetchResult.detail || "").trim(),
+    authContext: buildStationPassengerAuthContext({
+      endpointUrl,
+      companyCode: String(targetCandidate.code || "").trim(),
+      companyId: String(targetCandidate.id || "").trim(),
+      companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
+      cluster: clusterLabel,
+      loginResult
+    })
   };
 }
 
@@ -15230,6 +15738,7 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
 
     const result = await searchStationPassengerJourneysByPlate(plate);
     if (!result.ok) {
+      clearStationPassengerAuthContextFromSession(req);
       return res.status(502).json({
         ok: false,
         error: String(result.error || "").trim() || "Plaka araması tamamlanamadı.",
@@ -15241,6 +15750,8 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
         sourceMode: result.sourceMode || ""
       });
     }
+
+    saveStationPassengerAuthContextToSession(req, result.authContext);
 
     return res.json({
       ok: true,
@@ -15275,6 +15786,156 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
     });
   }
 });
+
+app.post(
+  "/api/station-passenger-info/journey-stations",
+  requireAuth,
+  requireMenuAccess("station-passenger-info"),
+  async (req, res) => {
+    try {
+      const tripId = String(req.body?.tripId || req.body?.journeyId || req.body?.seferId || "").trim();
+      if (!tripId) {
+        return res.status(400).json({ ok: false, error: "journey-id zorunludur." });
+      }
+
+      const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
+      const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
+      let authContext = getStationPassengerAuthContextFromSession(req);
+      let usedCachedAuth = Boolean(authContext);
+      let authRefreshed = false;
+
+      const ensureFreshAuthContext = async () => {
+        const targetResolution = await resolveStationPassengerTargetCandidate({
+          endpointUrl,
+          clusterLabel
+        });
+        const targetCandidate = targetResolution.candidate;
+        const loginResult = await resolveStationPassengerLoginResult({
+          endpointUrl,
+          companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
+          partnerCode: String(targetCandidate.code || "").trim(),
+          partnerId: String(targetCandidate.id || "").trim(),
+          username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+          password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+          fallbackBranchId: String(targetCandidate.branchId || targetCandidate.id || "").trim(),
+          allowEmptyPartnerCode: false,
+          authorization: STATION_PASSENGER_INFO_API_AUTH,
+          timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+        });
+
+        if (!(loginResult?.ok && String(loginResult.token || "").trim())) {
+          return {
+            ok: false,
+            error: String(loginResult?.error || "").trim() || "UserLogin başarısız.",
+            detail:
+              String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
+              String(targetResolution.partnerError || "").trim()
+          };
+        }
+
+        return {
+          ok: true,
+          authContext: buildStationPassengerAuthContext({
+            endpointUrl,
+            companyCode: String(targetCandidate.code || "").trim(),
+            companyId: String(targetCandidate.id || "").trim(),
+            companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
+            cluster: clusterLabel,
+            loginResult
+          })
+        };
+      };
+
+      if (!authContext) {
+        const authResolution = await ensureFreshAuthContext();
+        if (!authResolution.ok) {
+          clearStationPassengerAuthContextFromSession(req);
+          return res.status(502).json({
+            ok: false,
+            error: authResolution.error,
+            details: authResolution.detail,
+            tripId,
+            requestUrl: STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
+            usedCachedAuth: false,
+            authRefreshed: false
+          });
+        }
+        authContext = authResolution.authContext;
+        saveStationPassengerAuthContextToSession(req, authContext);
+      }
+
+      let fetchResult = await fetchStationPassengerJourneyStations({
+        endpointUrl: STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
+        sessionId: authContext.sessionId,
+        deviceId: authContext.deviceId,
+        token: authContext.token,
+        journeyId: tripId,
+        authorization: STATION_PASSENGER_INFO_API_AUTH
+      });
+
+      if (!fetchResult.ok && usedCachedAuth) {
+        const authResolution = await ensureFreshAuthContext();
+        if (authResolution.ok) {
+          authContext = authResolution.authContext;
+          authRefreshed = true;
+          saveStationPassengerAuthContextToSession(req, authContext);
+          fetchResult = await fetchStationPassengerJourneyStations({
+            endpointUrl: STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
+            sessionId: authContext.sessionId,
+            deviceId: authContext.deviceId,
+            token: authContext.token,
+            journeyId: tripId,
+            authorization: STATION_PASSENGER_INFO_API_AUTH
+          });
+        }
+      }
+
+      if (!fetchResult.ok) {
+        return res.status(502).json({
+          ok: false,
+          error: String(fetchResult.error || "").trim() || "GetJourneyStations başarısız.",
+          details: String(fetchResult.detail || "").trim(),
+          tripId,
+          requestUrl: fetchResult.requestUrl || STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
+          usedCachedAuth,
+          authRefreshed
+        });
+      }
+
+      return res.json({
+        ok: true,
+        tripId,
+        requestUrl: fetchResult.requestUrl || STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
+        items: Array.isArray(fetchResult.items) ? fetchResult.items : [],
+        totalCount: Array.isArray(fetchResult.items) ? fetchResult.items.length : 0,
+        requestDate: String(fetchResult.requestDate || "").trim(),
+        nextStation: fetchResult.nextStation || null,
+        usedCachedAuth,
+        authRefreshed
+      });
+    } catch (err) {
+      console.error("Station passenger journey stations error:", err);
+      return res.status(500).json({
+        ok: false,
+        error: `GetJourneyStations tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`,
+        details: buildObusServiceTraceText(
+          buildObusServiceTraceEntry({
+            service: "StationPassengerJourneyStationsApi",
+            url: "/api/station-passenger-info/journey-stations",
+            requestBody: req.body || {},
+            responseBody: "",
+            error: err?.message || "Bilinmeyen hata"
+          }),
+          err?.message || "Bilinmeyen hata",
+          {
+            bodyMaxLen: 120,
+            responseMaxLen: 180
+          }
+        )
+      });
+    }
+  }
+);
 
 app.get("/general/station-passenger-info", requireAuth, requireMenuAccess("station-passenger-info"), (req, res) => {
   res.render("general-station-passenger-info", {

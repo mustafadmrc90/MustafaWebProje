@@ -1827,11 +1827,37 @@
     const statusEl = page.querySelector("[data-station-passenger-status]");
     const resultsListEl = page.querySelector("[data-station-passenger-results-list]");
     const resultsCountEl = page.querySelector("[data-station-passenger-results-count]");
-    if (!plateInput || !goButton || !statusEl || !resultsListEl || !resultsCountEl) return;
+    const nextStopCardEl = page.querySelector("[data-station-passenger-next-stop]");
+    const nextStopEmptyEl = page.querySelector("[data-station-passenger-next-stop-empty]");
+    const nextStopOrderEl = page.querySelector("[data-station-passenger-next-stop-order]");
+    const nextStopStationEl = page.querySelector("[data-station-passenger-next-stop-station]");
+    const nextStopRequestTimeEl = page.querySelector("[data-station-passenger-next-stop-request-time]");
+    const nextStopDepartureEl = page.querySelector("[data-station-passenger-next-stop-departure]");
+    if (
+      !plateInput ||
+      !goButton ||
+      !statusEl ||
+      !resultsListEl ||
+      !resultsCountEl ||
+      !nextStopCardEl ||
+      !nextStopEmptyEl ||
+      !nextStopOrderEl ||
+      !nextStopStationEl ||
+      !nextStopRequestTimeEl ||
+      !nextStopDepartureEl
+    ) {
+      return;
+    }
 
     let requestSequence = 0;
     let selectedResultIndex = -1;
     let resultItems = [];
+    let selectedTripId = "";
+    const journeyStationsCache = new Map();
+    const journeyStationsRequestCache = new Map();
+    page.stationPassengerJourneyStationsCache = journeyStationsCache;
+    page.stationPassengerSelectedJourneyStations = [];
+    page.stationPassengerSelectedNextStation = null;
 
     const normalizePlateDisplay = (value) =>
       String(value || "")
@@ -1859,12 +1885,79 @@
       resultsCountEl.className = normalizedCount > 0 ? "pill" : "pill muted";
     };
 
+    const renderNextStation = (nextStation, requestDate, fallbackMessage) => {
+      const normalizedNextStation = nextStation && typeof nextStation === "object" ? nextStation : null;
+      const stationId = String(
+        normalizedNextStation?.stationId || normalizedNextStation?.["station-id"] || ""
+      ).trim();
+      if (!normalizedNextStation || !stationId) {
+        nextStopCardEl.hidden = true;
+        nextStopEmptyEl.hidden = false;
+        nextStopEmptyEl.textContent =
+          String(fallbackMessage || "").trim() || "Sefer seçince istek saatinden sonraki ilk durak burada görünecek.";
+        nextStopOrderEl.textContent = "-";
+        nextStopStationEl.textContent = "-";
+        nextStopRequestTimeEl.textContent = "-";
+        nextStopDepartureEl.textContent = "-";
+        page.stationPassengerSelectedNextStation = null;
+        return;
+      }
+
+      const orderValue = normalizedNextStation?.order;
+      const orderText = Number.isFinite(Number(orderValue)) ? `#${Number(orderValue)}` : "-";
+      const departureText = String(
+        normalizedNextStation?.departureTime || normalizedNextStation?.["departure-time"] || ""
+      ).trim();
+      const requestText = String(requestDate || "").trim();
+
+      nextStopOrderEl.textContent = orderText;
+      nextStopStationEl.textContent = `Durak ID: ${stationId}`;
+      nextStopRequestTimeEl.textContent = requestText ? `İstek saati: ${requestText}` : "İstek saati bilinmiyor";
+      nextStopDepartureEl.textContent = departureText ? `Kalkış: ${departureText}` : "Kalkış saati yok";
+      nextStopEmptyEl.hidden = true;
+      nextStopCardEl.hidden = false;
+      page.stationPassengerSelectedNextStation = {
+        ...normalizedNextStation,
+        requestDate: requestText
+      };
+    };
+
     const setSelectedResultIndex = (index) => {
       selectedResultIndex = Number.isInteger(index) ? index : -1;
       resultsListEl.querySelectorAll("[data-station-passenger-result-button='1']").forEach((buttonEl) => {
         const buttonIndex = Number.parseInt(buttonEl.dataset.stationPassengerResultIndex || "-1", 10);
         buttonEl.classList.toggle("is-selected", buttonIndex === selectedResultIndex);
       });
+      selectedTripId =
+        selectedResultIndex >= 0 && resultItems[selectedResultIndex]
+          ? String(resultItems[selectedResultIndex]?.tripId || "").trim()
+          : "";
+      page.dataset.stationPassengerSelectedTripId = selectedTripId;
+      if (selectedTripId && journeyStationsCache.has(selectedTripId)) {
+        const cachedResult = journeyStationsCache.get(selectedTripId);
+        page.stationPassengerSelectedJourneyStations = Array.isArray(cachedResult?.items) ? cachedResult.items : [];
+        renderNextStation(
+          cachedResult?.nextStation,
+          cachedResult?.requestDate,
+          "İstek saatinden sonraki ilk durak bulunamadı."
+        );
+      } else {
+        page.stationPassengerSelectedJourneyStations = [];
+        renderNextStation(null, "", "Sefer seçince istek saatinden sonraki ilk durak burada görünecek.");
+      }
+    };
+
+    const normalizeResultItem = (item) => {
+      const tripId =
+        String(item?.tripId || item?.journeyId || item?.seferId || item?.id || "")
+          .trim();
+      return {
+        ...item,
+        id: tripId,
+        tripId,
+        journeyId: tripId,
+        seferId: tripId
+      };
     };
 
     const renderEmptyResults = (message) => {
@@ -1874,12 +1967,21 @@
       emptyEl.textContent = String(message || "").trim() || "Henüz listelenecek sefer yok.";
       resultsListEl.appendChild(emptyEl);
       resultItems = [];
+      selectedTripId = "";
+      journeyStationsCache.clear();
+      journeyStationsRequestCache.clear();
+      page.dataset.stationPassengerSelectedTripId = "";
+      page.stationPassengerSelectedJourneyStations = [];
+      renderNextStation(null, "", "Sefer seçince istek saatinden sonraki ilk durak burada görünecek.");
       setCount(0);
       setSelectedResultIndex(-1);
     };
 
     const renderResults = (items) => {
-      const normalizedItems = Array.isArray(items) ? items : [];
+      const normalizedItems = Array.isArray(items) ? items.map(normalizeResultItem) : [];
+      journeyStationsCache.clear();
+      journeyStationsRequestCache.clear();
+      page.stationPassengerSelectedJourneyStations = [];
       resultItems = normalizedItems;
       resultsListEl.innerHTML = "";
 
@@ -1895,6 +1997,7 @@
         rowButton.className = "station-passenger-result-button";
         rowButton.dataset.stationPassengerResultButton = "1";
         rowButton.dataset.stationPassengerResultIndex = String(index);
+        rowButton.dataset.stationPassengerTripId = String(item?.tripId || "").trim();
 
         const timeEl = document.createElement("span");
         timeEl.className = "station-passenger-result-time";
@@ -1921,6 +2024,123 @@
       resultsListEl.appendChild(fragment);
       setCount(normalizedItems.length);
       setSelectedResultIndex(-1);
+    };
+
+    const loadJourneyStations = async ({ tripId, item, index }) => {
+      const normalizedTripId = String(tripId || "").trim();
+      if (!normalizedTripId) {
+        window.dispatchEvent(
+          new CustomEvent("station-passenger-journey-stations-error", {
+            detail: {
+              index,
+              tripId: "",
+              item,
+              error: "Sefer id bulunamadı."
+            }
+          })
+        );
+        return null;
+      }
+
+      if (journeyStationsCache.has(normalizedTripId)) {
+        const cachedResponse = journeyStationsCache.get(normalizedTripId);
+        page.stationPassengerSelectedJourneyStations =
+          selectedTripId === normalizedTripId && Array.isArray(cachedResponse?.items) ? cachedResponse.items : [];
+        if (selectedTripId === normalizedTripId) {
+          renderNextStation(
+            cachedResponse?.nextStation,
+            cachedResponse?.requestDate,
+            "İstek saatinden sonraki ilk durak bulunamadı."
+          );
+        }
+        window.dispatchEvent(
+          new CustomEvent("station-passenger-journey-stations-loaded", {
+            detail: {
+              index,
+              tripId: normalizedTripId,
+              item,
+              items: Array.isArray(cachedResponse?.items) ? cachedResponse.items : [],
+              response: cachedResponse,
+              cached: true
+            }
+          })
+        );
+        return cachedResponse;
+      }
+
+      if (journeyStationsRequestCache.has(normalizedTripId)) {
+        return journeyStationsRequestCache.get(normalizedTripId);
+      }
+
+      const requestPromise = (async () => {
+        try {
+          const response = await fetch("/api/station-passenger-info/journey-stations", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            body: JSON.stringify({
+              tripId: normalizedTripId
+            })
+          });
+          const data = await parseJsonResponse(response);
+          if (!response.ok || data?.ok === false) {
+            throw new Error(getApiErrorMessage(response, data, "GetJourneyStations başarısız"));
+          }
+
+          const normalizedItems = Array.isArray(data?.items) ? data.items : [];
+          const normalizedResponse = {
+            ...data,
+            items: normalizedItems
+          };
+          if (resultItems[index]) {
+            resultItems[index].journeyStations = normalizedItems;
+          }
+          journeyStationsCache.set(normalizedTripId, normalizedResponse);
+          if (selectedTripId === normalizedTripId) {
+            page.stationPassengerSelectedJourneyStations = normalizedItems;
+            renderNextStation(
+              normalizedResponse?.nextStation,
+              normalizedResponse?.requestDate,
+              "İstek saatinden sonraki ilk durak bulunamadı."
+            );
+          }
+          window.dispatchEvent(
+            new CustomEvent("station-passenger-journey-stations-loaded", {
+              detail: {
+                index,
+                tripId: normalizedTripId,
+                item,
+                items: normalizedItems,
+                response: normalizedResponse,
+                cached: false
+              }
+            })
+          );
+          return normalizedResponse;
+        } catch (err) {
+          if (selectedTripId === normalizedTripId) {
+            renderNextStation(null, "", "İlk durak bilgisi alınamadı.");
+          }
+          window.dispatchEvent(
+            new CustomEvent("station-passenger-journey-stations-error", {
+              detail: {
+                index,
+                tripId: normalizedTripId,
+                item,
+                error: String(err?.message || "GetJourneyStations başarısız.").trim()
+              }
+            })
+          );
+          throw err;
+        } finally {
+          journeyStationsRequestCache.delete(normalizedTripId);
+        }
+      })();
+
+      journeyStationsRequestCache.set(normalizedTripId, requestPromise);
+      return requestPromise;
     };
 
     const runSearch = async () => {
@@ -2009,10 +2229,16 @@
         new CustomEvent("station-passenger-result-selected", {
           detail: {
             index: nextIndex,
+            tripId: String(resultItems[nextIndex]?.tripId || "").trim(),
             item: resultItems[nextIndex]
           }
         })
       );
+      void loadJourneyStations({
+        tripId: String(resultItems[nextIndex]?.tripId || "").trim(),
+        item: resultItems[nextIndex],
+        index: nextIndex
+      }).catch(() => {});
     });
   };
 
