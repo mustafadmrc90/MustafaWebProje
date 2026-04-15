@@ -686,8 +686,16 @@ async function initDb() {
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       display_name TEXT NOT NULL,
+      login_input_lock_enabled BOOLEAN NOT NULL DEFAULT false,
+      login_input_lock_version INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS login_input_lock_enabled BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS login_input_lock_version INTEGER NOT NULL DEFAULT 1
   `);
 
   await pool.query(`
@@ -15845,6 +15853,23 @@ app.get("/", async (req, res) => {
   return res.redirect("/login");
 });
 
+function requestWantsJson(req) {
+  const accept = String(req?.get?.("accept") || "").toLocaleLowerCase("tr");
+  return accept.includes("application/json");
+}
+
+function renderLoginFailure(req, res, statusCode, errorMessage) {
+  const normalizedStatusCode = Number.isInteger(statusCode) ? statusCode : 500;
+  const normalizedMessage = String(errorMessage || "Hatalı giriş.").trim() || "Hatalı giriş.";
+  if (requestWantsJson(req)) {
+    return res.status(normalizedStatusCode).json({
+      ok: false,
+      error: normalizedMessage
+    });
+  }
+  return res.status(normalizedStatusCode).render("login", { error: normalizedMessage });
+}
+
 app.get("/login", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -15853,33 +15878,80 @@ app.get("/login", async (req, res) => {
   return res.render("login", { error: null });
 });
 
-app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).render("login", { error: "Kullanıcı adı ve şifre gerekli." });
+app.get("/api/login-lock-status", async (req, res) => {
+  const username = String(req.query.username || "").trim();
+  if (!username) {
+    return res.json({
+      ok: true,
+      enabled: false,
+      version: null,
+      username: ""
+    });
   }
 
   try {
     const result = await pool.query(
-      "SELECT id, username, password_hash, display_name FROM users WHERE username = $1",
+      `
+        SELECT username, login_input_lock_enabled, login_input_lock_version
+        FROM users
+        WHERE username = $1
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
+      [username]
+    );
+    const user = result.rows?.[0] || null;
+    return res.json({
+      ok: true,
+      enabled: Boolean(user?.login_input_lock_enabled),
+      version: Number.isInteger(Number(user?.login_input_lock_version))
+        ? Number(user.login_input_lock_version)
+        : null,
+      username: String(user?.username || "").trim()
+    });
+  } catch (err) {
+    console.error("Login lock status error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: `Login sabitleme durumu alınamadı: ${classifyDbErrorForUser(err)}`
+    });
+  }
+});
+
+app.post("/login", async (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+  if (!username || !password) {
+    return renderLoginFailure(req, res, 400, "Kullanıcı adı ve şifre gerekli.");
+  }
+
+  try {
+    const result = await pool.query(
+      `
+        SELECT id, username, password_hash, display_name, login_input_lock_enabled, login_input_lock_version
+        FROM users
+        WHERE username = $1
+      `,
       [username]
     );
     const user = result.rows[0];
     if (!user) {
-      return res.status(401).render("login", { error: "Hatalı giriş." });
+      return renderLoginFailure(req, res, 401, "Hatalı giriş.");
     }
 
     const storedHash = typeof user.password_hash === "string" ? user.password_hash.trim() : "";
     if (!storedHash) {
-      return res.status(500).render("login", {
-        error: "Kullanici sifre kaydi eksik. scripts/reset-user-password.js komutunu calistirin."
-      });
+      return renderLoginFailure(
+        req,
+        res,
+        500,
+        "Kullanici sifre kaydi eksik. scripts/reset-user-password.js komutunu calistirin."
+      );
     }
 
     const ok = await bcrypt.compare(password, storedHash);
     if (!ok) {
-      return res.status(401).render("login", { error: "Hatalı giriş." });
+      return renderLoginFailure(req, res, 401, "Hatalı giriş.");
     }
 
     req.session.user = {
@@ -15888,10 +15960,23 @@ app.post("/login", async (req, res) => {
       displayName: user.display_name
     };
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
-    res.redirect(targetRoute);
+    if (requestWantsJson(req)) {
+      return res.json({
+        ok: true,
+        redirectTo: targetRoute,
+        loginLock: {
+          enabled: Boolean(user.login_input_lock_enabled),
+          version: Number.isInteger(Number(user.login_input_lock_version))
+            ? Number(user.login_input_lock_version)
+            : 1,
+          username: String(user.username || "").trim()
+        }
+      });
+    }
+    return res.redirect(targetRoute);
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).render("login", { error: `Sunucu hatasi: ${classifyDbErrorForUser(err)}` });
+    return renderLoginFailure(req, res, 500, `Sunucu hatasi: ${classifyDbErrorForUser(err)}`);
   }
 });
 
@@ -17935,20 +18020,31 @@ app.get("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
     user_not_found: "Kullanıcı bulunamadı.",
     username_exists: "Bu kullanıcı adı zaten kullanılıyor.",
     update_failed: "Kullanıcı güncellenemedi.",
-    create_failed: "Kullanıcı oluşturulamadı."
+    create_failed: "Kullanıcı oluşturulamadı.",
+    login_lock_failed: "Login sabitleme ayarı güncellenemedi."
   };
 
   const okValue = String(req.query.ok || "").trim();
   const errValue = String(req.query.err || "").trim();
   const notice =
-    okValue === "1" ? "Kullanıcı oluşturuldu." : okValue === "2" ? "Kullanıcı güncellendi." : null;
+    okValue === "1"
+      ? "Kullanıcı oluşturuldu."
+      : okValue === "2"
+        ? "Kullanıcı güncellendi."
+        : okValue === "3"
+          ? "Login sabitleme ayarı güncellendi."
+          : null;
   const error = errorMessages[errValue] || null;
   const editUserId = Number(req.query.edit);
   const editingUserId = Number.isInteger(editUserId) ? editUserId : null;
 
   try {
     const result = await pool.query(
-      "SELECT id, username, display_name, created_at FROM users ORDER BY id DESC"
+      `
+        SELECT id, username, display_name, created_at, login_input_lock_enabled, login_input_lock_version
+        FROM users
+        ORDER BY id DESC
+      `
     );
     res.render("users", {
       user: req.session.user,
@@ -18017,17 +18113,51 @@ app.post("/users/:userId/update", requireAuth, requireMenuAccess("users"), async
   }
 
   try {
+    const existingUserResult = await pool.query(
+      `
+        SELECT username
+        FROM users
+        WHERE id = $1
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
+      [userId]
+    );
+    const existingUser = existingUserResult.rows?.[0] || null;
+    if (!existingUser) {
+      return res.redirect("/users?err=user_not_found");
+    }
+
+    const shouldBumpLoginLockVersion = Boolean(password) || String(existingUser.username || "").trim() !== username;
     let queryResult;
     if (password) {
       const passwordHash = await bcrypt.hash(password, 10);
       queryResult = await pool.query(
-        "UPDATE users SET username = $1, display_name = $2, password_hash = $3 WHERE id = $4",
-        [username, displayName, passwordHash, userId]
+        `
+          UPDATE users
+          SET username = $1,
+              display_name = $2,
+              password_hash = $3,
+              login_input_lock_version = CASE
+                WHEN $5 THEN login_input_lock_version + 1
+                ELSE login_input_lock_version
+              END
+          WHERE id = $4
+        `,
+        [username, displayName, passwordHash, userId, shouldBumpLoginLockVersion]
       );
     } else {
       queryResult = await pool.query(
-        "UPDATE users SET username = $1, display_name = $2 WHERE id = $3",
-        [username, displayName, userId]
+        `
+          UPDATE users
+          SET username = $1,
+              display_name = $2,
+              login_input_lock_version = CASE
+                WHEN $4 THEN login_input_lock_version + 1
+                ELSE login_input_lock_version
+              END
+          WHERE id = $3
+        `,
+        [username, displayName, userId, shouldBumpLoginLockVersion]
       );
     }
 
@@ -18047,6 +18177,36 @@ app.post("/users/:userId/update", requireAuth, requireMenuAccess("users"), async
       return res.redirect(`/users?edit=${userId}&err=username_exists`);
     }
     return res.redirect(`/users?edit=${userId}&err=update_failed`);
+  }
+});
+
+app.post("/users/:userId/login-lock", requireAuth, requireMenuAccess("users"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId)) {
+    return res.redirect("/users?err=invalid_user");
+  }
+
+  const enabled = String(req.body?.enabled || "").trim() === "1";
+
+  try {
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET login_input_lock_enabled = $1,
+            login_input_lock_version = login_input_lock_version + 1
+        WHERE id = $2
+      `,
+      [enabled, userId]
+    );
+
+    if ((result?.rowCount || 0) === 0) {
+      return res.redirect("/users?err=user_not_found");
+    }
+
+    return res.redirect("/users?ok=3");
+  } catch (err) {
+    console.error(err);
+    return res.redirect("/users?err=login_lock_failed");
   }
 });
 

@@ -74,6 +74,19 @@
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
                 <span class="user-row-actions">
+                  <form class="user-login-lock-form" method="post" action="/users/<%= u.id %>/login-lock">
+                    <input type="hidden" name="enabled" value="0" />
+                    <label class="user-login-lock-toggle">
+                      <input
+                        type="checkbox"
+                        name="enabled"
+                        value="1"
+                        data-user-login-lock-toggle="1"
+                        <%= u.login_input_lock_enabled ? 'checked' : '' %>
+                      />
+                      <span>Login Sabitle</span>
+                    </label>
+                  </form>
                   <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
                   <% if (editingUserId === u.id) { %>
                     <a class="button-link ghost" href="/users">Vazgeç</a>
@@ -113,5 +126,6 @@
       </div>
     </section>
     <script src="/public/app.js" defer></script>
+    <script src="/public/users.js" defer></script>
   </body>
 </html>

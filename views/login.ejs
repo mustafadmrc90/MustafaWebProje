@@ -18,8 +18,9 @@
       <% if (error) { %>
         <div class="alert"><%= error %></div>
       <% } %>
+      <div class="alert" data-login-error hidden></div>
 
-      <form method="post" action="/login" class="auth-form">
+      <form method="post" action="/login" class="auth-form" data-login-form="1">
         <label>
           <span>Kullanıcı Adı</span>
           <input type="text" name="username" autocomplete="username" required />
@@ -32,6 +33,7 @@
           <input type="checkbox" id="remember-username" />
           <span>Şifremi hafızada tut</span>
         </label>
+        <p class="auth-lock-note muted" data-login-lock-note hidden></p>
         <button type="submit">Giriş</button>
       </form>
 

@@ -1585,12 +1585,23 @@ th {
   font-size: 13px;
 }
 
+.auth-lock-note {
+  margin: -4px 0 0;
+  font-size: 12px;
+}
+
 .auth-form input {
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid #e4d7cc;
   background: #fff;
   font-size: 16px;
+}
+
+.auth-form input[readonly] {
+  background: #f4f6f9;
+  color: #5d6674;
+  cursor: default;
 }
 
 button {
@@ -5084,6 +5095,29 @@ button.ghost {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.user-login-lock-form {
+  margin: 0;
+}
+
+.user-login-lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #d6dde7;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.user-login-lock-toggle input[type="checkbox"] {
+  margin: 0;
 }
 
 .user-edit-row {
