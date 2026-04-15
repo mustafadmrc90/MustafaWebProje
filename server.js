@@ -185,6 +185,8 @@ const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
     process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
       "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations"
   ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations";
+const STATION_PASSENGER_INFO_TIME_ZONE =
+  String(process.env.STATION_PASSENGER_INFO_TIME_ZONE || "Europe/Istanbul").trim() || "Europe/Istanbul";
 const STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS || "900000", 10) || 900000;
 const STATION_PASSENGER_INFO_TARGET_COMPANY_CODE =
@@ -3914,18 +3916,22 @@ function formatStationPassengerPlateDisplay(value) {
 }
 
 function buildStationPassengerRequestDateParts(date = new Date()) {
-  const isoDate = formatDateToIsoInTimeZone(date, APP_TIME_ZONE) || formatDateToIsoLocal(date);
+  const isoDate =
+    formatDateToIsoInTimeZone(date, STATION_PASSENGER_INFO_TIME_ZONE) || formatDateToIsoLocal(date);
   return {
     isoDate,
     obusDate: isoDate ? `${isoDate} 00:00:00` : ""
   };
 }
 
-function formatDateTimeToSecondPrecisionInTimeZone(date = new Date(), timeZone = APP_TIME_ZONE) {
+function formatDateTimeToSecondPrecisionInTimeZone(
+  date = new Date(),
+  timeZone = STATION_PASSENGER_INFO_TIME_ZONE
+) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: String(timeZone || "").trim() || APP_TIME_ZONE,
+      timeZone: String(timeZone || "").trim() || STATION_PASSENGER_INFO_TIME_ZONE,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -4501,38 +4507,70 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
   });
 }
 
-function parseStationPassengerComparableDateTime(value) {
+function buildStationPassengerComparableDateTimeKey(value) {
   const text = String(value || "").trim();
-  if (!text) return null;
+  if (!text) return "";
 
-  const isoCandidate = text.includes("T") ? text : text.replace(" ", "T");
-  const parsed = new Date(isoCandidate);
-  if (!Number.isNaN(parsed.getTime())) return parsed;
-
-  const fallbackMatch = text.match(
-    /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?$/
+  const directMatch = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/
   );
-  if (!fallbackMatch) return null;
+  if (directMatch) {
+    const year = directMatch[1];
+    const month = directMatch[2];
+    const day = directMatch[3];
+    const hour = directMatch[4] || "00";
+    const minute = directMatch[5] || "00";
+    const second = directMatch[6] || "00";
+    return `${year}${month}${day}${hour}${minute}${second}`;
+  }
 
-  const year = Number.parseInt(fallbackMatch[1], 10);
-  const month = Number.parseInt(fallbackMatch[2], 10);
-  const day = Number.parseInt(fallbackMatch[3], 10);
-  const hour = Number.parseInt(fallbackMatch[4], 10);
-  const minute = Number.parseInt(fallbackMatch[5], 10);
-  const second = Number.parseInt(fallbackMatch[6] || "0", 10);
-  const fallbackDate = new Date(year, month - 1, day, hour, minute, second);
-  return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: STATION_PASSENGER_INFO_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(parsed);
+    const year = String(parts.find((part) => part.type === "year")?.value || "").trim();
+    const month = String(parts.find((part) => part.type === "month")?.value || "").trim();
+    const day = String(parts.find((part) => part.type === "day")?.value || "").trim();
+    const hour = String(parts.find((part) => part.type === "hour")?.value || "").trim();
+    const minute = String(parts.find((part) => part.type === "minute")?.value || "").trim();
+    const second = String(parts.find((part) => part.type === "second")?.value || "").trim();
+    if (year && month && day && hour && minute && second) {
+      return `${year}${month}${day}${hour}${minute}${second}`;
+    }
+  } catch (err) {
+    // Ignore and fallback to local date parts below.
+  }
+
+  const year = String(parsed.getFullYear()).padStart(4, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  const second = String(parsed.getSeconds()).padStart(2, "0");
+  return `${year}${month}${day}${hour}${minute}${second}`;
 }
 
 function findStationPassengerNextStationAfterRequest(items, requestDate) {
   const normalizedItems = Array.isArray(items) ? items : [];
-  const requestMoment = parseStationPassengerComparableDateTime(requestDate);
-  if (!requestMoment) return null;
+  const requestKey = buildStationPassengerComparableDateTimeKey(requestDate);
+  if (!requestKey) return null;
 
   return (
     normalizedItems.find((item) => {
-      const departureMoment = parseStationPassengerComparableDateTime(item?.departureTime || item?.["departure-time"]);
-      return Boolean(departureMoment && departureMoment.getTime() > requestMoment.getTime());
+      const departureKey = buildStationPassengerComparableDateTimeKey(
+        item?.departureTime || item?.["departure-time"]
+      );
+      return Boolean(departureKey && departureKey > requestKey);
     }) || null
   );
 }
@@ -4928,7 +4966,7 @@ async function fetchStationPassengerJourneyStations({
   const normalizedDeviceId = String(deviceId || "").trim();
   const normalizedToken = String(token || "").trim();
   const normalizedJourneyId = String(journeyId || "").trim();
-  const requestDate = formatDateTimeToSecondPrecisionInTimeZone(new Date(), APP_TIME_ZONE);
+  const requestDate = formatDateTimeToSecondPrecisionInTimeZone(new Date(), STATION_PASSENGER_INFO_TIME_ZONE);
   const requestBody = buildStationPassengerJourneyStationsRequestBody({
     journeyId: normalizedJourneyId,
     sessionId: normalizedSessionId,
@@ -5095,6 +5133,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
   const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
   const requestDateParts = buildStationPassengerRequestDateParts(new Date());
   const requestDate = requestDateParts.isoDate;
+  const requestDateTime = formatDateTimeToSecondPrecisionInTimeZone(new Date(), STATION_PASSENGER_INFO_TIME_ZONE);
   const targetCode = STATION_PASSENGER_INFO_TARGET_COMPANY_CODE;
   const targetId = STATION_PASSENGER_INFO_TARGET_COMPANY_ID;
   const sourceCompanyLabel = `${targetCode} / ${targetId}`;
@@ -5105,6 +5144,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       items: [],
       requestUrl: endpointUrl,
       requestDate,
+      requestDateTime,
       error: "Plaka girilmesi zorunludur.",
       detail: ""
     };
@@ -5116,6 +5156,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       items: [],
       requestUrl: endpointUrl,
       requestDate,
+      requestDateTime,
       error: "INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD zorunludur.",
       detail: ""
     };
@@ -5153,6 +5194,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       items: [],
       requestUrl: endpointUrl,
       requestDate,
+      requestDateTime,
       searchedPlate: displayPlate,
       sourceCompany: sourceCompanyLabel,
       sourceMode: "company",
@@ -5178,6 +5220,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       items: [],
       requestUrl: fetchResult.requestUrl || endpointUrl,
       requestDate,
+      requestDateTime,
       searchedPlate: displayPlate,
       sourceCompany: sourceCompanyLabel,
       sourceMode: "company",
@@ -5192,6 +5235,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     searchedPlate: displayPlate,
     sourceCompany: sourceCompanyLabel,
     sourceMode: "company",
+    requestDateTime,
     detail: String(fetchResult.detail || "").trim(),
     authContext: buildStationPassengerAuthContext({
       endpointUrl,
@@ -15745,6 +15789,7 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
         details: String(result.detail || "").trim(),
         requestUrl: result.requestUrl || "",
         requestDate: result.requestDate || "",
+        requestDateTime: result.requestDateTime || "",
         searchedPlate: result.searchedPlate || plate,
         sourceCompany: result.sourceCompany || "",
         sourceMode: result.sourceMode || ""
@@ -15759,6 +15804,7 @@ app.post("/api/station-passenger-info/search", requireAuth, requireMenuAccess("s
       totalCount: Array.isArray(result.items) ? result.items.length : 0,
       requestUrl: result.requestUrl || "",
       requestDate: result.requestDate || "",
+      requestDateTime: result.requestDateTime || "",
       searchedPlate: result.searchedPlate || plate,
       sourceCompany: result.sourceCompany || "",
       sourceMode: result.sourceMode || "",

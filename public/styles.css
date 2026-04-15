@@ -4516,6 +4516,10 @@ button.ghost {
   align-self: center;
 }
 
+.station-passenger-result-time.is-past {
+  background: #cf3d3d;
+}
+
 .station-passenger-result-route {
   min-width: 0;
   display: grid;

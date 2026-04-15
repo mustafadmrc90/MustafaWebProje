@@ -1885,6 +1885,37 @@
       resultsCountEl.className = normalizedCount > 0 ? "pill" : "pill muted";
     };
 
+    const parseTimeToMinutes = (value) => {
+      const text = String(value || "").trim();
+      const match = text.match(/(\d{2}):(\d{2})/);
+      if (!match) return null;
+      const hour = Number.parseInt(match[1], 10);
+      const minute = Number.parseInt(match[2], 10);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+      return hour * 60 + minute;
+    };
+
+    const findClosestUpcomingJourneyIndex = (items, requestDateTime) => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      const requestMinutes = parseTimeToMinutes(requestDateTime);
+      if (!Number.isFinite(requestMinutes)) {
+        return {
+          requestMinutes: null,
+          anchorIndex: -1
+        };
+      }
+
+      const anchorIndex = normalizedItems.findIndex((item) => {
+        const departureMinutes = parseTimeToMinutes(item?.departureTime);
+        return Number.isFinite(departureMinutes) && departureMinutes >= requestMinutes;
+      });
+
+      return {
+        requestMinutes,
+        anchorIndex
+      };
+    };
+
     const renderNextStation = (nextStation, requestDate, fallbackMessage) => {
       const normalizedNextStation = nextStation && typeof nextStation === "object" ? nextStation : null;
       const stationId = String(
@@ -1977,7 +2008,7 @@
       setSelectedResultIndex(-1);
     };
 
-    const renderResults = (items) => {
+    const renderResults = (items, requestDateTime = "") => {
       const normalizedItems = Array.isArray(items) ? items.map(normalizeResultItem) : [];
       journeyStationsCache.clear();
       journeyStationsRequestCache.clear();
@@ -1990,6 +2021,7 @@
         return;
       }
 
+      const journeyPosition = findClosestUpcomingJourneyIndex(normalizedItems, requestDateTime);
       const fragment = document.createDocumentFragment();
       normalizedItems.forEach((item, index) => {
         const rowButton = document.createElement("button");
@@ -2002,6 +2034,12 @@
         const timeEl = document.createElement("span");
         timeEl.className = "station-passenger-result-time";
         timeEl.textContent = String(item?.departureTime || "").trim() || "-";
+        const departureMinutes = parseTimeToMinutes(item?.departureTime);
+        const isPastJourney =
+          Number.isFinite(journeyPosition.requestMinutes) &&
+          Number.isFinite(departureMinutes) &&
+          departureMinutes < journeyPosition.requestMinutes;
+        timeEl.classList.toggle("is-past", Boolean(isPastJourney));
 
         const routeWrapEl = document.createElement("span");
         routeWrapEl.className = "station-passenger-result-route";
@@ -2024,6 +2062,21 @@
       resultsListEl.appendChild(fragment);
       setCount(normalizedItems.length);
       setSelectedResultIndex(-1);
+
+      if (Number.isInteger(journeyPosition.anchorIndex) && journeyPosition.anchorIndex >= 0) {
+        setSelectedResultIndex(journeyPosition.anchorIndex);
+        requestAnimationFrame(() => {
+          const selectedButton = resultsListEl.querySelector(
+            `[data-station-passenger-result-index='${journeyPosition.anchorIndex}']`
+          );
+          if (selectedButton && typeof selectedButton.scrollIntoView === "function") {
+            selectedButton.scrollIntoView({
+              block: "nearest",
+              inline: "nearest"
+            });
+          }
+        });
+      }
     };
 
     const loadJourneyStations = async ({ tripId, item, index }) => {
@@ -2179,7 +2232,7 @@
         }
 
         const items = Array.isArray(data?.items) ? data.items : [];
-        renderResults(items);
+        renderResults(items, data?.requestDateTime || "");
 
         if (items.length === 0) {
           const searchedPlate = normalizePlateDisplay(data?.searchedPlate || displayPlate) || displayPlate;
