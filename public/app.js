@@ -2039,6 +2039,9 @@
       const stationId = String(
         normalizedNextStation?.stationId || normalizedNextStation?.["station-id"] || ""
       ).trim();
+      const stationName = String(
+        normalizedNextStation?.stationName || normalizedNextStation?.["station-name"] || ""
+      ).trim();
       if (!normalizedNextStation || !stationId) {
         nextStopSectionEl.hidden = true;
         nextStopCardEl.hidden = true;
@@ -2056,9 +2059,10 @@
         normalizedNextStation?.departureTime || normalizedNextStation?.["departure-time"] || ""
       ).trim();
       const requestText = String(requestDate || "").trim();
+      const stationDisplay = stationName ? `${stationName} - ${stationId}` : stationId;
 
       nextStopOrderEl.textContent = orderText;
-      nextStopStationEl.textContent = `station-id: ${stationId}`;
+      nextStopStationEl.textContent = `Durak: ${stationDisplay}`;
       nextStopRequestTimeEl.textContent = requestText ? `İstek saati: ${requestText}` : "İstek saati bilinmiyor";
       nextStopDepartureEl.textContent = departureText ? `Kalkış: ${departureText}` : "Kalkış saati yok";
       nextStopSectionEl.hidden = false;

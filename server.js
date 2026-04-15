@@ -4457,6 +4457,28 @@ function extractStationPassengerJourneyStationDepartureTime(node) {
   );
 }
 
+function extractStationPassengerJourneyStationName(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "station-name",
+      "station_name",
+      "stationname",
+      "name",
+      "label",
+      "title",
+      "location-name",
+      "location_name",
+      "locationname",
+      "city-name",
+      "city_name",
+      "cityname"
+    ],
+    2
+  );
+}
+
 function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}) {
   const collected = [];
   const seen = new Set();
@@ -4466,9 +4488,11 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
     const itemJourneyId = extractStationPassengerJourneyId(node) || String(journeyId || "").trim();
     const order = extractStationPassengerJourneyStationOrder(node);
     const stationId = extractStationPassengerJourneyStationId(node);
+    const stationName = extractStationPassengerJourneyStationName(node);
     const departureTime = extractStationPassengerJourneyStationDepartureTime(node);
     const hasUsefulData =
       Number.isFinite(order) ||
+      Boolean(String(stationName || "").trim()) ||
       Boolean(String(stationId || "").trim()) ||
       Boolean(String(departureTime || "").trim());
 
@@ -4492,6 +4516,8 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
       seferId: String(itemJourneyId || "").trim(),
       "journey-id": String(itemJourneyId || "").trim(),
       order: Number.isFinite(order) ? order : null,
+      stationName: String(stationName || "").trim(),
+      "station-name": String(stationName || "").trim(),
       stationId: String(stationId || "").trim(),
       "station-id": String(stationId || "").trim(),
       departureTime: String(departureTime || "").trim(),
