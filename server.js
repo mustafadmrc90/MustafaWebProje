@@ -185,6 +185,11 @@ const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
     process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
       "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations"
   ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/inventory/getjourneystations";
+const STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL =
+  String(
+    process.env.STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL ||
+      "https://api-coreprod-cluster3.obus.com.tr/api/payment/GetPassengerStateHistory"
+  ).trim() || "https://api-coreprod-cluster3.obus.com.tr/api/payment/GetPassengerStateHistory";
 const STATION_PASSENGER_INFO_TIME_ZONE =
   String(process.env.STATION_PASSENGER_INFO_TIME_ZONE || "Europe/Istanbul").trim() || "Europe/Istanbul";
 const STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS =
@@ -4003,6 +4008,28 @@ function buildStationPassengerJourneyStationsRequestBody({
   };
 }
 
+function buildStationPassengerPassengerStateHistoryRequestBody({
+  journeyId = "",
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  dateValue = ""
+} = {}) {
+  return {
+    data: {
+      "journey-id": normalizeStationPassengerJourneyIdForRequest(journeyId),
+      "seat-number": null
+    },
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    token: String(token || "").trim(),
+    date: String(dateValue || "").trim(),
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE
+  };
+}
+
 function buildStationPassengerAuthContext({
   endpointUrl = "",
   companyCode = "",
@@ -4505,6 +4532,283 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
     if (byStationId !== 0) return byStationId;
     return String(a.departureTime || "").localeCompare(String(b.departureTime || ""), "tr");
   });
+}
+
+function extractStationPassengerPassengerName(node) {
+  if (!node || typeof node !== "object") return "";
+
+  const fullName = readStationPassengerTextByAliases(
+    node,
+    [
+      "full-name",
+      "full_name",
+      "fullname",
+      "passenger-name",
+      "passenger_name",
+      "passengername",
+      "customer-name",
+      "customer_name",
+      "customername",
+      "name-surname",
+      "name_surname",
+      "namesurname",
+      "display-name",
+      "display_name",
+      "displayname"
+    ],
+    1
+  );
+  if (fullName) return fullName;
+
+  const firstName = readStationPassengerTextByAliases(
+    node,
+    [
+      "first-name",
+      "first_name",
+      "firstname",
+      "name"
+    ],
+    1
+  );
+  const lastName = readStationPassengerTextByAliases(
+    node,
+    [
+      "last-name",
+      "last_name",
+      "lastname",
+      "surname",
+      "family-name",
+      "family_name",
+      "familyname"
+    ],
+    1
+  );
+
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+
+function extractStationPassengerPassengerSeatNumber(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "seat-number",
+      "seat_number",
+      "seatnumber",
+      "seat-no",
+      "seat_no",
+      "seatno",
+      "seat"
+    ],
+    1
+  );
+}
+
+function extractStationPassengerPassengerOriginId(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "origin-id",
+      "origin_id",
+      "originid",
+      "from-id",
+      "from_id",
+      "fromid",
+      "departure-station-id",
+      "departure_station_id",
+      "departurestationid"
+    ],
+    1
+  );
+}
+
+function extractStationPassengerPassengerDestinationId(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "destination-id",
+      "destination_id",
+      "destinationid",
+      "to-id",
+      "to_id",
+      "toid",
+      "arrival-station-id",
+      "arrival_station_id",
+      "arrivalstationid"
+    ],
+    1
+  );
+}
+
+function extractStationPassengerPassengerTicketNumber(node) {
+  if (!node || typeof node !== "object") return "";
+  return readStationPassengerTextByAliases(
+    node,
+    [
+      "ticket-number",
+      "ticket_number",
+      "ticketnumber",
+      "ticket-no",
+      "ticket_no",
+      "ticketno",
+      "pnr",
+      "reservation-number",
+      "reservation_number",
+      "reservationnumber"
+    ],
+    1
+  );
+}
+
+function buildStationPassengerPassengerDisplayLabel({
+  passengerName = "",
+  seatNumber = "",
+  ticketNumber = ""
+} = {}) {
+  const parts = [];
+  const normalizedName = String(passengerName || "").trim();
+  const normalizedSeatNumber = String(seatNumber || "").trim();
+  const normalizedTicketNumber = String(ticketNumber || "").trim();
+
+  parts.push(normalizedName || (normalizedTicketNumber ? `Bilet ${normalizedTicketNumber}` : "Yolcu"));
+  if (normalizedSeatNumber) {
+    parts.push(`Koltuk ${normalizedSeatNumber}`);
+  }
+
+  return parts.join(" • ").trim();
+}
+
+function parseStationPassengerSeatSortValue(value) {
+  const text = String(value || "").trim();
+  if (!/^\d+$/.test(text)) return Number.MAX_SAFE_INTEGER;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function extractStationPassengerPassengerStateItems(payload, { journeyId = "" } = {}) {
+  const rootPayload =
+    payload && typeof payload === "object" && !Array.isArray(payload) && Object.prototype.hasOwnProperty.call(payload, "data")
+      ? payload.data
+      : payload;
+  const collected = [];
+  const seen = new Set();
+  const visited = new Set();
+
+  const pushCandidate = (node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return;
+
+    const originId = extractStationPassengerPassengerOriginId(node);
+    const destinationId = extractStationPassengerPassengerDestinationId(node);
+    const seatNumber = extractStationPassengerPassengerSeatNumber(node);
+    const passengerName = extractStationPassengerPassengerName(node);
+    const ticketNumber = extractStationPassengerPassengerTicketNumber(node);
+    const itemJourneyId = extractStationPassengerJourneyId(node) || String(journeyId || "").trim();
+    const hasRouting = Boolean(String(originId || "").trim() || String(destinationId || "").trim());
+    const hasIdentity = Boolean(
+      String(passengerName || "").trim() ||
+        String(seatNumber || "").trim() ||
+        String(ticketNumber || "").trim()
+    );
+
+    if (!hasRouting || !hasIdentity) return;
+
+    const dedupeKey = [
+      String(itemJourneyId || "").trim(),
+      String(passengerName || "").trim(),
+      String(seatNumber || "").trim(),
+      String(ticketNumber || "").trim(),
+      String(originId || "").trim(),
+      String(destinationId || "").trim()
+    ]
+      .join("|||")
+      .toLocaleLowerCase("tr");
+
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+
+    collected.push({
+      journeyId: String(itemJourneyId || "").trim(),
+      tripId: String(itemJourneyId || "").trim(),
+      seferId: String(itemJourneyId || "").trim(),
+      passengerName: String(passengerName || "").trim(),
+      seatNumber: String(seatNumber || "").trim(),
+      ticketNumber: String(ticketNumber || "").trim(),
+      originId: String(originId || "").trim(),
+      "origin-id": String(originId || "").trim(),
+      destinationId: String(destinationId || "").trim(),
+      "destination-id": String(destinationId || "").trim(),
+      label: buildStationPassengerPassengerDisplayLabel({
+        passengerName,
+        seatNumber,
+        ticketNumber
+      }),
+      raw: node
+    });
+  };
+
+  const walk = (node, depth = 0, historyScopeActive = false) => {
+    if (depth > 8 || node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) {
+          walk(parsed, depth + 1, historyScopeActive);
+        }
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, depth + 1, historyScopeActive));
+      return;
+    }
+
+    if (!historyScopeActive) {
+      pushCandidate(node);
+    }
+
+    Object.entries(node).forEach(([key, value]) => {
+      const nextHistoryScopeActive = historyScopeActive || normalizeTokenName(key).includes("history");
+      walk(value, depth + 1, nextHistoryScopeActive);
+    });
+  };
+
+  walk(rootPayload);
+
+  return collected.sort((a, b) => {
+    const bySeat = parseStationPassengerSeatSortValue(a.seatNumber) - parseStationPassengerSeatSortValue(b.seatNumber);
+    if (bySeat !== 0) return bySeat;
+    const byName = String(a.passengerName || "").localeCompare(String(b.passengerName || ""), "tr");
+    if (byName !== 0) return byName;
+    return String(a.ticketNumber || "").localeCompare(String(b.ticketNumber || ""), "tr");
+  });
+}
+
+function filterStationPassengerPassengerStateByStationId(items, { stationId = "" } = {}) {
+  const normalizedStationId = String(stationId || "").trim();
+  const normalizedItems = Array.isArray(items) ? items : [];
+  if (!normalizedStationId) {
+    return {
+      boardingPassengers: [],
+      dropoffPassengers: []
+    };
+  }
+
+  return {
+    boardingPassengers: normalizedItems.filter(
+      (item) => String(item?.originId || item?.["origin-id"] || "").trim() === normalizedStationId
+    ),
+    dropoffPassengers: normalizedItems.filter(
+      (item) => String(item?.destinationId || item?.["destination-id"] || "").trim() === normalizedStationId
+    )
+  };
 }
 
 function buildStationPassengerComparableDateTimeKey(value) {
@@ -5119,6 +5423,211 @@ async function fetchStationPassengerJourneyStations({
       items: [],
       requestDate,
       nextStation: null,
+      status: null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchStationPassengerPassengerStateHistory({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  token,
+  journeyId,
+  stationId,
+  authorization = STATION_PASSENGER_INFO_API_AUTH
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+  const normalizedJourneyId = String(journeyId || "").trim();
+  const normalizedStationId = String(stationId || "").trim();
+  const requestDate =
+    formatDateTimeToSecondPrecisionInTimeZone(new Date(), STATION_PASSENGER_INFO_TIME_ZONE).replace(" ", "T");
+  const requestBody = buildStationPassengerPassengerStateHistoryRequestBody({
+    journeyId: normalizedJourneyId,
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    token: normalizedToken,
+    dateValue: requestDate
+  });
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      requestUrl: "",
+      error: "GetPassengerStateHistory URL oluşturulamadı.",
+      detail: "",
+      items: [],
+      boardingPassengers: [],
+      dropoffPassengers: [],
+      requestDate,
+      status: null
+    };
+  }
+
+  if (!normalizedJourneyId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: "journey-id zorunludur.",
+      detail: "",
+      items: [],
+      boardingPassengers: [],
+      dropoffPassengers: [],
+      requestDate,
+      status: null
+    };
+  }
+
+  if (!normalizedStationId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: "station-id zorunludur.",
+      detail: "",
+      items: [],
+      boardingPassengers: [],
+      dropoffPassengers: [],
+      requestDate,
+      status: null
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId || !normalizedToken) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: "GetPassengerStateHistory için session/device/token eksik.",
+      detail: "",
+      items: [],
+      boardingPassengers: [],
+      dropoffPassengers: [],
+      requestDate,
+      status: null
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Payment GetPassengerStateHistory",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        requestUrl: normalizedEndpointUrl,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 140,
+          responseMaxLen: 220
+        }),
+        items: [],
+        boardingPassengers: [],
+        dropoffPassengers: [],
+        requestDate,
+        status: response.status
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          requestUrl: normalizedEndpointUrl,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 140,
+            responseMaxLen: 220
+          }),
+          items: [],
+          boardingPassengers: [],
+          dropoffPassengers: [],
+          requestDate,
+          status: response.status
+        };
+      }
+    }
+
+    const items = extractStationPassengerPassengerStateItems(parsed ?? raw, {
+      journeyId: normalizedJourneyId
+    });
+    const { boardingPassengers, dropoffPassengers } = filterStationPassengerPassengerStateByStationId(items, {
+      stationId: normalizedStationId
+    });
+
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      items,
+      boardingPassengers,
+      dropoffPassengers,
+      requestDate,
+      status: response.status,
+      error: "",
+      detail:
+        items.length > 0
+          ? ""
+          : buildObusServiceTraceText(trace, extractObusApiLogDetail(parsed, raw, ""), {
+              bodyMaxLen: 140,
+              responseMaxLen: 200
+            })
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Payment GetPassengerStateHistory",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "GetPassengerStateHistory isteği başarısız."
+    });
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      error: err?.message || "GetPassengerStateHistory isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "GetPassengerStateHistory isteği başarısız.", {
+        bodyMaxLen: 140,
+        responseMaxLen: 180
+      }),
+      items: [],
+      boardingPassengers: [],
+      dropoffPassengers: [],
+      requestDate,
       status: null
     };
   } finally {
@@ -15968,6 +16477,165 @@ app.post(
           buildObusServiceTraceEntry({
             service: "StationPassengerJourneyStationsApi",
             url: "/api/station-passenger-info/journey-stations",
+            requestBody: req.body || {},
+            responseBody: "",
+            error: err?.message || "Bilinmeyen hata"
+          }),
+          err?.message || "Bilinmeyen hata",
+          {
+            bodyMaxLen: 120,
+            responseMaxLen: 180
+          }
+        )
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/station-passenger-info/passenger-state-history",
+  requireAuth,
+  requireMenuAccess("station-passenger-info"),
+  async (req, res) => {
+    try {
+      const tripId = String(req.body?.tripId || req.body?.journeyId || req.body?.seferId || "").trim();
+      const stationId = String(req.body?.stationId || req.body?.["station-id"] || "").trim();
+      if (!tripId) {
+        return res.status(400).json({ ok: false, error: "journey-id zorunludur." });
+      }
+      if (!stationId) {
+        return res.status(400).json({ ok: false, error: "station-id zorunludur." });
+      }
+
+      const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
+      const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
+      let authContext = getStationPassengerAuthContextFromSession(req);
+      let usedCachedAuth = Boolean(authContext);
+      let authRefreshed = false;
+
+      const ensureFreshAuthContext = async () => {
+        const targetResolution = await resolveStationPassengerTargetCandidate({
+          endpointUrl,
+          clusterLabel
+        });
+        const targetCandidate = targetResolution.candidate;
+        const loginResult = await resolveStationPassengerLoginResult({
+          endpointUrl,
+          companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
+          partnerCode: String(targetCandidate.code || "").trim(),
+          partnerId: String(targetCandidate.id || "").trim(),
+          username: INVENTORY_BRANCHES_LOGIN_USERNAME,
+          password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+          fallbackBranchId: String(targetCandidate.branchId || targetCandidate.id || "").trim(),
+          allowEmptyPartnerCode: false,
+          authorization: STATION_PASSENGER_INFO_API_AUTH,
+          timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+        });
+
+        if (!(loginResult?.ok && String(loginResult.token || "").trim())) {
+          return {
+            ok: false,
+            error: String(loginResult?.error || "").trim() || "UserLogin başarısız.",
+            detail:
+              String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
+              String(targetResolution.partnerError || "").trim()
+          };
+        }
+
+        return {
+          ok: true,
+          authContext: buildStationPassengerAuthContext({
+            endpointUrl,
+            companyCode: String(targetCandidate.code || "").trim(),
+            companyId: String(targetCandidate.id || "").trim(),
+            companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
+            cluster: clusterLabel,
+            loginResult
+          })
+        };
+      };
+
+      if (!authContext) {
+        const authResolution = await ensureFreshAuthContext();
+        if (!authResolution.ok) {
+          clearStationPassengerAuthContextFromSession(req);
+          return res.status(502).json({
+            ok: false,
+            error: authResolution.error,
+            details: authResolution.detail,
+            tripId,
+            stationId,
+            requestUrl: STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL,
+            usedCachedAuth: false,
+            authRefreshed: false
+          });
+        }
+        authContext = authResolution.authContext;
+        saveStationPassengerAuthContextToSession(req, authContext);
+      }
+
+      let fetchResult = await fetchStationPassengerPassengerStateHistory({
+        endpointUrl: STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL,
+        sessionId: authContext.sessionId,
+        deviceId: authContext.deviceId,
+        token: authContext.token,
+        journeyId: tripId,
+        stationId,
+        authorization: STATION_PASSENGER_INFO_API_AUTH
+      });
+
+      if (!fetchResult.ok && usedCachedAuth) {
+        const authResolution = await ensureFreshAuthContext();
+        if (authResolution.ok) {
+          authContext = authResolution.authContext;
+          authRefreshed = true;
+          saveStationPassengerAuthContextToSession(req, authContext);
+          fetchResult = await fetchStationPassengerPassengerStateHistory({
+            endpointUrl: STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL,
+            sessionId: authContext.sessionId,
+            deviceId: authContext.deviceId,
+            token: authContext.token,
+            journeyId: tripId,
+            stationId,
+            authorization: STATION_PASSENGER_INFO_API_AUTH
+          });
+        }
+      }
+
+      if (!fetchResult.ok) {
+        return res.status(502).json({
+          ok: false,
+          error: String(fetchResult.error || "").trim() || "GetPassengerStateHistory başarısız.",
+          details: String(fetchResult.detail || "").trim(),
+          tripId,
+          stationId,
+          requestUrl: fetchResult.requestUrl || STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL,
+          usedCachedAuth,
+          authRefreshed
+        });
+      }
+
+      return res.json({
+        ok: true,
+        tripId,
+        stationId,
+        requestUrl: fetchResult.requestUrl || STATION_PASSENGER_INFO_PASSENGER_STATE_HISTORY_API_URL,
+        requestDate: String(fetchResult.requestDate || "").trim(),
+        items: Array.isArray(fetchResult.items) ? fetchResult.items : [],
+        boardingPassengers: Array.isArray(fetchResult.boardingPassengers) ? fetchResult.boardingPassengers : [],
+        dropoffPassengers: Array.isArray(fetchResult.dropoffPassengers) ? fetchResult.dropoffPassengers : [],
+        usedCachedAuth,
+        authRefreshed
+      });
+    } catch (err) {
+      console.error("Station passenger passenger state history error:", err);
+      return res.status(500).json({
+        ok: false,
+        error: `GetPassengerStateHistory tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`,
+        details: buildObusServiceTraceText(
+          buildObusServiceTraceEntry({
+            service: "StationPassengerStateHistoryApi",
+            url: "/api/station-passenger-info/passenger-state-history",
             requestBody: req.body || {},
             responseBody: "",
             error: err?.message || "Bilinmeyen hata"
