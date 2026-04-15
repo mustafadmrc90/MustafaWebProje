@@ -4465,6 +4465,10 @@ function extractStationPassengerJourneyStationName(node) {
       "station-name",
       "station_name",
       "stationname",
+      "stop-name",
+      "stop_name",
+      "stopname",
+      "station",
       "name",
       "label",
       "title",
@@ -4481,7 +4485,7 @@ function extractStationPassengerJourneyStationName(node) {
 
 function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}) {
   const collected = [];
-  const seen = new Set();
+  const seen = new Map();
   const visited = new Set();
 
   const pushCandidate = (node) => {
@@ -4507,10 +4511,7 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
       .join("|||")
       .toLocaleLowerCase("tr");
 
-    if (seen.has(key)) return;
-    seen.add(key);
-
-    collected.push({
+    const candidate = {
       journeyId: String(itemJourneyId || "").trim(),
       tripId: String(itemJourneyId || "").trim(),
       seferId: String(itemJourneyId || "").trim(),
@@ -4523,7 +4524,27 @@ function extractStationPassengerJourneyStations(payload, { journeyId = "" } = {}
       departureTime: String(departureTime || "").trim(),
       "departure-time": String(departureTime || "").trim(),
       raw: node
-    });
+    };
+
+    const existingIndex = seen.get(key);
+    if (Number.isInteger(existingIndex) && existingIndex >= 0 && collected[existingIndex]) {
+      const existingItem = collected[existingIndex];
+      collected[existingIndex] = {
+        ...existingItem,
+        order: existingItem.order ?? candidate.order,
+        stationName: existingItem.stationName || candidate.stationName,
+        "station-name": existingItem["station-name"] || candidate["station-name"],
+        stationId: existingItem.stationId || candidate.stationId,
+        "station-id": existingItem["station-id"] || candidate["station-id"],
+        departureTime: existingItem.departureTime || candidate.departureTime,
+        "departure-time": existingItem["departure-time"] || candidate["departure-time"],
+        raw: existingItem.raw || candidate.raw
+      };
+      return;
+    }
+
+    seen.set(key, collected.length);
+    collected.push(candidate);
   };
 
   const walk = (node, depth = 0) => {

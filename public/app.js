@@ -1831,7 +1831,6 @@
     const nextStopCardEl = page.querySelector("[data-station-passenger-next-stop]");
     const nextStopOrderEl = page.querySelector("[data-station-passenger-next-stop-order]");
     const nextStopStationEl = page.querySelector("[data-station-passenger-next-stop-station]");
-    const nextStopRequestTimeEl = page.querySelector("[data-station-passenger-next-stop-request-time]");
     const nextStopDepartureEl = page.querySelector("[data-station-passenger-next-stop-departure]");
     const passengerSectionEl = page.querySelector("[data-station-passenger-passenger-section]");
     const passengerStateCardEl = page.querySelector("[data-station-passenger-passenger-state]");
@@ -1849,7 +1848,6 @@
       !nextStopCardEl ||
       !nextStopOrderEl ||
       !nextStopStationEl ||
-      !nextStopRequestTimeEl ||
       !nextStopDepartureEl ||
       !passengerSectionEl ||
       !passengerStateCardEl ||
@@ -2047,7 +2045,6 @@
         nextStopCardEl.hidden = true;
         nextStopOrderEl.textContent = "-";
         nextStopStationEl.textContent = "-";
-        nextStopRequestTimeEl.textContent = "-";
         nextStopDepartureEl.textContent = "-";
         page.stationPassengerSelectedNextStation = null;
         return;
@@ -2058,19 +2055,14 @@
       const departureText = String(
         normalizedNextStation?.departureTime || normalizedNextStation?.["departure-time"] || ""
       ).trim();
-      const requestText = String(requestDate || "").trim();
-      const stationDisplay = stationName ? `${stationName} - ${stationId}` : stationId;
+      const stationDisplay = stationName || stationId;
 
       nextStopOrderEl.textContent = orderText;
       nextStopStationEl.textContent = `Durak: ${stationDisplay}`;
-      nextStopRequestTimeEl.textContent = requestText ? `İstek saati: ${requestText}` : "İstek saati bilinmiyor";
       nextStopDepartureEl.textContent = departureText ? `Kalkış: ${departureText}` : "Kalkış saati yok";
       nextStopSectionEl.hidden = false;
       nextStopCardEl.hidden = false;
-      page.stationPassengerSelectedNextStation = {
-        ...normalizedNextStation,
-        requestDate: requestText
-      };
+      page.stationPassengerSelectedNextStation = normalizedNextStation;
       scrollDetailsIntoView("next-stop");
     };
 
