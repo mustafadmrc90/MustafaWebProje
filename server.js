@@ -4434,7 +4434,9 @@ function extractStationPassengerJourneyStationId(node) {
       "station-id",
       "station_id",
       "stationid",
-      "id"
+      "station-key",
+      "station_key",
+      "stationkey"
     ],
     2
   );
