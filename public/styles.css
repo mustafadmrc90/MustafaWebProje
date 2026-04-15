@@ -4415,9 +4415,9 @@ button.ghost {
 }
 
 .station-passenger-next-stop-badge {
-  min-width: 44px;
+  min-width: 64px;
   min-height: 44px;
-  padding: 8px;
+  padding: 8px 10px;
   border-radius: 14px;
   background: #0f6bdc;
   color: #fff;
@@ -4425,6 +4425,7 @@ button.ghost {
   place-items: center;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .station-passenger-next-stop-meta {

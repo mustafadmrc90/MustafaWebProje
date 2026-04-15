@@ -2001,6 +2001,15 @@
     const buildPassengerStateCacheKey = (tripId, stationId) =>
       [String(tripId || "").trim(), String(stationId || "").trim()].join("|||").toLocaleLowerCase("tr");
 
+    const getTurkishAblativeSuffix = (value) => {
+      const normalized = String(value || "").trim().toLocaleLowerCase("tr");
+      const vowels = normalized.match(/[aeiıioöuü]/g);
+      const lastVowel = Array.isArray(vowels) && vowels.length > 0 ? vowels[vowels.length - 1] : "";
+      if ("aıou".includes(lastVowel)) return "'dan";
+      if ("eiöü".includes(lastVowel)) return "'den";
+      return "'den";
+    };
+
     const parseTimeToMinutes = (value) => {
       const text = String(value || "").trim();
       const match = text.match(/(\d{2}):(\d{2})/);
@@ -2056,10 +2065,11 @@
         normalizedNextStation?.departureTime || normalizedNextStation?.["departure-time"] || ""
       ).trim();
       const stationDisplay = stationName || stationId;
+      const departureLabel = `${stationDisplay}${getTurkishAblativeSuffix(stationDisplay)} Kalkış`;
 
       nextStopOrderEl.textContent = orderText;
-      nextStopStationEl.textContent = `Durak: ${stationDisplay}`;
-      nextStopDepartureEl.textContent = departureText ? `Kalkış: ${departureText}` : "Kalkış saati yok";
+      nextStopStationEl.textContent = `Varılacak Durak: ${stationDisplay}`;
+      nextStopDepartureEl.textContent = departureText ? `${departureLabel}: ${departureText}` : `${departureLabel} saati yok`;
       nextStopSectionEl.hidden = false;
       nextStopCardEl.hidden = false;
       page.stationPassengerSelectedNextStation = normalizedNextStation;
