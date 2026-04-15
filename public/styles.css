@@ -4397,19 +4397,6 @@ button.ghost {
   gap: 12px;
 }
 
-.station-passenger-next-stop-empty {
-  min-height: 104px;
-  border: 1px dashed #d3ddea;
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(247, 250, 255, 0.95) 0%, rgba(240, 245, 252, 0.98) 100%);
-  color: #6b7b8d;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  text-align: center;
-  font-size: 13px;
-}
-
 .station-passenger-next-stop {
   display: grid;
   gap: 12px;
@@ -4466,19 +4453,6 @@ button.ghost {
 .station-passenger-passenger-card {
   display: grid;
   gap: 12px;
-}
-
-.station-passenger-passenger-empty {
-  min-height: 132px;
-  border: 1px dashed #d3ddea;
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(247, 250, 255, 0.95) 0%, rgba(240, 245, 252, 0.98) 100%);
-  color: #6b7b8d;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  text-align: center;
-  font-size: 13px;
 }
 
 .station-passenger-passenger-state {
