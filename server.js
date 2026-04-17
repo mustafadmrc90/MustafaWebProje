@@ -134,6 +134,8 @@ const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGI
 const OBUS_USER_CREATE_LOGIN_PASSWORD = String(
   process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
 );
+const OBUS_USER_CREATE_DEFAULT_PHONE =
+  String(process.env.OBUS_USER_CREATE_DEFAULT_PHONE || "9999999999").trim() || "9999999999";
 const OBUS_USER_CREATE_TIMEOUT_MS = Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_USER_CREATE_CONCURRENCY = Number.parseInt(process.env.OBUS_USER_CREATE_CONCURRENCY || "8", 10) || 8;
 const OBUS_USER_DEACTIVATE_LIST_API_URL =
@@ -14850,6 +14852,7 @@ function buildObusCreateUserRequestBody({
       "full-name": fullName,
       username,
       password,
+      phone: OBUS_USER_CREATE_DEFAULT_PHONE,
       "time-to-change-password": 0,
       branches: [branchIdValue],
       "is-active": true,
