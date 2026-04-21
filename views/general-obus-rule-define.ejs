@@ -36,7 +36,12 @@
       <% } %>
 
       <section class="table-card panel-card obus-rule-define-page-card">
-        <div class="obus-rule-define-workbench" data-obus-rule-define-page="1">
+        <div
+          class="obus-rule-define-workbench"
+          data-obus-rule-define-page="1"
+          data-obus-rule-create-base-url="<%= ruleCreateBaseUrl || '' %>"
+          data-obus-rule-submit-url="/api/obus-rule-define/create"
+        >
           <aside class="obus-rule-define-title-card">
             <h2>Kural Ekle</h2>
           </aside>
@@ -58,7 +63,7 @@
                   aria-haspopup="listbox"
                   aria-expanded="false"
                 >
-                  Hepsi
+                  Firma seçiniz
                 </button>
 
                 <div class="obus-company-dropdown" id="obus-rule-company-dropdown" role="listbox" hidden>
@@ -115,6 +120,10 @@
                 />
               </label>
             </div>
+
+            <div class="obus-rule-define-actions">
+              <button type="button" class="button-link" data-obus-rule-submit="1">İsteği Gönder</button>
+            </div>
           </section>
 
           <article class="obus-rule-define-io-card obus-rule-define-io-card--body">
@@ -130,7 +139,10 @@
               <h3>2. Request</h3>
               <span class="pill muted">Response JSON</span>
             </div>
-            <pre class="allowed-lines-debug-pre" data-obus-rule-request-preview>{}</pre>
+            <pre class="allowed-lines-debug-pre" data-obus-rule-request-preview>{
+  "ok": false,
+  "message": "İstek henüz gönderilmedi."
+}</pre>
           </article>
 
           <div class="obus-rule-define-status muted" data-obus-rule-status="1">

@@ -130,6 +130,16 @@ const OBUS_USER_CREATE_API_URL =
   process.env.OBUS_USER_CREATE_API_URL || "https://api-preprod.obus.com.tr/api/membership/createuser";
 const OBUS_USER_CREATE_API_AUTH =
   process.env.OBUS_USER_CREATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const OBUS_PARTNER_RULE_CREATE_API_URL =
+  process.env.OBUS_PARTNER_RULE_CREATE_API_URL ||
+  "https://api-coreprod-cluster1.obus.com.tr/api/Rule/CreatePartnerRule";
+const OBUS_PARTNER_RULE_CREATE_API_AUTH = process.env.OBUS_PARTNER_RULE_CREATE_API_AUTH || OBUS_USER_CREATE_API_AUTH;
+const OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
+const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
+const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
+  Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
 const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGIN_USERNAME || "admin").trim();
 const OBUS_USER_CREATE_LOGIN_PASSWORD = String(
   process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "O6us&D3V3l0p3r.WaS.H3r3!"
@@ -3111,6 +3121,19 @@ function buildMembershipDeleteUserUrl(baseUrl, clusterLabel = "") {
   try {
     const parsed = new URL(String(clusteredUrl || ""));
     parsed.pathname = "/api/membership/deleteuser";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildObusPartnerRuleCreateUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/Rule/CreatePartnerRule";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -14801,6 +14824,80 @@ function formatObusRequestDate(date = new Date()) {
   return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
 }
 
+function buildObusRuleDefineCompanyOptions(partnerItems = []) {
+  return (Array.isArray(partnerItems) ? partnerItems : []).map((item) => {
+    const value = buildCompanyOptionValue(item);
+    const idText = String(item?.id || "").trim() || "N/A";
+    const clusterText = String(item?.cluster || "").trim() || "cluster";
+    const branchId = String(item?.branchId || "").trim();
+    return {
+      value,
+      label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${branchId || "-"}`,
+      code: String(item?.code || "").trim(),
+      id: String(item?.id || "").trim(),
+      cluster: String(item?.cluster || "").trim(),
+      branchId,
+      url: String(item?.url || "").trim()
+    };
+  });
+}
+
+function buildObusPartnerRuleRequestBody({
+  partnerIdValue,
+  startDate = "",
+  endDate = "",
+  rate = "",
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  usePlaceholders = false
+}) {
+  const normalizedPartnerId =
+    Number.isInteger(partnerIdValue) || typeof partnerIdValue === "number"
+      ? Number(partnerIdValue)
+      : normalizeObusPartnerIdValue(partnerIdValue);
+  const normalizedStartDate = normalizeIsoDateInput(startDate);
+  const normalizedEndDate = normalizeIsoDateInput(endDate);
+  const parsedRate = Number.parseFloat(String(rate || "").trim().replace(",", "."));
+  const startDateIso = parseIsoDateToUtc(normalizedStartDate, false)?.toISOString() || "";
+  const endDateIso = parseIsoDateToUtc(normalizedEndDate, true)?.toISOString() || "";
+  const normalizedRate = Number.isFinite(parsedRate) ? parsedRate : 0;
+
+  return {
+    data: {
+      "partner-id": Number.isInteger(normalizedPartnerId) ? normalizedPartnerId : 0,
+      "rule-id": OBUS_PARTNER_RULE_DEFAULT_RULE_ID,
+      data: {
+        StartDate: startDateIso,
+        StartTime: "00:00",
+        EndDate: endDateIso,
+        EndTime: "23:59",
+        BranchType: 1,
+        CapacityBegin: 1,
+        CapacityEnd: 3,
+        IsActive: true,
+        PriceChange: "Decrease",
+        Rate: normalizedRate,
+        Weekdays: "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday",
+        IncludedBranches: "",
+        IgnoredBranches: "",
+        IncludedRoutes: "",
+        IgnoredRoutes: "",
+        IncludedUsers: "",
+        IgnoredUsers: ""
+      },
+      "partner-rule-station": []
+    },
+    "device-session": {
+      "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
+      "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
+    },
+    date: formatObusRequestDate(new Date()),
+    language: "tr-TR",
+    token: usePlaceholders ? "{{token}}" : String(token || "").trim()
+  };
+}
+
 function buildObusCreateUserPermissions(branchIdValue) {
   const template = [
     { id: 163, group: "Other", type: "CanSeePassengerInformation", "group-name": "Diğer" },
@@ -14892,6 +14989,213 @@ function buildObusCreateUserRequestBody({
     },
     language: "tr-TR",
     token
+  };
+}
+
+async function createObusPartnerRuleForCompany({ company, startDate, endDate, rate }) {
+  const companyLabel = String(company?.label || "").trim() || String(company?.meta?.code || "").trim() || "Firma";
+  const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
+  const partnerCode = String(company?.meta?.code || "").trim();
+  const partnerIdRaw = String(company?.meta?.id || "").trim();
+  const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
+  const branchRaw = String(company?.meta?.branchId || "").trim();
+  const companyUrl = normalizeTargetUrl(company?.meta?.url || "");
+  const clusterSourceUrl = resolvePartnerFetchUrlByCluster(companyCluster);
+  const createRuleBaseUrl =
+    companyUrl || clusterSourceUrl || buildUrlForCluster(OBUS_PARTNER_RULE_CREATE_API_URL, companyCluster) || OBUS_PARTNER_RULE_CREATE_API_URL;
+  const createRuleUrl = normalizeTargetUrl(buildObusPartnerRuleCreateUrl(createRuleBaseUrl, companyCluster));
+
+  if (!Number.isInteger(partnerIdValue)) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: null,
+      status: null,
+      error: "Partner ID bulunamadı."
+    };
+  }
+
+  if (!createRuleUrl) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: "",
+      partnerId: partnerIdValue,
+      status: null,
+      error: "CreatePartnerRule URL oluşturulamadı."
+    };
+  }
+
+  const loginResult = await fetchAuthorizedLinesLoginInfo({
+    endpointUrl: createRuleUrl,
+    companyUrl: companyUrl || createRuleBaseUrl,
+    partnerCode,
+    partnerId: partnerIdRaw,
+    username: OBUS_USER_CREATE_LOGIN_USERNAME,
+    password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+    fallbackBranchId: branchRaw,
+    loginBranchId: branchRaw,
+    timeoutMs: OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS,
+    authorization: OBUS_PARTNER_RULE_CREATE_API_AUTH
+  });
+
+  if (!loginResult.ok) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: partnerIdValue,
+      status: null,
+      error: String(loginResult.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
+      errorDetail: String(loginResult.errorDetail || loginResult.tokenMissingDetail || "").trim()
+    };
+  }
+
+  const token = String(loginResult.token || "").trim();
+  if (!token) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: partnerIdValue,
+      status: null,
+      error: "UserLogin token bulunamadı.",
+      errorDetail:
+        String(loginResult.tokenMissingDetail || loginResult.errorDetail || "").trim() ||
+        (String(loginResult.rawLoginBody || "").trim()
+          ? `UserLogin ham yanıtı: ${truncateObusDebugText(loginResult.rawLoginBody, 260)}`
+          : "")
+    };
+  }
+
+  const requestBodyObject = buildObusPartnerRuleRequestBody({
+    partnerIdValue,
+    startDate,
+    endDate,
+    rate,
+    sessionId: String(loginResult.sessionId || "").trim(),
+    deviceId: String(loginResult.deviceId || "").trim(),
+    token
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS, 90000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(createRuleUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_PARTNER_RULE_CREATE_API_AUTH
+      },
+      body: JSON.stringify(requestBodyObject),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const parsedBody = parsed ?? raw;
+    const apiMessage =
+      (parsed &&
+        typeof parsed === "object" &&
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        label: companyLabel,
+        requestUrl: createRuleUrl,
+        partnerId: partnerIdValue,
+        status: response.status,
+        responseBody: parsedBody,
+        error: `HTTP ${response.status}: ${apiMessage}`
+      };
+    }
+
+    const hasStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    if (hasStatusField && !isSuccessStatusPayload(parsed)) {
+      return {
+        ok: false,
+        label: companyLabel,
+        requestUrl: createRuleUrl,
+        partnerId: partnerIdValue,
+        status: response.status,
+        responseBody: parsedBody,
+        error: apiMessage || "CreatePartnerRule başarısız döndü."
+      };
+    }
+
+    return {
+      ok: true,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: partnerIdValue,
+      status: response.status,
+      responseBody: parsedBody,
+      message: String(apiMessage || "Kural oluşturuldu.").trim()
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: partnerIdValue,
+      status: null,
+      error: err?.message || "CreatePartnerRule isteği gönderilemedi."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function createObusPartnerRulesByCompanies({ companies, startDate, endDate, rate }) {
+  const selectedCompanies = Array.isArray(companies) ? companies : [];
+  if (selectedCompanies.length === 0) {
+    return {
+      successItems: [],
+      failureItems: [],
+      results: []
+    };
+  }
+
+  const workerResults = await runWithConcurrency(
+    selectedCompanies,
+    Math.max(1, OBUS_PARTNER_RULE_CREATE_CONCURRENCY),
+    async (company) => createObusPartnerRuleForCompany({ company, startDate, endDate, rate })
+  );
+
+  const successItems = [];
+  const failureItems = [];
+  const results = workerResults.map((item, index) => {
+    if (item?.ok) {
+      successItems.push(item);
+      return item;
+    }
+    const fallback = {
+      ok: false,
+      label: String(selectedCompanies[index]?.label || "").trim() || "Firma",
+      requestUrl: "",
+      partnerId: null,
+      status: null,
+      error: String(item?.error?.message || item?.error || "CreatePartnerRule isteği başarısız.").trim()
+    };
+    failureItems.push(fallback);
+    return fallback;
+  });
+
+  return {
+    successItems,
+    failureItems,
+    results
   };
 }
 
@@ -16722,22 +17026,7 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
   const rateInput = String(req.query.rate || "1").trim().replace(",", ".");
   const parsedRate = Number.parseFloat(rateInput);
   const rate = Number.isFinite(parsedRate) ? String(parsedRate) : "1";
-
-  const companyOptions = partnerItems.map((item) => {
-    const value = buildCompanyOptionValue(item);
-    const idText = String(item?.id || "").trim() || "N/A";
-    const clusterText = String(item?.cluster || "").trim() || "cluster";
-    const branchId = String(item?.branchId || "").trim();
-    return {
-      value,
-      label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${branchId || "-"}`,
-      code: String(item?.code || "").trim(),
-      id: String(item?.id || "").trim(),
-      cluster: String(item?.cluster || "").trim(),
-      branchId,
-      url: String(item?.url || "").trim()
-    };
-  });
+  const companyOptions = buildObusRuleDefineCompanyOptions(partnerItems);
 
   res.render("general-obus-rule-define", {
     user: req.session.user,
@@ -16745,12 +17034,89 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
     partnerError,
     companyOptions,
     selectedCompaniesJson: JSON.stringify([]),
+    ruleCreateBaseUrl: OBUS_PARTNER_RULE_CREATE_API_URL,
     filters: {
       startDate,
       endDate,
       rate
     }
   });
+});
+
+app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-rule-define"), async (req, res) => {
+  try {
+    const selectedCompanyValues = Array.from(
+      new Set(parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies))
+    );
+    const startDate = normalizeIsoDateInput(String(req.body?.startDate || "").trim());
+    const endDate = normalizeIsoDateInput(String(req.body?.endDate || "").trim());
+    const rateText = String(req.body?.rate || "").trim().replace(",", ".");
+    const parsedRate = Number.parseFloat(rateText);
+
+    if (selectedCompanyValues.length === 0) {
+      return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({ ok: false, error: "StartDate ve EndDate zorunludur." });
+    }
+    if (String(startDate) > String(endDate)) {
+      return res.status(400).json({ ok: false, error: "StartDate, EndDate'ten büyük olamaz." });
+    }
+    if (!Number.isFinite(parsedRate)) {
+      return res.status(400).json({ ok: false, error: "Geçerli bir Rate girilmelidir." });
+    }
+
+    const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+    if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
+      return res.status(400).json({ ok: false, error: partnerError });
+    }
+
+    const optionByValue = new Map(
+      (Array.isArray(companies) ? companies : [])
+        .filter((item) => !item?.disabled && item?.meta)
+        .map((item) => [String(item.value || "").trim(), item])
+    );
+    const selectedCompanies = selectedCompanyValues.map((value) => optionByValue.get(value)).filter(Boolean);
+
+    if (selectedCompanies.length === 0) {
+      return res.status(400).json({ ok: false, error: "Seçilen firmalar Tüm Firmalar listesinde bulunamadı." });
+    }
+
+    const createResult = await createObusPartnerRulesByCompanies({
+      companies: selectedCompanies,
+      startDate,
+      endDate,
+      rate: parsedRate
+    });
+
+    return res.json({
+      ok: createResult.failureItems.length === 0,
+      totalCount: createResult.results.length,
+      successCount: createResult.successItems.length,
+      failureCount: createResult.failureItems.length,
+      filters: {
+        startDate,
+        endDate,
+        rate: parsedRate
+      },
+      results: createResult.results.map((item) => ({
+        company: String(item?.label || "").trim(),
+        partnerId: item?.partnerId ?? null,
+        requestUrl: String(item?.requestUrl || "").trim(),
+        status: Number.isFinite(Number(item?.status)) ? Number(item.status) : null,
+        ok: item?.ok === true,
+        message: String(item?.message || "").trim(),
+        error: String(item?.error || "").trim(),
+        errorDetail: String(item?.errorDetail || "").trim(),
+        responseBody: item?.responseBody ?? null
+      }))
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: `CreatePartnerRule isteği tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`
+    });
+  }
 });
 
 app.get("/general/journey-search", requireAuth, requireMenuAccess("journey-search"), async (req, res) => {

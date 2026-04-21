@@ -1823,6 +1823,8 @@
     root.dataset.bound = "1";
 
     const multiselect = root.querySelector(".obus-company-multiselect");
+    const requestBaseUrl = String(root.getAttribute("data-obus-rule-create-base-url") || "").trim();
+    const submitUrl = String(root.getAttribute("data-obus-rule-submit-url") || "").trim() || "/api/obus-rule-define/create";
     const trigger = root.querySelector("#obus-rule-company-trigger");
     const dropdown = root.querySelector("#obus-rule-company-dropdown");
     const selectAllCheckbox = root.querySelector("[data-obus-rule-select-all='1']");
@@ -1831,6 +1833,7 @@
     const startDateInput = root.querySelector("#obus-rule-start-date");
     const endDateInput = root.querySelector("#obus-rule-end-date");
     const rateInput = root.querySelector("#obus-rule-rate");
+    const submitButton = root.querySelector("[data-obus-rule-submit='1']");
     const bodyPreviewEl = root.querySelector("[data-obus-rule-body-preview]");
     const requestPreviewEl = root.querySelector("[data-obus-rule-request-preview]");
     const statusEl = root.querySelector("[data-obus-rule-status='1']");
@@ -1843,6 +1846,7 @@
       !startDateInput ||
       !endDateInput ||
       !rateInput ||
+      !submitButton ||
       !trigger ||
       !dropdown
     ) {
@@ -1858,6 +1862,11 @@
         return fallback;
       }
     };
+
+    const buildIdleResponsePreview = (errorText = "") =>
+      errorText
+        ? { ok: false, error: String(errorText || "").trim() }
+        : { ok: false, message: "İstek henüz gönderilmedi." };
 
     const readSelectedCompanyValues = () =>
       companyCheckboxes
@@ -1901,10 +1910,7 @@
         : [];
       const allowedValues = new Set(companyCheckboxes.map((item) => String(item.value || "").trim()).filter(Boolean));
       const normalizedInitial = initialValues.filter((value) => allowedValues.has(value));
-      const selectedSet =
-        normalizedInitial.length > 0
-          ? new Set(normalizedInitial)
-          : new Set(companyCheckboxes.map((item) => String(item.value || "").trim()).filter(Boolean));
+      const selectedSet = new Set(normalizedInitial);
 
       companyCheckboxes.forEach((item) => {
         item.checked = selectedSet.has(String(item.value || "").trim());
@@ -1936,81 +1942,166 @@
         }))
         .filter((item) => item.value && item.code);
 
-    const buildRequestBody = () => {
-      const selectedCompanies = readSelectedCompanies();
+    const normalizeIsoDateInput = (value) => {
+      const text = String(value || "").trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+    };
+
+    const buildIsoDateText = (value, endOfDay = false) => {
+      const normalized = normalizeIsoDateInput(value);
+      if (!normalized) return "";
+      const date = new Date(`${normalized}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+      if (Number.isNaN(date.getTime())) return "";
+      return date.toISOString();
+    };
+
+    const buildRequestUrl = (clusterLabel) => {
+      const normalizedCluster = String(clusterLabel || "").trim().toLowerCase();
+      if (!requestBaseUrl) return "";
+      if (/cluster\d+/i.test(requestBaseUrl) && /^cluster\d+$/i.test(normalizedCluster)) {
+        return requestBaseUrl.replace(/cluster\d+/i, normalizedCluster);
+      }
+      return requestBaseUrl;
+    };
+
+    const buildRequestBodyForCompany = (company, { usePlaceholders = true } = {}) => {
       const startDate = String(startDateInput.value || "").trim();
       const endDate = String(endDateInput.value || "").trim();
       const rateText = String(rateInput.value || "").trim().replace(",", ".");
       const parsedRate = Number.parseFloat(rateText);
 
       return {
-        companies: selectedCompanies.map((item) => ({
-          code: item.code,
-          id: item.id,
-          cluster: item.cluster,
-          branchId: item.branchId,
-          url: item.url
-        })),
-        startDate,
-        endDate,
-        rate: Number.isFinite(parsedRate) ? parsedRate : rateText
+        data: {
+          "partner-id": Number.parseInt(String(company?.id || "0").trim(), 10) || 0,
+          "rule-id": 2,
+          data: {
+            StartDate: buildIsoDateText(startDate, false),
+            StartTime: "00:00",
+            EndDate: buildIsoDateText(endDate, true),
+            EndTime: "23:59",
+            BranchType: 1,
+            CapacityBegin: 1,
+            CapacityEnd: 3,
+            IsActive: true,
+            PriceChange: "Decrease",
+            Rate: Number.isFinite(parsedRate) ? parsedRate : rateText,
+            Weekdays: "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday",
+            IncludedBranches: "",
+            IgnoredBranches: "",
+            IncludedRoutes: "",
+            IgnoredRoutes: "",
+            IncludedUsers: "",
+            IgnoredUsers: ""
+          },
+          "partner-rule-station": []
+        },
+        "device-session": {
+          "session-id": usePlaceholders ? "{{sessionId}}" : "",
+          "device-id": usePlaceholders ? "{{deviceId}}" : ""
+        },
+        date: new Date().toISOString().slice(0, 19).replace("T", " "),
+        language: "tr-TR",
+        token: usePlaceholders ? "{{token}}" : ""
       };
     };
 
-    const buildResponseBody = (requestBody) => {
-      const selectedCompanies = Array.isArray(requestBody?.companies) ? requestBody.companies : [];
-      const parsedRate = Number.parseFloat(String(requestBody?.rate || "").trim());
+    const buildValidationState = () => {
+      const selectedCompanies = readSelectedCompanies();
+      const startDate = String(startDateInput.value || "").trim();
+      const endDate = String(endDateInput.value || "").trim();
+      const rateText = String(rateInput.value || "").trim().replace(",", ".");
+      const parsedRate = Number.parseFloat(rateText);
 
       if (selectedCompanies.length === 0) {
-        return {
-          ok: false,
-          error: "En az bir firma seçmelisiniz."
-        };
+        return { ok: false, error: "En az bir firma seçmelisiniz." };
       }
-      if (!String(requestBody?.startDate || "").trim() || !String(requestBody?.endDate || "").trim()) {
-        return {
-          ok: false,
-          error: "StartDate ve EndDate zorunludur."
-        };
+      if (!normalizeIsoDateInput(startDate) || !normalizeIsoDateInput(endDate)) {
+        return { ok: false, error: "StartDate ve EndDate zorunludur." };
       }
-      if (String(requestBody.startDate) > String(requestBody.endDate)) {
-        return {
-          ok: false,
-          error: "StartDate, EndDate'ten büyük olamaz."
-        };
+      if (String(startDate) > String(endDate)) {
+        return { ok: false, error: "StartDate, EndDate'ten büyük olamaz." };
       }
       if (!Number.isFinite(parsedRate)) {
-        return {
-          ok: false,
-          error: "Geçerli bir rate girilmelidir."
-        };
+        return { ok: false, error: "Geçerli bir Rate girilmelidir." };
       }
-
       return {
         ok: true,
-        message: "İstek hazırlandı.",
         companyCount: selectedCompanies.length,
-        rate: parsedRate,
-        dateRange: {
-          startDate: requestBody.startDate,
-          endDate: requestBody.endDate
-        },
-        companies: selectedCompanies.map((item) => ({
-          code: item.code,
-          id: item.id,
-          cluster: item.cluster
-        }))
+        startDate,
+        endDate,
+        rate: parsedRate
       };
     };
 
-    const updateStatus = (responseBody) => {
-      if (responseBody?.ok) {
-        statusEl.textContent = `${Number(responseBody.companyCount || 0)} firma için JSON istek hazırlandı.`;
+    const buildBodyPreviewPayload = () => {
+      const selectedCompanies = readSelectedCompanies();
+      if (selectedCompanies.length === 0) return [];
+      const entries = selectedCompanies.map((company) => {
+        const payload = buildRequestBodyForCompany(company, { usePlaceholders: true });
+        if (selectedCompanies.length === 1) {
+          return payload;
+        }
+        return {
+          company: company.code,
+          requestUrl: buildRequestUrl(company.cluster),
+          body: payload
+        };
+      });
+      return entries.length === 1 ? entries[0] : entries;
+    };
+
+    const buildResponseEntry = (item) => {
+      const responseBody = item?.responseBody;
+      if (responseBody && typeof responseBody === "object") {
+        return responseBody;
+      }
+      if (typeof responseBody === "string" && responseBody.trim()) {
+        return {
+          ok: item?.ok === true,
+          status: Number.isFinite(Number(item?.status)) ? Number(item.status) : null,
+          raw: responseBody
+        };
+      }
+      return {
+        ok: item?.ok === true,
+        status: Number.isFinite(Number(item?.status)) ? Number(item.status) : null,
+        message: String(item?.message || "").trim(),
+        error: String(item?.error || "").trim(),
+        errorDetail: String(item?.errorDetail || "").trim()
+      };
+    };
+
+    const buildResponsePreviewPayload = (payload) => {
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      if (results.length === 0) {
+        return payload;
+      }
+      const entries = results.map((item) => {
+        if (results.length === 1) {
+          return buildResponseEntry(item);
+        }
+        return {
+          company: String(item?.company || "").trim(),
+          requestUrl: String(item?.requestUrl || "").trim(),
+          response: buildResponseEntry(item)
+        };
+      });
+      return entries.length === 1 ? entries[0] : entries;
+    };
+
+    const updateStatus = (validationState, options = {}) => {
+      if (options.loading) {
+        statusEl.textContent = "CreatePartnerRule istekleri gönderiliyor...";
+        statusEl.className = "obus-rule-define-status muted";
+        return;
+      }
+      if (validationState?.ok) {
+        statusEl.textContent = `${Number(validationState.companyCount || 0)} firma için istek hazır. Göndermek için butonu kullanın.`;
         statusEl.className = "obus-rule-define-status inline-success";
         return;
       }
-      if (responseBody?.error) {
-        statusEl.textContent = responseBody.error;
+      if (validationState?.error) {
+        statusEl.textContent = validationState.error;
         statusEl.className = "obus-rule-define-status alert inline-alert";
         return;
       }
@@ -2018,12 +2109,19 @@
       statusEl.className = "obus-rule-define-status muted";
     };
 
-    const updatePreview = () => {
-      const requestBody = buildRequestBody();
-      const responseBody = buildResponseBody(requestBody);
-      bodyPreviewEl.textContent = JSON.stringify(requestBody, null, 2);
-      requestPreviewEl.textContent = JSON.stringify(responseBody, null, 2);
-      updateStatus(responseBody);
+    const updatePreview = ({ preserveResponse = false } = {}) => {
+      const validationState = buildValidationState();
+      const bodyPreviewPayload = buildBodyPreviewPayload();
+      bodyPreviewEl.textContent = JSON.stringify(bodyPreviewPayload, null, 2);
+      if (!preserveResponse) {
+        requestPreviewEl.textContent = JSON.stringify(
+          buildIdleResponsePreview(validationState.ok ? "" : validationState.error),
+          null,
+          2
+        );
+      }
+      updateStatus(validationState);
+      return validationState;
     };
 
     trigger.addEventListener("click", (event) => {
@@ -2043,6 +2141,64 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         closeDropdown();
+      }
+    });
+
+    submitButton.addEventListener("click", async () => {
+      const validationState = updatePreview({ preserveResponse: true });
+      if (!validationState.ok) return;
+
+      closeDropdown();
+      submitButton.disabled = true;
+      updateStatus(validationState, { loading: true });
+
+      try {
+        const response = await fetch(submitUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({
+            selectedCompanies: readSelectedCompanyValues(),
+            startDate: String(startDateInput.value || "").trim(),
+            endDate: String(endDateInput.value || "").trim(),
+            rate: String(rateInput.value || "").trim()
+          })
+        });
+        const data = await parseJsonResponse(response);
+        const payload = data || {
+          ok: false,
+          error: getApiErrorMessage(response, data, "CreatePartnerRule sonucu alınamadı")
+        };
+        requestPreviewEl.textContent = JSON.stringify(buildResponsePreviewPayload(payload), null, 2);
+
+        if (!response.ok || payload?.ok === false) {
+          if (payload?.successCount > 0 || payload?.failureCount > 0) {
+            statusEl.textContent = `${Number(payload.successCount || 0)} başarılı, ${Number(payload.failureCount || 0)} başarısız istek tamamlandı.`;
+            statusEl.className = "obus-rule-define-status alert inline-alert";
+          } else {
+            statusEl.textContent = String(payload?.error || "CreatePartnerRule isteği başarısız.").trim();
+            statusEl.className = "obus-rule-define-status alert inline-alert";
+          }
+          return;
+        }
+
+        statusEl.textContent = `${Number(payload.successCount || 0)} firma için CreatePartnerRule isteği başarıyla tamamlandı.`;
+        statusEl.className = "obus-rule-define-status inline-success";
+      } catch (err) {
+        requestPreviewEl.textContent = JSON.stringify(
+          {
+            ok: false,
+            error: String(err?.message || "CreatePartnerRule isteği gönderilemedi.").trim()
+          },
+          null,
+          2
+        );
+        statusEl.textContent = String(err?.message || "CreatePartnerRule isteği gönderilemedi.").trim();
+        statusEl.className = "obus-rule-define-status alert inline-alert";
+      } finally {
+        submitButton.disabled = false;
       }
     });
 
