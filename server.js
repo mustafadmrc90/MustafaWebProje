@@ -1741,6 +1741,7 @@ function normalizePartnerItems(items) {
     let cluster = "";
     let url = "";
     let branchId = "";
+    let isAbroad = null;
 
     if (typeof item === "string") {
       code = String(item).trim();
@@ -1750,13 +1751,14 @@ function normalizePartnerItems(items) {
       cluster = String(item.cluster || "").trim().toLowerCase();
       url = normalizeTargetUrl(item.url || "");
       branchId = String(item.branchId || "").trim();
+      isAbroad = parseAllCompaniesBooleanValue(item.isAbroad ?? item.isabroad ?? item.is_abroad);
     }
 
     if (!code) return;
 
     const key = `${code}__${id}__${cluster}`;
     if (!byKey.has(key)) {
-      byKey.set(key, { code, id, cluster, url, branchId });
+      byKey.set(key, { code, id, cluster, url, branchId, isAbroad });
       return;
     }
 
@@ -1769,6 +1771,9 @@ function normalizePartnerItems(items) {
     }
     if (!next.branchId && branchId) {
       next = { ...next, branchId };
+    }
+    if (next.isAbroad === null && isAbroad !== null) {
+      next = { ...next, isAbroad };
     }
     if (next !== current) {
       byKey.set(key, next);
@@ -3388,7 +3393,8 @@ async function loadAuthorizedLinesCompanies() {
       id: String(row?.id || "").trim(),
       cluster: extractClusterLabel(String(row?.source || "").trim()),
       url: normalizeTargetUrl(row?.url || ""),
-      branchId: String(row?.ObusMerkezSubeID || row?.obus_merkez_sube_id || "").trim()
+      branchId: String(row?.ObusMerkezSubeID || row?.obus_merkez_sube_id || "").trim(),
+      isAbroad: parseAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad)
     }))
   );
 
@@ -14865,6 +14871,7 @@ function buildObusRuleDefineCompanyOptions(partnerItems = []) {
     const idText = String(item?.id || "").trim() || "N/A";
     const clusterText = String(item?.cluster || "").trim() || "cluster";
     const branchId = String(item?.branchId || "").trim();
+    const isAbroad = parseAllCompaniesBooleanValue(item?.isAbroad ?? item?.isabroad ?? item?.is_abroad);
     return {
       value,
       label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${branchId || "-"}`,
@@ -14872,7 +14879,8 @@ function buildObusRuleDefineCompanyOptions(partnerItems = []) {
       id: String(item?.id || "").trim(),
       cluster: String(item?.cluster || "").trim(),
       branchId,
-      url: String(item?.url || "").trim()
+      url: String(item?.url || "").trim(),
+      isAbroad: isAbroad === null ? "" : isAbroad ? "true" : "false"
     };
   });
 }
@@ -15040,10 +15048,9 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
   const partnerIdRaw = String(company?.meta?.id || "").trim();
   const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
   const branchRaw = String(company?.meta?.branchId || "").trim();
-  const companyUrl = normalizeTargetUrl(company?.meta?.url || "");
   const clusterSourceUrl = resolvePartnerFetchUrlByCluster(companyCluster);
   const createRuleBaseUrl =
-    companyUrl || clusterSourceUrl || buildUrlForCluster(OBUS_PARTNER_RULE_CREATE_API_URL, companyCluster) || OBUS_PARTNER_RULE_CREATE_API_URL;
+    clusterSourceUrl || buildUrlForCluster(OBUS_PARTNER_RULE_CREATE_API_URL, companyCluster) || OBUS_PARTNER_RULE_CREATE_API_URL;
   const createRuleUrl = normalizeTargetUrl(buildObusPartnerRuleCreateUrl(createRuleBaseUrl, companyCluster));
 
   if (!Number.isInteger(partnerIdValue)) {
@@ -15070,7 +15077,7 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
 
   const loginResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl: createRuleUrl,
-    companyUrl: companyUrl || createRuleBaseUrl,
+    companyUrl: "",
     partnerCode,
     partnerId: partnerIdRaw,
     username: OBUS_USER_CREATE_LOGIN_USERNAME,
@@ -17066,6 +17073,8 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
   const today = getTodayIsoDate();
   const startDate = normalizeIsoDateInput(req.query.startDate) || today;
   const endDate = normalizeIsoDateInput(req.query.endDate) || today;
+  const isAbroadFilterRaw = String(req.query.isabroad || "").trim().toLowerCase();
+  const isAbroad = ["true", "false"].includes(isAbroadFilterRaw) ? isAbroadFilterRaw : "all";
   const rateInput = String(req.query.rate || "1").trim().replace(",", ".");
   const parsedRate = Number.parseFloat(rateInput);
   const rate = Number.isFinite(parsedRate) ? String(parsedRate) : "1";
@@ -17085,6 +17094,7 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
     selectedCompaniesJson: JSON.stringify([]),
     ruleCreateBaseUrl: OBUS_PARTNER_RULE_CREATE_API_URL,
     filters: {
+      isAbroad,
       startDate,
       endDate,
       rate,

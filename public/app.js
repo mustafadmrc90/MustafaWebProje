@@ -1827,8 +1827,12 @@
     const submitUrl = String(root.getAttribute("data-obus-rule-submit-url") || "").trim() || "/api/obus-rule-define/create";
     const trigger = root.querySelector("#obus-rule-company-trigger");
     const dropdown = root.querySelector("#obus-rule-company-dropdown");
+    const isAbroadFilterInput = root.querySelector("#obus-rule-isabroad-filter");
     const selectAllCheckbox = root.querySelector("[data-obus-rule-select-all='1']");
+    const selectAllRow = root.querySelector(".obus-company-option-all");
     const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-rule-company-checkbox='1']"));
+    const companyOptionRows = Array.from(root.querySelectorAll(".obus-company-option[data-obus-rule-company-option-row='1']"));
+    const companyFilterEmptyEl = root.querySelector("[data-obus-rule-company-filter-empty='1']");
     const selectedCompaniesInput = root.querySelector("#obus-rule-selected-companies");
     const startDateInput = root.querySelector("#obus-rule-start-date");
     const endDateInput = root.querySelector("#obus-rule-end-date");
@@ -1853,6 +1857,7 @@
       !capacityBeginInput ||
       !capacityEndInput ||
       !submitButton ||
+      !isAbroadFilterInput ||
       !trigger ||
       !dropdown
     ) {
@@ -1897,13 +1902,20 @@
         .map((item) => String(item.value || "").trim())
         .filter(Boolean);
 
+    const readVisibleCompanyCheckboxes = () =>
+      companyCheckboxes.filter((item) => {
+        const row = item.closest("[data-obus-rule-company-option-row='1']");
+        return row && row.hidden !== true;
+      });
+
     const updateCompanyTriggerLabel = () => {
       const selectedValues = readSelectedCompanyValues();
+      const visibleCompanyCheckboxes = readVisibleCompanyCheckboxes();
       if (selectedValues.length === 0) {
         trigger.textContent = "Firma seçiniz";
         return;
       }
-      if (selectedValues.length === companyCheckboxes.length) {
+      if (visibleCompanyCheckboxes.length > 0 && selectedValues.length === visibleCompanyCheckboxes.length) {
         trigger.textContent = "Hepsi";
         return;
       }
@@ -1919,8 +1931,9 @@
 
     const syncSelectedCompanies = () => {
       const selectedValues = readSelectedCompanyValues();
+      const visibleCompanyCheckboxes = readVisibleCompanyCheckboxes();
       if (selectAllCheckbox) {
-        selectAllCheckbox.checked = selectedValues.length > 0 && selectedValues.length === companyCheckboxes.length;
+        selectAllCheckbox.checked = selectedValues.length > 0 && selectedValues.length === visibleCompanyCheckboxes.length;
       }
       selectedCompaniesInput.value = JSON.stringify(selectedValues);
       updateCompanyTriggerLabel();
@@ -1952,10 +1965,37 @@
       trigger.setAttribute("aria-expanded", "true");
     };
 
+    const applyCompanyFilter = () => {
+      const normalizedFilter = String(isAbroadFilterInput.value || "all").trim().toLowerCase();
+      let visibleCount = 0;
+
+      companyOptionRows.forEach((row) => {
+        const checkbox = row.querySelector("[data-obus-rule-company-checkbox='1']");
+        const rowIsAbroad = String(checkbox?.dataset.companyIsabroad || "").trim().toLowerCase();
+        const isMatch = normalizedFilter === "all" || rowIsAbroad === normalizedFilter;
+        row.hidden = !isMatch;
+        if (!isMatch && checkbox) {
+          checkbox.checked = false;
+        }
+        if (isMatch) {
+          visibleCount += 1;
+        }
+      });
+
+      if (selectAllRow) {
+        selectAllRow.hidden = visibleCount === 0;
+      }
+      if (companyFilterEmptyEl) {
+        companyFilterEmptyEl.hidden = visibleCount > 0;
+      }
+      syncSelectedCompanies();
+      return visibleCount;
+    };
+
     const findMatchingCompanyOption = (queryText) => {
       const normalizedQuery = normalizeSearchText(queryText);
       if (!normalizedQuery) return null;
-      const optionRows = Array.from(root.querySelectorAll(".obus-company-option[data-obus-rule-company-option-row='1']"));
+      const optionRows = companyOptionRows.filter((row) => row.hidden !== true);
       return (
         optionRows.find((row) => {
           const labelText = String(row.querySelector("span")?.textContent || "");
@@ -2310,7 +2350,7 @@
     });
 
     selectAllCheckbox?.addEventListener("change", () => {
-      companyCheckboxes.forEach((item) => {
+      readVisibleCompanyCheckboxes().forEach((item) => {
         item.checked = Boolean(selectAllCheckbox.checked);
       });
       syncSelectedCompanies();
@@ -2329,7 +2369,13 @@
       input.addEventListener("change", updatePreview);
     });
 
+    isAbroadFilterInput.addEventListener("change", () => {
+      applyCompanyFilter();
+      updatePreview();
+    });
+
     applyInitialCompanySelection();
+    applyCompanyFilter();
     updatePreview();
   };
 

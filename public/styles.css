@@ -3019,7 +3019,8 @@ button.ghost {
 }
 
 .obus-rule-define-field input[type="date"],
-.obus-rule-define-field input[type="number"] {
+.obus-rule-define-field input[type="number"],
+.obus-rule-define-field select {
   border-radius: 10px;
   border: 1px solid #b9c6d7;
   background: #fff;
@@ -3033,7 +3034,8 @@ button.ghost {
 }
 
 .obus-rule-define-field input[type="date"]:focus,
-.obus-rule-define-field input[type="number"]:focus {
+.obus-rule-define-field input[type="number"]:focus,
+.obus-rule-define-field select:focus {
   outline: none;
   border-color: #8ca4c0;
   background: #fff;
@@ -3052,6 +3054,12 @@ button.ghost {
 .obus-rule-define-io-card {
   min-width: 0;
   align-self: stretch;
+}
+
+.obus-rule-define-io-card .allowed-lines-debug-pre {
+  min-height: 420px;
+  max-height: 520px;
+  padding-bottom: 24px;
 }
 
 .obus-rule-define-io-card--body {

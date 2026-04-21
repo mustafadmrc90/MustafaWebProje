@@ -53,6 +53,15 @@
               value="<%= selectedCompaniesJson || '[]' %>"
             />
 
+            <label class="obus-rule-define-field">
+              <span>IsAbroad Filtresi</span>
+              <select id="obus-rule-isabroad-filter">
+                <option value="all" <%= filters?.isAbroad === 'all' ? 'selected' : '' %>>Hepsi</option>
+                <option value="true" <%= filters?.isAbroad === 'true' ? 'selected' : '' %>>true</option>
+                <option value="false" <%= filters?.isAbroad === 'false' ? 'selected' : '' %>>false</option>
+              </select>
+            </label>
+
             <label class="obus-rule-define-field obus-rule-define-field-company">
               <span>Firmalar</span>
               <div class="obus-company-multiselect">
@@ -85,10 +94,14 @@
                           data-company-cluster="<%= company.cluster %>"
                           data-company-branch-id="<%= company.branchId %>"
                           data-company-url="<%= company.url %>"
+                          data-company-isabroad="<%= company.isAbroad || '' %>"
                         />
                         <span><%= company.label %></span>
                       </label>
                     <% }) %>
+                    <div class="obus-rule-define-company-empty" data-obus-rule-company-filter-empty="1" hidden>
+                      Seçilen IsAbroad filtresine uygun firma bulunamadı.
+                    </div>
                   <% } else { %>
                     <div class="obus-rule-define-company-empty">Tüm Firmalar verisinden gösterilecek firma bulunamadı.</div>
                   <% } %>
