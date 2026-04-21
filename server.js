@@ -3003,6 +3003,11 @@ function extractClusterLabel(url) {
   return match ? match[0].toLowerCase() : "cluster";
 }
 
+function normalizeObusClusterLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return /^cluster\d+$/.test(normalized) ? normalized : "";
+}
+
 function buildSessionUrlForPartnerUrl(partnerUrl) {
   try {
     const parsed = new URL(String(partnerUrl || ""));
@@ -15043,15 +15048,25 @@ function buildObusCreateUserRequestBody({
 
 async function createObusPartnerRuleForCompany({ company, startDate, endDate, rate, capacityBegin, capacityEnd }) {
   const companyLabel = String(company?.label || "").trim() || String(company?.meta?.code || "").trim() || "Firma";
-  const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
+  const companyCluster = normalizeObusClusterLabel(company?.meta?.cluster || company?.cluster || "");
   const partnerCode = String(company?.meta?.code || "").trim();
   const partnerIdRaw = String(company?.meta?.id || "").trim();
   const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
   const branchRaw = String(company?.meta?.branchId || "").trim();
-  const clusterSourceUrl = resolvePartnerFetchUrlByCluster(companyCluster);
-  const createRuleBaseUrl =
-    clusterSourceUrl || buildUrlForCluster(OBUS_PARTNER_RULE_CREATE_API_URL, companyCluster) || OBUS_PARTNER_RULE_CREATE_API_URL;
-  const createRuleUrl = normalizeTargetUrl(buildObusPartnerRuleCreateUrl(createRuleBaseUrl, companyCluster));
+
+  if (!companyCluster) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: "",
+      partnerId: Number.isInteger(partnerIdValue) ? partnerIdValue : null,
+      status: null,
+      error: "Firma için geçerli cluster bilgisi bulunamadı."
+    };
+  }
+
+  const createRuleUrl = normalizeTargetUrl(buildObusPartnerRuleCreateUrl(OBUS_PARTNER_RULE_CREATE_API_URL, companyCluster));
+  const requestCluster = normalizeObusClusterLabel(extractClusterLabel(createRuleUrl));
 
   if (!Number.isInteger(partnerIdValue)) {
     return {
@@ -15072,6 +15087,17 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
       partnerId: partnerIdValue,
       status: null,
       error: "CreatePartnerRule URL oluşturulamadı."
+    };
+  }
+
+  if (requestCluster !== companyCluster) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: createRuleUrl,
+      partnerId: partnerIdValue,
+      status: null,
+      error: `CreatePartnerRule URL'i ${companyCluster} için üretilemedi.`
     };
   }
 

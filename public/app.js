@@ -2067,13 +2067,19 @@
       return date.toISOString();
     };
 
+    const normalizeObusClusterLabel = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return /^cluster\d+$/.test(normalized) ? normalized : "";
+    };
+
     const buildRequestUrl = (clusterLabel) => {
-      const normalizedCluster = String(clusterLabel || "").trim().toLowerCase();
-      if (!requestBaseUrl) return "";
-      if (/cluster\d+/i.test(requestBaseUrl) && /^cluster\d+$/i.test(normalizedCluster)) {
-        return requestBaseUrl.replace(/cluster\d+/i, normalizedCluster);
+      const normalizedCluster = normalizeObusClusterLabel(clusterLabel);
+      if (!requestBaseUrl || !normalizedCluster || !/cluster\d+/i.test(requestBaseUrl)) {
+        return "";
       }
-      return requestBaseUrl;
+      const nextUrl = requestBaseUrl.replace(/cluster\d+/i, normalizedCluster);
+      const matchedCluster = normalizeObusClusterLabel((String(nextUrl).match(/cluster\d+/i) || [])[0] || "");
+      return matchedCluster === normalizedCluster ? nextUrl : "";
     };
 
     const buildRequestBodyForCompany = (company, { usePlaceholders = true } = {}) => {
