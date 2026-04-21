@@ -16714,10 +16714,42 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
   });
 });
 
-app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-define"), (req, res) => {
+app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-define"), async (req, res) => {
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const today = getTodayIsoDate();
+  const startDate = normalizeIsoDateInput(req.query.startDate) || today;
+  const endDate = normalizeIsoDateInput(req.query.endDate) || today;
+  const rateInput = String(req.query.rate || "1").trim().replace(",", ".");
+  const parsedRate = Number.parseFloat(rateInput);
+  const rate = Number.isFinite(parsedRate) ? String(parsedRate) : "1";
+
+  const companyOptions = partnerItems.map((item) => {
+    const value = buildCompanyOptionValue(item);
+    const idText = String(item?.id || "").trim() || "N/A";
+    const clusterText = String(item?.cluster || "").trim() || "cluster";
+    const branchId = String(item?.branchId || "").trim();
+    return {
+      value,
+      label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${branchId || "-"}`,
+      code: String(item?.code || "").trim(),
+      id: String(item?.id || "").trim(),
+      cluster: String(item?.cluster || "").trim(),
+      branchId,
+      url: String(item?.url || "").trim()
+    };
+  });
+
   res.render("general-obus-rule-define", {
     user: req.session.user,
-    active: "obus-rule-define"
+    active: "obus-rule-define",
+    partnerError,
+    companyOptions,
+    selectedCompaniesJson: JSON.stringify([]),
+    filters: {
+      startDate,
+      endDate,
+      rate
+    }
   });
 });
 

@@ -2952,15 +2952,14 @@ button.ghost {
 
 .obus-rule-define-workbench {
   display: grid;
-  grid-template-columns: minmax(170px, 0.9fr) minmax(250px, 1.1fr) repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(180px, 0.72fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 
-.obus-rule-define-step-nav,
+.obus-rule-define-title-card,
 .obus-rule-define-config-card,
-.obus-rule-define-io-card,
-.obus-rule-define-summary-card {
+.obus-rule-define-io-card {
   border: 1px solid #d7e0ec;
   border-radius: 16px;
   background: #f7f9fc;
@@ -2968,96 +2967,29 @@ button.ghost {
   min-width: 0;
 }
 
-.obus-rule-define-step-nav {
+.obus-rule-define-title-card {
   grid-column: 1 / 2;
+  min-height: 100%;
   display: grid;
-  gap: 10px;
+  align-content: start;
 }
 
-.obus-rule-define-step-nav-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.obus-rule-define-step-nav-title {
+.obus-rule-define-title-card h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: #4f6176;
-}
-
-.obus-rule-define-step-button {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid #c5d3e2;
-  background: #fff;
+  font-size: 18px;
+  line-height: 1.2;
   color: #1f2735;
-  box-shadow: none;
-}
-
-.obus-rule-define-step-button:hover {
-  transform: none;
-  box-shadow: none;
-  border-color: #9eb4cc;
-}
-
-.obus-rule-define-step-button.active {
-  background: #1f5fa9;
-  border-color: #1f5fa9;
-  color: #fff;
-}
-
-.obus-rule-define-step-index {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(31, 95, 169, 0.12);
-  color: inherit;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.obus-rule-define-step-button.active .obus-rule-define-step-index {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.obus-rule-define-step-copy {
-  display: grid;
-  gap: 4px;
-}
-
-.obus-rule-define-step-name {
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-.obus-rule-define-step-meta {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.82;
 }
 
 .obus-rule-define-config-card {
-  grid-column: 2 / 3;
+  grid-column: 2 / 4;
+  display: grid;
+  gap: 14px;
 }
 
-.obus-rule-define-fields {
+.obus-rule-define-input-grid {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -3075,113 +3007,47 @@ button.ghost {
   color: #4f6176;
 }
 
-.obus-rule-define-field input[type="text"],
-.obus-rule-define-field input[type="number"],
-.obus-rule-define-field select,
-.obus-rule-define-field textarea {
+.obus-rule-define-field input[type="date"],
+.obus-rule-define-field input[type="number"] {
   border-radius: 10px;
   border: 1px solid #b9c6d7;
   background: #fff;
   padding: 8px 10px;
   font-size: 13px;
-  min-height: 36px;
+  min-height: 38px;
   color: #1f2735;
   width: 100%;
   min-width: 0;
   font-family: inherit;
 }
 
-.obus-rule-define-field textarea {
-  min-height: 92px;
-  resize: vertical;
-}
-
-.obus-rule-define-field input[type="text"]:focus,
-.obus-rule-define-field input[type="number"]:focus,
-.obus-rule-define-field select:focus,
-.obus-rule-define-field textarea:focus {
+.obus-rule-define-field input[type="date"]:focus,
+.obus-rule-define-field input[type="number"]:focus {
   outline: none;
   border-color: #8ca4c0;
   background: #fff;
 }
 
-.obus-rule-define-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid #d7e0ec;
-  border-radius: 12px;
-  background: #fff;
-  padding: 10px 12px;
+.obus-rule-define-field-company small {
+  line-height: 1.4;
 }
 
-.obus-rule-define-toggle-row strong {
+.obus-rule-define-company-empty {
+  padding: 10px 12px;
+  color: #5f6b7a;
   font-size: 13px;
-  color: #1f2735;
 }
 
 .obus-rule-define-io-card {
   min-width: 0;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
-}
-
-.obus-rule-define-io-card.active {
-  border-color: #1f5fa9;
-  box-shadow: 0 0 0 1px rgba(31, 95, 169, 0.12);
-  background: #fdfefe;
 }
 
 .obus-rule-define-io-card--body {
-  grid-column: 3 / 4;
+  grid-column: 2 / 3;
 }
 
 .obus-rule-define-io-card--request {
-  grid-column: 4 / 5;
-}
-
-.obus-rule-define-io-card--response {
-  grid-column: 3 / 5;
-}
-
-.obus-rule-define-note {
-  margin: 10px 0 8px;
-  font-size: 12px;
-  color: #5f6b7a;
-  word-break: break-word;
-}
-
-.obus-rule-define-summary-card {
-  grid-column: 2 / 5;
-}
-
-.obus-rule-define-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.obus-rule-define-summary-item {
-  border: 1px solid #d7e0ec;
-  border-radius: 14px;
-  background: #fff;
-  padding: 12px;
-  display: grid;
-  gap: 6px;
-}
-
-.obus-rule-define-summary-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: #6a7b8f;
-}
-
-.obus-rule-define-summary-item strong {
-  font-size: 14px;
-  color: #1f2735;
-  overflow-wrap: anywhere;
+  grid-column: 3 / 4;
 }
 
 .obus-rule-define-status {
@@ -5679,13 +5545,15 @@ button.ghost {
     grid-template-columns: 1fr;
   }
 
-  .obus-rule-define-step-nav,
   .obus-rule-define-config-card,
+  .obus-rule-define-title-card,
   .obus-rule-define-io-card--body,
-  .obus-rule-define-io-card--request,
-  .obus-rule-define-io-card--response,
-  .obus-rule-define-summary-card {
+  .obus-rule-define-io-card--request {
     grid-column: 1 / -1;
+  }
+
+  .obus-rule-define-input-grid {
+    grid-template-columns: 1fr;
   }
 
   .obus-user-create-grid {

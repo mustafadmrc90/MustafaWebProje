@@ -7,7 +7,7 @@
     <link rel="icon" href="/public/favicon.png" />
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard layout">
+  <body class="dashboard layout obus-rule-define-page">
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
@@ -20,243 +20,121 @@
                 <path d="M8 8h8"></path>
                 <path d="M8 12h8"></path>
                 <path d="M8 16h5"></path>
-                <path d="M17 7v4"></path>
-                <path d="M15 9h4"></path>
               </svg>
             </span>
             <span>Obus Kural Tanımla</span>
           </h1>
-          <p>Kural body, request ve response akışını ayrı panellerde canlı olarak izleyin.</p>
+          <p>Firma, tarih ve rate alanlarına göre JSON istek ve örnek yanıt oluşturun.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
 
+      <% if (partnerError) { %>
+        <div class="alert inline-alert"><%= partnerError %></div>
+      <% } %>
+
       <section class="table-card panel-card obus-rule-define-page-card">
         <div class="obus-rule-define-workbench" data-obus-rule-define-page="1">
-          <aside class="obus-rule-define-step-nav">
-            <div class="obus-rule-define-step-nav-head">
-              <span class="obus-rule-define-step-nav-title">Adımlar</span>
-              <span class="pill muted">3</span>
-            </div>
-
-            <button
-              type="button"
-              class="obus-rule-define-step-button active"
-              data-obus-rule-step-button="body"
-              aria-pressed="true"
-            >
-              <span class="obus-rule-define-step-index">1</span>
-              <span class="obus-rule-define-step-copy">
-                <span class="obus-rule-define-step-name">Body</span>
-                <span class="obus-rule-define-step-meta">Kural alanlarini JSON body olarak hazirla</span>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              class="obus-rule-define-step-button"
-              data-obus-rule-step-button="request"
-              aria-pressed="false"
-            >
-              <span class="obus-rule-define-step-index">2</span>
-              <span class="obus-rule-define-step-copy">
-                <span class="obus-rule-define-step-name">Request</span>
-                <span class="obus-rule-define-step-meta">Endpoint, header ve body paketini goster</span>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              class="obus-rule-define-step-button"
-              data-obus-rule-step-button="response"
-              aria-pressed="false"
-            >
-              <span class="obus-rule-define-step-index">3</span>
-              <span class="obus-rule-define-step-copy">
-                <span class="obus-rule-define-step-name">Response</span>
-                <span class="obus-rule-define-step-meta">Beklenen servis cevabini ayri panelde izle</span>
-              </span>
-            </button>
+          <aside class="obus-rule-define-title-card">
+            <h2>Kural Ekle</h2>
           </aside>
 
           <section class="obus-rule-define-config-card">
-            <div class="journey-search-card-head">
-              <h3>Kural Formu</h3>
-              <span class="pill" data-obus-rule-summary-state-pill>Aktif</span>
-            </div>
+            <input
+              type="hidden"
+              id="obus-rule-selected-companies"
+              value="<%= selectedCompaniesJson || '[]' %>"
+            />
 
-            <div class="obus-rule-define-fields">
-              <label class="obus-rule-define-field">
-                <span>Kural Adi</span>
-                <input
-                  type="text"
-                  id="obus-rule-name"
-                  value="Gece Seferi Uyarisi"
-                  autocomplete="off"
-                  data-obus-rule-field="name"
-                />
-              </label>
+            <label class="obus-rule-define-field obus-rule-define-field-company">
+              <span>Firmalar</span>
+              <div class="obus-company-multiselect">
+                <button
+                  type="button"
+                  class="obus-company-trigger"
+                  id="obus-rule-company-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  Hepsi
+                </button>
 
-              <label class="obus-rule-define-field">
-                <span>Kural Kodu</span>
-                <input
-                  type="text"
-                  id="obus-rule-code"
-                  value=""
-                  placeholder="Bos birakilirsa otomatik uretilir"
-                  autocomplete="off"
-                  data-obus-rule-field="code"
-                />
-              </label>
+                <div class="obus-company-dropdown" id="obus-rule-company-dropdown" role="listbox" hidden>
+                  <% if (companyOptions.length > 0) { %>
+                    <label class="obus-company-option obus-company-option-all">
+                      <input type="checkbox" data-obus-rule-select-all="1" />
+                      <span>Hepsi</span>
+                    </label>
 
-              <label class="obus-rule-define-field">
-                <span>Firma</span>
-                <select id="obus-rule-company" data-obus-rule-field="company">
-                  <option value="METRO">Metro Turizm</option>
-                  <option value="PAMUKKALE">Pamukkale</option>
-                  <option value="VARAN">Varan</option>
-                  <option value="KAMILKOC">Kamil Koc</option>
-                </select>
-              </label>
-
-              <label class="obus-rule-define-field">
-                <span>Tetikleyici</span>
-                <select id="obus-rule-trigger" data-obus-rule-field="trigger">
-                  <option value="JourneyCreated">JourneyCreated</option>
-                  <option value="TicketSold">TicketSold</option>
-                  <option value="TicketCancelled">TicketCancelled</option>
-                  <option value="SeatChanged">SeatChanged</option>
-                </select>
-              </label>
-
-              <label class="obus-rule-define-field">
-                <span>Aksiyon</span>
-                <select id="obus-rule-action" data-obus-rule-field="action">
-                  <option value="Notification">Notification</option>
-                  <option value="BlockSale">BlockSale</option>
-                  <option value="ManualReview">ManualReview</option>
-                  <option value="PriceGuard">PriceGuard</option>
-                </select>
-              </label>
-
-              <label class="obus-rule-define-field">
-                <span>Oncelik</span>
-                <input
-                  type="number"
-                  id="obus-rule-priority"
-                  min="1"
-                  max="999"
-                  value="50"
-                  autocomplete="off"
-                  data-obus-rule-field="priority"
-                />
-              </label>
-
-              <label class="obus-rule-define-field">
-                <span>Endpoint URL</span>
-                <input
-                  type="text"
-                  id="obus-rule-endpoint-url"
-                  value="/api/obus-rules/define"
-                  autocomplete="off"
-                  data-obus-rule-field="endpoint-url"
-                />
-              </label>
-
-              <label class="obus-rule-define-field">
-                <span>Aciklama</span>
-                <textarea
-                  id="obus-rule-notes"
-                  rows="4"
-                  data-obus-rule-field="notes"
-                >22:00 sonrasi seferlerde ek onay akisina bilgi mesaji dusur.</textarea>
-              </label>
-
-              <div class="obus-rule-define-field">
-                <span>Durum</span>
-                <div class="obus-rule-define-toggle-row">
-                  <strong data-obus-rule-active-label>Aktif</strong>
-                  <label class="switch">
-                    <input type="checkbox" id="obus-rule-active" checked data-obus-rule-field="active" />
-                    <span class="slider"></span>
-                  </label>
+                    <% companyOptions.forEach((company) => { %>
+                      <label class="obus-company-option" data-obus-rule-company-option-row="1">
+                        <input
+                          type="checkbox"
+                          data-obus-rule-company-checkbox="1"
+                          value="<%= company.value %>"
+                          data-company-label="<%= company.label %>"
+                          data-company-code="<%= company.code %>"
+                          data-company-id="<%= company.id %>"
+                          data-company-cluster="<%= company.cluster %>"
+                          data-company-branch-id="<%= company.branchId %>"
+                          data-company-url="<%= company.url %>"
+                        />
+                        <span><%= company.label %></span>
+                      </label>
+                    <% }) %>
+                  <% } else { %>
+                    <div class="obus-rule-define-company-empty">Tüm Firmalar verisinden gösterilecek firma bulunamadı.</div>
+                  <% } %>
                 </div>
               </div>
+              <small class="muted">Liste Tüm Firmalar ekranındaki SQL verisinden gelir. Çoklu seçim yapılabilir.</small>
+            </label>
+
+            <div class="obus-rule-define-input-grid">
+              <label class="obus-rule-define-field">
+                <span>StartDate</span>
+                <input type="date" id="obus-rule-start-date" value="<%= filters?.startDate || '' %>" />
+              </label>
+
+              <label class="obus-rule-define-field">
+                <span>EndDate</span>
+                <input type="date" id="obus-rule-end-date" value="<%= filters?.endDate || '' %>" />
+              </label>
+
+              <label class="obus-rule-define-field">
+                <span>Rate</span>
+                <input
+                  type="number"
+                  id="obus-rule-rate"
+                  step="0.01"
+                  min="0"
+                  value="<%= filters?.rate || '1' %>"
+                  autocomplete="off"
+                />
+              </label>
             </div>
           </section>
 
-          <article class="obus-rule-define-io-card obus-rule-define-io-card--body active" data-obus-rule-step-panel="body">
+          <article class="obus-rule-define-io-card obus-rule-define-io-card--body">
             <div class="journey-search-card-head">
               <h3>1. Body</h3>
-              <span class="pill muted">JSON</span>
+              <span class="pill muted">Request JSON</span>
             </div>
-            <div class="obus-rule-define-note">Form alanlari kural objesine donusturulur.</div>
             <pre class="allowed-lines-debug-pre" data-obus-rule-body-preview>{}</pre>
           </article>
 
-          <article class="obus-rule-define-io-card obus-rule-define-io-card--request" data-obus-rule-step-panel="request">
+          <article class="obus-rule-define-io-card obus-rule-define-io-card--request">
             <div class="journey-search-card-head">
               <h3>2. Request</h3>
-              <span class="pill">POST</span>
+              <span class="pill muted">Response JSON</span>
             </div>
-            <div class="journey-search-url-line" data-obus-rule-request-url>URL: /api/obus-rules/define</div>
             <pre class="allowed-lines-debug-pre" data-obus-rule-request-preview>{}</pre>
           </article>
 
-          <article class="obus-rule-define-io-card obus-rule-define-io-card--response" data-obus-rule-step-panel="response">
-            <div class="journey-search-card-head">
-              <h3>3. Response</h3>
-              <div class="journey-search-response-meta">
-                <span class="pill muted" data-obus-rule-response-http>HTTP 200</span>
-              </div>
-            </div>
-            <div class="obus-rule-define-note">Beklenen servis cevabi secilen kurala gore canli guncellenir.</div>
-            <pre class="allowed-lines-debug-pre" data-obus-rule-response-preview>{}</pre>
-          </article>
-
-          <section class="obus-rule-define-summary-card">
-            <div class="journey-search-card-head">
-              <h3>Akis Ozeti</h3>
-              <span class="pulse">Canli Onizleme</span>
-            </div>
-
-            <div class="obus-rule-define-summary-grid">
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Kural</span>
-                <strong data-obus-rule-summary-name>Gece Seferi Uyarisi</strong>
-              </div>
-
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Firma</span>
-                <strong data-obus-rule-summary-company>METRO</strong>
-              </div>
-
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Tetikleyici</span>
-                <strong data-obus-rule-summary-trigger>JourneyCreated</strong>
-              </div>
-
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Aksiyon</span>
-                <strong data-obus-rule-summary-action>Notification</strong>
-              </div>
-
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Hedef URL</span>
-                <strong data-obus-rule-summary-endpoint>/api/obus-rules/define</strong>
-              </div>
-
-              <div class="obus-rule-define-summary-item">
-                <span class="obus-rule-define-summary-label">Son Guncelleme</span>
-                <strong data-obus-rule-summary-updated>-</strong>
-              </div>
-            </div>
-          </section>
-
           <div class="obus-rule-define-status muted" data-obus-rule-status="1">
-            Body, request ve response panelleri form alanlari degistikce birlikte guncellenir.
+            Firma, startDate, endDate ve rate alanlarını güncelledikçe JSON çıktıları yenilenir.
           </div>
         </div>
       </section>

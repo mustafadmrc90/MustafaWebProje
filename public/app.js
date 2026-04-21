@@ -1822,246 +1822,251 @@
     if (root.dataset.bound === "1") return;
     root.dataset.bound = "1";
 
-    const stepButtons = Array.from(root.querySelectorAll("[data-obus-rule-step-button]"));
-    const stepPanels = Array.from(root.querySelectorAll("[data-obus-rule-step-panel]"));
-    const fieldEls = {
-      name: root.querySelector("#obus-rule-name"),
-      code: root.querySelector("#obus-rule-code"),
-      company: root.querySelector("#obus-rule-company"),
-      trigger: root.querySelector("#obus-rule-trigger"),
-      action: root.querySelector("#obus-rule-action"),
-      priority: root.querySelector("#obus-rule-priority"),
-      endpointUrl: root.querySelector("#obus-rule-endpoint-url"),
-      notes: root.querySelector("#obus-rule-notes"),
-      active: root.querySelector("#obus-rule-active")
-    };
+    const multiselect = root.querySelector(".obus-company-multiselect");
+    const trigger = root.querySelector("#obus-rule-company-trigger");
+    const dropdown = root.querySelector("#obus-rule-company-dropdown");
+    const selectAllCheckbox = root.querySelector("[data-obus-rule-select-all='1']");
+    const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-rule-company-checkbox='1']"));
+    const selectedCompaniesInput = root.querySelector("#obus-rule-selected-companies");
+    const startDateInput = root.querySelector("#obus-rule-start-date");
+    const endDateInput = root.querySelector("#obus-rule-end-date");
+    const rateInput = root.querySelector("#obus-rule-rate");
     const bodyPreviewEl = root.querySelector("[data-obus-rule-body-preview]");
     const requestPreviewEl = root.querySelector("[data-obus-rule-request-preview]");
-    const requestUrlEl = root.querySelector("[data-obus-rule-request-url]");
-    const responsePreviewEl = root.querySelector("[data-obus-rule-response-preview]");
-    const responseHttpEl = root.querySelector("[data-obus-rule-response-http]");
     const statusEl = root.querySelector("[data-obus-rule-status='1']");
-    const summaryNameEl = root.querySelector("[data-obus-rule-summary-name]");
-    const summaryCompanyEl = root.querySelector("[data-obus-rule-summary-company]");
-    const summaryTriggerEl = root.querySelector("[data-obus-rule-summary-trigger]");
-    const summaryActionEl = root.querySelector("[data-obus-rule-summary-action]");
-    const summaryEndpointEl = root.querySelector("[data-obus-rule-summary-endpoint]");
-    const summaryUpdatedEl = root.querySelector("[data-obus-rule-summary-updated]");
-    const summaryStatePillEl = root.querySelector("[data-obus-rule-summary-state-pill]");
-    const activeLabelEl = root.querySelector("[data-obus-rule-active-label]");
 
     if (
-      stepButtons.length === 0 ||
-      stepPanels.length === 0 ||
-      !fieldEls.name ||
-      !fieldEls.code ||
-      !fieldEls.company ||
-      !fieldEls.trigger ||
-      !fieldEls.action ||
-      !fieldEls.priority ||
-      !fieldEls.endpointUrl ||
-      !fieldEls.notes ||
-      !fieldEls.active ||
       !bodyPreviewEl ||
       !requestPreviewEl ||
-      !requestUrlEl ||
-      !responsePreviewEl ||
-      !responseHttpEl ||
       !statusEl ||
-      !summaryNameEl ||
-      !summaryCompanyEl ||
-      !summaryTriggerEl ||
-      !summaryActionEl ||
-      !summaryEndpointEl ||
-      !summaryUpdatedEl ||
-      !summaryStatePillEl ||
-      !activeLabelEl
+      !selectedCompaniesInput ||
+      !startDateInput ||
+      !endDateInput ||
+      !rateInput ||
+      !trigger ||
+      !dropdown
     ) {
       return;
     }
 
-    const stepHints = {
-      body: "Body adimi kural alanlarini JSON body olarak uretir.",
-      request: "Request adimi gonderilecek method, URL, header ve body paketini ayri gosterir.",
-      response: "Response adimi beklenen servis cevabinin onizlemesini ayri panelde sunar."
-    };
-    let activeStep = "body";
-
-    const transliterate = (value) =>
-      String(value || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/ı/g, "i")
-        .replace(/İ/g, "I");
-
-    const buildRuleCodeFallback = (name) => {
-      const normalized = transliterate(name)
-        .toUpperCase()
-        .replace(/[^A-Z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-      return normalized || "OBUS_RULE";
+    const parseJson = (raw, fallback) => {
+      const text = String(raw || "").trim();
+      if (!text) return fallback;
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        return fallback;
+      }
     };
 
-    const formatTimestamp = (date) => {
-      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "-";
-      return date.toLocaleString("tr-TR", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
+    const readSelectedCompanyValues = () =>
+      companyCheckboxes
+        .filter((item) => item.checked)
+        .map((item) => String(item.value || "").trim())
+        .filter(Boolean);
+
+    const updateCompanyTriggerLabel = () => {
+      const selectedValues = readSelectedCompanyValues();
+      if (selectedValues.length === 0) {
+        trigger.textContent = "Firma seçiniz";
+        return;
+      }
+      if (selectedValues.length === companyCheckboxes.length) {
+        trigger.textContent = "Hepsi";
+        return;
+      }
+      if (selectedValues.length === 1) {
+        const selectedItem = companyCheckboxes.find((item) => item.checked);
+        trigger.textContent =
+          String(selectedItem?.dataset.companyLabel || selectedItem?.closest("label")?.querySelector("span")?.textContent || "")
+            .trim() || "1 firma seçildi";
+        return;
+      }
+      trigger.textContent = `${selectedValues.length} firma seçildi`;
+    };
+
+    const syncSelectedCompanies = () => {
+      const selectedValues = readSelectedCompanyValues();
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = selectedValues.length > 0 && selectedValues.length === companyCheckboxes.length;
+      }
+      selectedCompaniesInput.value = JSON.stringify(selectedValues);
+      updateCompanyTriggerLabel();
+    };
+
+    const applyInitialCompanySelection = () => {
+      const parsed = parseJson(selectedCompaniesInput.value, []);
+      const initialValues = Array.isArray(parsed)
+        ? parsed.map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+      const allowedValues = new Set(companyCheckboxes.map((item) => String(item.value || "").trim()).filter(Boolean));
+      const normalizedInitial = initialValues.filter((value) => allowedValues.has(value));
+      const selectedSet =
+        normalizedInitial.length > 0
+          ? new Set(normalizedInitial)
+          : new Set(companyCheckboxes.map((item) => String(item.value || "").trim()).filter(Boolean));
+
+      companyCheckboxes.forEach((item) => {
+        item.checked = selectedSet.has(String(item.value || "").trim());
       });
+      syncSelectedCompanies();
     };
 
-    const readValue = (element) => String(element?.value || "").trim();
-
-    const getSelectedOptionLabel = (selectEl) => {
-      const selectedOption = selectEl?.selectedOptions?.[0];
-      return String(selectedOption?.textContent || selectEl?.value || "").trim() || "-";
+    const closeDropdown = () => {
+      dropdown.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
     };
 
-    const buildPayload = () => {
-      const ruleName = readValue(fieldEls.name) || "Yeni Obus Kurali";
-      const ruleCode = readValue(fieldEls.code) || buildRuleCodeFallback(ruleName);
-      const companyCode = readValue(fieldEls.company) || "GENEL";
-      const triggerEvent = readValue(fieldEls.trigger) || "JourneyCreated";
-      const actionType = readValue(fieldEls.action) || "Notification";
-      const endpointUrl = readValue(fieldEls.endpointUrl) || "/api/obus-rules/define";
-      const priorityValue = Number.parseInt(readValue(fieldEls.priority), 10);
-      const notes = readValue(fieldEls.notes);
-      const isActive = Boolean(fieldEls.active.checked);
+    const openDropdown = () => {
+      dropdown.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    };
+
+    const readSelectedCompanies = () =>
+      companyCheckboxes
+        .filter((item) => item.checked)
+        .map((item) => ({
+          value: String(item.value || "").trim(),
+          label: String(item.dataset.companyLabel || "").trim(),
+          code: String(item.dataset.companyCode || "").trim(),
+          id: String(item.dataset.companyId || "").trim(),
+          cluster: String(item.dataset.companyCluster || "").trim(),
+          branchId: String(item.dataset.companyBranchId || "").trim(),
+          url: String(item.dataset.companyUrl || "").trim()
+        }))
+        .filter((item) => item.value && item.code);
+
+    const buildRequestBody = () => {
+      const selectedCompanies = readSelectedCompanies();
+      const startDate = String(startDateInput.value || "").trim();
+      const endDate = String(endDateInput.value || "").trim();
+      const rateText = String(rateInput.value || "").trim().replace(",", ".");
+      const parsedRate = Number.parseFloat(rateText);
 
       return {
-        ruleName,
-        ruleCode,
-        companyCode,
-        priority: Number.isFinite(priorityValue) ? priorityValue : 50,
-        trigger: {
-          source: "Obus",
-          event: triggerEvent,
-          stage: "pre-submit"
-        },
-        action: {
-          type: actionType,
-          endpointUrl,
-          mode: isActive ? "auto" : "draft"
-        },
-        notes,
-        isActive,
-        previewOnly: true
+        companies: selectedCompanies.map((item) => ({
+          code: item.code,
+          id: item.id,
+          cluster: item.cluster,
+          branchId: item.branchId,
+          url: item.url
+        })),
+        startDate,
+        endDate,
+        rate: Number.isFinite(parsedRate) ? parsedRate : rateText
       };
     };
 
-    const buildRequestPreview = (payload) =>
-      JSON.stringify(
-        {
-          method: "POST",
-          url: payload.action.endpointUrl || "/api/obus-rules/define",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Rule-Code": payload.ruleCode,
-            "X-Preview-Mode": "1"
-          },
-          body: payload
-        },
-        null,
-        2
-      );
+    const buildResponseBody = (requestBody) => {
+      const selectedCompanies = Array.isArray(requestBody?.companies) ? requestBody.companies : [];
+      const parsedRate = Number.parseFloat(String(requestBody?.rate || "").trim());
 
-    const buildResponsePreview = (payload) => {
-      const httpStatus = payload.isActive ? 200 : 202;
-      return JSON.stringify(
-        {
-          ok: true,
-          status: payload.isActive ? "active" : "draft",
-          httpStatus,
-          message: payload.isActive
-            ? "Kural kaydedilmeye hazir."
-            : "Kural taslak durumda, yayin oncesi kontrol bekliyor.",
-          data: {
-            ruleId: `${payload.ruleCode}-001`,
-            companyCode: payload.companyCode,
-            triggerEvent: payload.trigger.event,
-            actionType: payload.action.type,
-            endpointUrl: payload.action.endpointUrl,
-            nextStep: payload.isActive ? "publish" : "review"
-          }
+      if (selectedCompanies.length === 0) {
+        return {
+          ok: false,
+          error: "En az bir firma seçmelisiniz."
+        };
+      }
+      if (!String(requestBody?.startDate || "").trim() || !String(requestBody?.endDate || "").trim()) {
+        return {
+          ok: false,
+          error: "StartDate ve EndDate zorunludur."
+        };
+      }
+      if (String(requestBody.startDate) > String(requestBody.endDate)) {
+        return {
+          ok: false,
+          error: "StartDate, EndDate'ten büyük olamaz."
+        };
+      }
+      if (!Number.isFinite(parsedRate)) {
+        return {
+          ok: false,
+          error: "Geçerli bir rate girilmelidir."
+        };
+      }
+
+      return {
+        ok: true,
+        message: "İstek hazırlandı.",
+        companyCount: selectedCompanies.length,
+        rate: parsedRate,
+        dateRange: {
+          startDate: requestBody.startDate,
+          endDate: requestBody.endDate
         },
-        null,
-        2
-      );
+        companies: selectedCompanies.map((item) => ({
+          code: item.code,
+          id: item.id,
+          cluster: item.cluster
+        }))
+      };
     };
 
-    const applyStepState = (stepKey, scrollIntoView = false) => {
-      activeStep = String(stepKey || "").trim() || "body";
-
-      stepButtons.forEach((button) => {
-        const isActive = String(button.dataset.obusRuleStepButton || "").trim() === activeStep;
-        button.classList.toggle("active", isActive);
-        button.setAttribute("aria-pressed", isActive ? "true" : "false");
-      });
-
-      stepPanels.forEach((panel) => {
-        const isActive = String(panel.dataset.obusRuleStepPanel || "").trim() === activeStep;
-        panel.classList.toggle("active", isActive);
-        if (isActive && scrollIntoView) {
-          panel.scrollIntoView({
-            behavior: "smooth",
-            block: "nearest",
-            inline: "nearest"
-          });
-        }
-      });
-    };
-
-    const updateStatus = (payload) => {
-      const baseText = stepHints[activeStep] || "Kural onizlemesi hazir.";
-      const stateText = payload.isActive ? "Kural aktif modda hazir." : "Kural taslak modda izleniyor.";
-      statusEl.textContent = `${baseText} ${stateText}`;
-      statusEl.className = payload.isActive ? "obus-rule-define-status inline-success" : "obus-rule-define-status muted";
+    const updateStatus = (responseBody) => {
+      if (responseBody?.ok) {
+        statusEl.textContent = `${Number(responseBody.companyCount || 0)} firma için JSON istek hazırlandı.`;
+        statusEl.className = "obus-rule-define-status inline-success";
+        return;
+      }
+      if (responseBody?.error) {
+        statusEl.textContent = responseBody.error;
+        statusEl.className = "obus-rule-define-status alert inline-alert";
+        return;
+      }
+      statusEl.textContent = "Firma, startDate, endDate ve rate alanlarını güncelledikçe JSON çıktıları yenilenir.";
+      statusEl.className = "obus-rule-define-status muted";
     };
 
     const updatePreview = () => {
-      const payload = buildPayload();
-      const now = new Date();
-      const httpStatus = payload.isActive ? 200 : 202;
-
-      bodyPreviewEl.textContent = JSON.stringify(payload, null, 2);
-      requestPreviewEl.textContent = buildRequestPreview(payload);
-      requestUrlEl.textContent = `URL: ${payload.action.endpointUrl || "/api/obus-rules/define"}`;
-      responsePreviewEl.textContent = buildResponsePreview(payload);
-      responseHttpEl.textContent = `HTTP ${httpStatus}`;
-      responseHttpEl.className = payload.isActive ? "pill" : "pill muted";
-
-      summaryNameEl.textContent = payload.ruleName;
-      summaryCompanyEl.textContent = getSelectedOptionLabel(fieldEls.company);
-      summaryTriggerEl.textContent = payload.trigger.event;
-      summaryActionEl.textContent = payload.action.type;
-      summaryEndpointEl.textContent = payload.action.endpointUrl || "/api/obus-rules/define";
-      summaryUpdatedEl.textContent = formatTimestamp(now);
-      summaryStatePillEl.textContent = payload.isActive ? "Aktif" : "Taslak";
-      summaryStatePillEl.className = payload.isActive ? "pill" : "pill muted";
-      activeLabelEl.textContent = payload.isActive ? "Aktif" : "Taslak";
-
-      updateStatus(payload);
-      applyStepState(activeStep, false);
+      const requestBody = buildRequestBody();
+      const responseBody = buildResponseBody(requestBody);
+      bodyPreviewEl.textContent = JSON.stringify(requestBody, null, 2);
+      requestPreviewEl.textContent = JSON.stringify(responseBody, null, 2);
+      updateStatus(responseBody);
     };
 
-    stepButtons.forEach((button) => {
-      button.addEventListener("click", () => {
-        applyStepState(button.dataset.obusRuleStepButton || "body", true);
-        updateStatus(buildPayload());
-      });
-    });
-
-    Object.values(fieldEls).forEach((element) => {
-      element.addEventListener("input", updatePreview);
-      if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
-        element.addEventListener("change", updatePreview);
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (dropdown.hidden) {
+        openDropdown();
+      } else {
+        closeDropdown();
       }
     });
 
+    document.addEventListener("click", (event) => {
+      if (!multiselect || multiselect.contains(event.target)) return;
+      closeDropdown();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeDropdown();
+      }
+    });
+
+    selectAllCheckbox?.addEventListener("change", () => {
+      companyCheckboxes.forEach((item) => {
+        item.checked = Boolean(selectAllCheckbox.checked);
+      });
+      syncSelectedCompanies();
+      updatePreview();
+    });
+
+    companyCheckboxes.forEach((item) => {
+      item.addEventListener("change", () => {
+        syncSelectedCompanies();
+        updatePreview();
+      });
+    });
+
+    [startDateInput, endDateInput, rateInput].forEach((input) => {
+      input.addEventListener("input", updatePreview);
+      input.addEventListener("change", updatePreview);
+    });
+
+    applyInitialCompanySelection();
     updatePreview();
   };
 
