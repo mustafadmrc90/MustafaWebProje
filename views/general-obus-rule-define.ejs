@@ -119,6 +119,30 @@
                   autocomplete="off"
                 />
               </label>
+
+              <label class="obus-rule-define-field">
+                <span>CapacityBegin</span>
+                <input
+                  type="number"
+                  id="obus-rule-capacity-begin"
+                  step="1"
+                  min="0"
+                  value="<%= filters?.capacityBegin || '1' %>"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="obus-rule-define-field">
+                <span>CapacityEnd</span>
+                <input
+                  type="number"
+                  id="obus-rule-capacity-end"
+                  step="1"
+                  min="0"
+                  value="<%= filters?.capacityEnd || '3' %>"
+                  autocomplete="off"
+                />
+              </label>
             </div>
 
             <div class="obus-rule-define-actions">
@@ -128,16 +152,16 @@
 
           <article class="obus-rule-define-io-card obus-rule-define-io-card--body">
             <div class="journey-search-card-head">
-              <h3>1. Body</h3>
-              <span class="pill muted">Request JSON</span>
+              <h3>İstek</h3>
+              <span class="pill muted">JSON</span>
             </div>
             <pre class="allowed-lines-debug-pre" data-obus-rule-body-preview>{}</pre>
           </article>
 
           <article class="obus-rule-define-io-card obus-rule-define-io-card--request">
             <div class="journey-search-card-head">
-              <h3>2. Request</h3>
-              <span class="pill muted">Response JSON</span>
+              <h3>Cevap</h3>
+              <span class="pill muted">JSON</span>
             </div>
             <pre class="allowed-lines-debug-pre" data-obus-rule-request-preview>{
   "ok": false,
@@ -146,7 +170,7 @@
           </article>
 
           <div class="obus-rule-define-status muted" data-obus-rule-status="1">
-            Firma, startDate, endDate ve rate alanlarını güncelledikçe JSON çıktıları yenilenir.
+            Firma, startDate, endDate, rate ve capacity alanlarını güncelledikçe JSON çıktıları yenilenir.
           </div>
         </div>
       </section>

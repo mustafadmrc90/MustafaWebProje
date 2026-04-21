@@ -2952,7 +2952,7 @@ button.ghost {
 
 .obus-rule-define-workbench {
   display: grid;
-  grid-template-columns: minmax(180px, 0.72fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
@@ -2968,10 +2968,10 @@ button.ghost {
 }
 
 .obus-rule-define-title-card {
-  grid-column: 1 / 2;
-  min-height: 100%;
+  grid-column: 1 / -1;
   display: grid;
   align-content: start;
+  padding-block: 12px;
 }
 
 .obus-rule-define-title-card h2 {
@@ -2982,15 +2982,26 @@ button.ghost {
 }
 
 .obus-rule-define-config-card {
-  grid-column: 2 / 4;
+  grid-column: 1 / 2;
   display: grid;
   gap: 14px;
+  align-self: stretch;
 }
 
 .obus-rule-define-input-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+.obus-rule-define-actions {
+  display: flex;
+  justify-content: stretch;
+}
+
+.obus-rule-define-actions .button-link {
+  width: 100%;
+  justify-content: center;
 }
 
 .obus-rule-define-field {
@@ -3040,6 +3051,7 @@ button.ghost {
 
 .obus-rule-define-io-card {
   min-width: 0;
+  align-self: stretch;
 }
 
 .obus-rule-define-io-card--body {

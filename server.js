@@ -133,7 +133,8 @@ const OBUS_USER_CREATE_API_AUTH =
 const OBUS_PARTNER_RULE_CREATE_API_URL =
   process.env.OBUS_PARTNER_RULE_CREATE_API_URL ||
   "https://api-coreprod-cluster1.obus.com.tr/api/Rule/CreatePartnerRule";
-const OBUS_PARTNER_RULE_CREATE_API_AUTH = process.env.OBUS_PARTNER_RULE_CREATE_API_AUTH || OBUS_USER_CREATE_API_AUTH;
+const OBUS_PARTNER_RULE_CREATE_API_AUTH =
+  process.env.OBUS_PARTNER_RULE_CREATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 const OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
@@ -1038,6 +1039,7 @@ async function initDb() {
       obilet_partner_id TEXT,
       biletall_partner_id TEXT,
       url TEXT,
+      is_abroad BOOLEAN,
       obus_merkez_sube_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1050,6 +1052,7 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS obilet_partner_id TEXT,
       ADD COLUMN IF NOT EXISTS biletall_partner_id TEXT,
       ADD COLUMN IF NOT EXISTS url TEXT,
+      ADD COLUMN IF NOT EXISTS is_abroad BOOLEAN,
       ADD COLUMN IF NOT EXISTS obus_merkez_sube_id TEXT,
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -1928,6 +1931,27 @@ function formatPartnerCellValue(value) {
   }
 }
 
+function parseAllCompaniesBooleanValue(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  const normalized = normalizeTokenName(value);
+  if (!normalized) return null;
+  if (["true", "1", "yes", "evet"].includes(normalized)) return true;
+  if (["false", "0", "no", "hayir"].includes(normalized)) return false;
+  return null;
+}
+
+function formatAllCompaniesBooleanValue(value) {
+  const parsed = parseAllCompaniesBooleanValue(value);
+  if (parsed === null) return "";
+  return parsed ? "true" : "false";
+}
+
 function buildPartnerRawColumns(rows) {
   const allColumns = new Set();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
@@ -1998,6 +2022,7 @@ function normalizeAllCompaniesReportRows(rows) {
     "obilet-partner-id",
     "biletall-partner-id",
     "url",
+    "isabroad",
     "ObusMerkezSubeID"
   ];
 
@@ -2050,6 +2075,9 @@ function normalizeAllCompaniesReportRows(rows) {
       url: formatPartnerCellValue(
         readPartnerRawValueByAliases(row, ["url", "api_url", "apiUrl", "endpoint_url", "endpointUrl", "base_url", "baseUrl"])
       ),
+      isabroad: formatAllCompaniesBooleanValue(
+        readPartnerRawValueByAliases(row, ["isabroad", "is_abroad", "is-abroad", "isAbroad", "IsAbroad"])
+      ),
       ObusMerkezSubeID: ""
     }));
 
@@ -2078,6 +2106,7 @@ function normalizeAllCompaniesCacheRow(row) {
     "obilet-partner-id": formatPartnerCellValue(row?.["obilet-partner-id"] ?? row?.obilet_partner_id),
     "biletall-partner-id": formatPartnerCellValue(row?.["biletall-partner-id"] ?? row?.biletall_partner_id),
     url: formatPartnerCellValue(row?.url),
+    isabroad: formatAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad ?? row?.["is-abroad"]),
     ObusMerkezSubeID: formatPartnerCellValue(row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id)
   };
 }
@@ -7314,6 +7343,7 @@ async function fetchAllCompaniesRowsFromCache() {
         obilet_partner_id,
         biletall_partner_id,
         url,
+        is_abroad,
         obus_merkez_sube_id,
         updated_at
       FROM all_companies_cache
@@ -7445,6 +7475,7 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
       const obiletPartnerId = String(row?.["obilet-partner-id"] || "").trim() || null;
       const biletallPartnerId = String(row?.["biletall-partner-id"] || "").trim() || null;
       const url = String(row?.url || "").trim() || null;
+      const isAbroad = parseAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad);
       const obusMerkezSubeId = String(row?.ObusMerkezSubeID || "").trim() || null;
       const updateResult = await client.query(
         `
@@ -7452,7 +7483,8 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
           SET obilet_partner_id = $4,
               biletall_partner_id = $5,
               url = $6,
-              obus_merkez_sube_id = COALESCE(NULLIF($7, ''), obus_merkez_sube_id),
+              is_abroad = COALESCE($7, is_abroad),
+              obus_merkez_sube_id = COALESCE(NULLIF($8, ''), obus_merkez_sube_id),
               updated_at = now()
           WHERE id = $1
             AND source = $2
@@ -7465,6 +7497,7 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
           obiletPartnerId,
           biletallPartnerId,
           url,
+          isAbroad,
           obusMerkezSubeId
         ]
       );
@@ -7479,10 +7512,11 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
             obilet_partner_id,
             biletall_partner_id,
             url,
+            is_abroad,
             obus_merkez_sube_id,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
         `,
         [
           id,
@@ -7491,6 +7525,7 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
           obiletPartnerId,
           biletallPartnerId,
           url,
+          isAbroad,
           obusMerkezSubeId
         ]
       );
@@ -14847,6 +14882,8 @@ function buildObusPartnerRuleRequestBody({
   startDate = "",
   endDate = "",
   rate = "",
+  capacityBegin = "",
+  capacityEnd = "",
   sessionId = "",
   deviceId = "",
   token = "",
@@ -14859,9 +14896,13 @@ function buildObusPartnerRuleRequestBody({
   const normalizedStartDate = normalizeIsoDateInput(startDate);
   const normalizedEndDate = normalizeIsoDateInput(endDate);
   const parsedRate = Number.parseFloat(String(rate || "").trim().replace(",", "."));
+  const parsedCapacityBegin = Number.parseInt(String(capacityBegin || "").trim(), 10);
+  const parsedCapacityEnd = Number.parseInt(String(capacityEnd || "").trim(), 10);
   const startDateIso = parseIsoDateToUtc(normalizedStartDate, false)?.toISOString() || "";
   const endDateIso = parseIsoDateToUtc(normalizedEndDate, true)?.toISOString() || "";
   const normalizedRate = Number.isFinite(parsedRate) ? parsedRate : 0;
+  const normalizedCapacityBegin = Number.isInteger(parsedCapacityBegin) ? parsedCapacityBegin : 1;
+  const normalizedCapacityEnd = Number.isInteger(parsedCapacityEnd) ? parsedCapacityEnd : 3;
 
   return {
     data: {
@@ -14873,8 +14914,8 @@ function buildObusPartnerRuleRequestBody({
         EndDate: endDateIso,
         EndTime: "23:59",
         BranchType: 1,
-        CapacityBegin: 1,
-        CapacityEnd: 3,
+        CapacityBegin: normalizedCapacityBegin,
+        CapacityEnd: normalizedCapacityEnd,
         IsActive: true,
         PriceChange: "Decrease",
         Rate: normalizedRate,
@@ -14992,7 +15033,7 @@ function buildObusCreateUserRequestBody({
   };
 }
 
-async function createObusPartnerRuleForCompany({ company, startDate, endDate, rate }) {
+async function createObusPartnerRuleForCompany({ company, startDate, endDate, rate, capacityBegin, capacityEnd }) {
   const companyLabel = String(company?.label || "").trim() || String(company?.meta?.code || "").trim() || "Firma";
   const companyCluster = String(company?.meta?.cluster || "").trim().toLowerCase();
   const partnerCode = String(company?.meta?.code || "").trim();
@@ -15074,6 +15115,8 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
     startDate,
     endDate,
     rate,
+    capacityBegin,
+    capacityEnd,
     sessionId: String(loginResult.sessionId || "").trim(),
     deviceId: String(loginResult.deviceId || "").trim(),
     token
@@ -15157,7 +15200,7 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
   }
 }
 
-async function createObusPartnerRulesByCompanies({ companies, startDate, endDate, rate }) {
+async function createObusPartnerRulesByCompanies({ companies, startDate, endDate, rate, capacityBegin, capacityEnd }) {
   const selectedCompanies = Array.isArray(companies) ? companies : [];
   if (selectedCompanies.length === 0) {
     return {
@@ -15170,7 +15213,7 @@ async function createObusPartnerRulesByCompanies({ companies, startDate, endDate
   const workerResults = await runWithConcurrency(
     selectedCompanies,
     Math.max(1, OBUS_PARTNER_RULE_CREATE_CONCURRENCY),
-    async (company) => createObusPartnerRuleForCompany({ company, startDate, endDate, rate })
+    async (company) => createObusPartnerRuleForCompany({ company, startDate, endDate, rate, capacityBegin, capacityEnd })
   );
 
   const successItems = [];
@@ -17026,6 +17069,12 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
   const rateInput = String(req.query.rate || "1").trim().replace(",", ".");
   const parsedRate = Number.parseFloat(rateInput);
   const rate = Number.isFinite(parsedRate) ? String(parsedRate) : "1";
+  const capacityBeginInput = String(req.query.capacityBegin || "1").trim();
+  const capacityEndInput = String(req.query.capacityEnd || "3").trim();
+  const parsedCapacityBegin = Number.parseInt(capacityBeginInput, 10);
+  const parsedCapacityEnd = Number.parseInt(capacityEndInput, 10);
+  const capacityBegin = Number.isInteger(parsedCapacityBegin) && parsedCapacityBegin >= 0 ? String(parsedCapacityBegin) : "1";
+  const capacityEnd = Number.isInteger(parsedCapacityEnd) && parsedCapacityEnd >= 0 ? String(parsedCapacityEnd) : "3";
   const companyOptions = buildObusRuleDefineCompanyOptions(partnerItems);
 
   res.render("general-obus-rule-define", {
@@ -17038,7 +17087,9 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
     filters: {
       startDate,
       endDate,
-      rate
+      rate,
+      capacityBegin,
+      capacityEnd
     }
   });
 });
@@ -17052,6 +17103,10 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
     const endDate = normalizeIsoDateInput(String(req.body?.endDate || "").trim());
     const rateText = String(req.body?.rate || "").trim().replace(",", ".");
     const parsedRate = Number.parseFloat(rateText);
+    const capacityBeginText = String(req.body?.capacityBegin || "").trim();
+    const capacityEndText = String(req.body?.capacityEnd || "").trim();
+    const parsedCapacityBegin = Number.parseInt(capacityBeginText, 10);
+    const parsedCapacityEnd = Number.parseInt(capacityEndText, 10);
 
     if (selectedCompanyValues.length === 0) {
       return res.status(400).json({ ok: false, error: "En az bir firma seçmelisiniz." });
@@ -17064,6 +17119,15 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
     }
     if (!Number.isFinite(parsedRate)) {
       return res.status(400).json({ ok: false, error: "Geçerli bir Rate girilmelidir." });
+    }
+    if (!Number.isInteger(parsedCapacityBegin) || parsedCapacityBegin < 0) {
+      return res.status(400).json({ ok: false, error: "Geçerli bir CapacityBegin girilmelidir." });
+    }
+    if (!Number.isInteger(parsedCapacityEnd) || parsedCapacityEnd < 0) {
+      return res.status(400).json({ ok: false, error: "Geçerli bir CapacityEnd girilmelidir." });
+    }
+    if (parsedCapacityBegin > parsedCapacityEnd) {
+      return res.status(400).json({ ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." });
     }
 
     const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
@@ -17086,7 +17150,9 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
       companies: selectedCompanies,
       startDate,
       endDate,
-      rate: parsedRate
+      rate: parsedRate,
+      capacityBegin: parsedCapacityBegin,
+      capacityEnd: parsedCapacityEnd
     });
 
     return res.json({
@@ -17097,7 +17163,9 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
       filters: {
         startDate,
         endDate,
-        rate: parsedRate
+        rate: parsedRate,
+        capacityBegin: parsedCapacityBegin,
+        capacityEnd: parsedCapacityEnd
       },
       results: createResult.results.map((item) => ({
         company: String(item?.label || "").trim(),

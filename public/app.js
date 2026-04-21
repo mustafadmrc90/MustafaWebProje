@@ -1833,10 +1833,14 @@
     const startDateInput = root.querySelector("#obus-rule-start-date");
     const endDateInput = root.querySelector("#obus-rule-end-date");
     const rateInput = root.querySelector("#obus-rule-rate");
+    const capacityBeginInput = root.querySelector("#obus-rule-capacity-begin");
+    const capacityEndInput = root.querySelector("#obus-rule-capacity-end");
     const submitButton = root.querySelector("[data-obus-rule-submit='1']");
     const bodyPreviewEl = root.querySelector("[data-obus-rule-body-preview]");
     const requestPreviewEl = root.querySelector("[data-obus-rule-request-preview]");
     const statusEl = root.querySelector("[data-obus-rule-status='1']");
+    let typeAheadText = "";
+    let typeAheadTimerId = null;
 
     if (
       !bodyPreviewEl ||
@@ -1846,6 +1850,8 @@
       !startDateInput ||
       !endDateInput ||
       !rateInput ||
+      !capacityBeginInput ||
+      !capacityEndInput ||
       !submitButton ||
       !trigger ||
       !dropdown
@@ -1867,6 +1873,23 @@
       errorText
         ? { ok: false, error: String(errorText || "").trim() }
         : { ok: false, message: "İstek henüz gönderilmedi." };
+    const normalizeSearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
+    const clearTypeAhead = () => {
+      typeAheadText = "";
+      if (typeAheadTimerId) {
+        clearTimeout(typeAheadTimerId);
+        typeAheadTimerId = null;
+      }
+    };
+    const queueTypeAheadReset = () => {
+      if (typeAheadTimerId) {
+        clearTimeout(typeAheadTimerId);
+      }
+      typeAheadTimerId = setTimeout(() => {
+        typeAheadText = "";
+        typeAheadTimerId = null;
+      }, 900);
+    };
 
     const readSelectedCompanyValues = () =>
       companyCheckboxes
@@ -1921,11 +1944,60 @@
     const closeDropdown = () => {
       dropdown.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
+      clearTypeAhead();
     };
 
     const openDropdown = () => {
       dropdown.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
+    };
+
+    const findMatchingCompanyOption = (queryText) => {
+      const normalizedQuery = normalizeSearchText(queryText);
+      if (!normalizedQuery) return null;
+      const optionRows = Array.from(root.querySelectorAll(".obus-company-option[data-obus-rule-company-option-row='1']"));
+      return (
+        optionRows.find((row) => {
+          const labelText = String(row.querySelector("span")?.textContent || "");
+          return normalizeSearchText(labelText).includes(normalizedQuery);
+        }) || null
+      );
+    };
+
+    const focusCompanyOptionRow = (row) => {
+      if (!row) return;
+      const currentFocusedRows = Array.from(root.querySelectorAll(".obus-company-option-focus"));
+      currentFocusedRows.forEach((item) => item.classList.remove("obus-company-option-focus"));
+      row.scrollIntoView({ block: "nearest" });
+      row.classList.add("obus-company-option-focus");
+      setTimeout(() => {
+        row.classList.remove("obus-company-option-focus");
+      }, 450);
+    };
+
+    const handleTypeAheadKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape" || event.key === "Tab") return;
+
+      let nextQuery = typeAheadText;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        nextQuery = String(typeAheadText || "").slice(0, -1);
+      } else if (event.key.length === 1) {
+        event.preventDefault();
+        nextQuery = `${String(typeAheadText || "")}${event.key}`;
+      } else {
+        return;
+      }
+
+      typeAheadText = normalizeSearchText(nextQuery);
+      queueTypeAheadReset();
+      if (!typeAheadText) return;
+
+      if (dropdown.hidden) {
+        openDropdown();
+      }
+      focusCompanyOptionRow(findMatchingCompanyOption(typeAheadText));
     };
 
     const readSelectedCompanies = () =>
@@ -1969,6 +2041,10 @@
       const endDate = String(endDateInput.value || "").trim();
       const rateText = String(rateInput.value || "").trim().replace(",", ".");
       const parsedRate = Number.parseFloat(rateText);
+      const capacityBeginText = String(capacityBeginInput.value || "").trim();
+      const capacityEndText = String(capacityEndInput.value || "").trim();
+      const parsedCapacityBegin = Number.parseInt(capacityBeginText, 10);
+      const parsedCapacityEnd = Number.parseInt(capacityEndText, 10);
 
       return {
         data: {
@@ -1980,8 +2056,8 @@
             EndDate: buildIsoDateText(endDate, true),
             EndTime: "23:59",
             BranchType: 1,
-            CapacityBegin: 1,
-            CapacityEnd: 3,
+            CapacityBegin: Number.isInteger(parsedCapacityBegin) ? parsedCapacityBegin : capacityBeginText,
+            CapacityEnd: Number.isInteger(parsedCapacityEnd) ? parsedCapacityEnd : capacityEndText,
             IsActive: true,
             PriceChange: "Decrease",
             Rate: Number.isFinite(parsedRate) ? parsedRate : rateText,
@@ -2011,6 +2087,10 @@
       const endDate = String(endDateInput.value || "").trim();
       const rateText = String(rateInput.value || "").trim().replace(",", ".");
       const parsedRate = Number.parseFloat(rateText);
+      const capacityBeginText = String(capacityBeginInput.value || "").trim();
+      const capacityEndText = String(capacityEndInput.value || "").trim();
+      const parsedCapacityBegin = Number.parseInt(capacityBeginText, 10);
+      const parsedCapacityEnd = Number.parseInt(capacityEndText, 10);
 
       if (selectedCompanies.length === 0) {
         return { ok: false, error: "En az bir firma seçmelisiniz." };
@@ -2024,12 +2104,23 @@
       if (!Number.isFinite(parsedRate)) {
         return { ok: false, error: "Geçerli bir Rate girilmelidir." };
       }
+      if (!Number.isInteger(parsedCapacityBegin) || parsedCapacityBegin < 0) {
+        return { ok: false, error: "Geçerli bir CapacityBegin girilmelidir." };
+      }
+      if (!Number.isInteger(parsedCapacityEnd) || parsedCapacityEnd < 0) {
+        return { ok: false, error: "Geçerli bir CapacityEnd girilmelidir." };
+      }
+      if (parsedCapacityBegin > parsedCapacityEnd) {
+        return { ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." };
+      }
       return {
         ok: true,
         companyCount: selectedCompanies.length,
         startDate,
         endDate,
-        rate: parsedRate
+        rate: parsedRate,
+        capacityBegin: parsedCapacityBegin,
+        capacityEnd: parsedCapacityEnd
       };
     };
 
@@ -2105,7 +2196,7 @@
         statusEl.className = "obus-rule-define-status alert inline-alert";
         return;
       }
-      statusEl.textContent = "Firma, startDate, endDate ve rate alanlarını güncelledikçe JSON çıktıları yenilenir.";
+      statusEl.textContent = "Firma, startDate, endDate, rate ve capacity alanlarını güncelledikçe JSON çıktıları yenilenir.";
       statusEl.className = "obus-rule-define-status muted";
     };
 
@@ -2133,6 +2224,10 @@
       }
     });
 
+    trigger.addEventListener("keydown", (event) => {
+      handleTypeAheadKey(event);
+    });
+
     document.addEventListener("click", (event) => {
       if (!multiselect || multiselect.contains(event.target)) return;
       closeDropdown();
@@ -2143,6 +2238,16 @@
         closeDropdown();
       }
     });
+
+    if (multiselect) {
+      multiselect.addEventListener("keydown", (event) => {
+        const activeElement = document.activeElement;
+        const isCheckboxActive =
+          activeElement instanceof HTMLInputElement && activeElement.type === "checkbox";
+        if (!isCheckboxActive) return;
+        handleTypeAheadKey(event);
+      });
+    }
 
     submitButton.addEventListener("click", async () => {
       const validationState = updatePreview({ preserveResponse: true });
@@ -2163,7 +2268,9 @@
             selectedCompanies: readSelectedCompanyValues(),
             startDate: String(startDateInput.value || "").trim(),
             endDate: String(endDateInput.value || "").trim(),
-            rate: String(rateInput.value || "").trim()
+            rate: String(rateInput.value || "").trim(),
+            capacityBegin: String(capacityBeginInput.value || "").trim(),
+            capacityEnd: String(capacityEndInput.value || "").trim()
           })
         });
         const data = await parseJsonResponse(response);
@@ -2217,7 +2324,7 @@
       });
     });
 
-    [startDateInput, endDateInput, rateInput].forEach((input) => {
+    [startDateInput, endDateInput, rateInput, capacityBeginInput, capacityEndInput].forEach((input) => {
       input.addEventListener("input", updatePreview);
       input.addEventListener("change", updatePreview);
     });
