@@ -83,7 +83,11 @@
                     </label>
 
                     <% companyOptions.forEach((company) => { %>
-                      <label class="obus-company-option" data-obus-rule-company-option-row="1">
+                      <label
+                        class="obus-company-option"
+                        data-obus-rule-company-option-row="1"
+                        data-company-isabroad="<%= company.isAbroad || '' %>"
+                      >
                         <input
                           type="checkbox"
                           data-obus-rule-company-checkbox="1"

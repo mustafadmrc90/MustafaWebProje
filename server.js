@@ -1946,8 +1946,8 @@ function parseAllCompaniesBooleanValue(value) {
   }
   const normalized = normalizeTokenName(value);
   if (!normalized) return null;
-  if (["true", "1", "yes", "evet"].includes(normalized)) return true;
-  if (["false", "0", "no", "hayir"].includes(normalized)) return false;
+  if (["true", "1", "yes", "evet", "t", "y", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "hayir", "f", "n", "off"].includes(normalized)) return false;
   return null;
 }
 

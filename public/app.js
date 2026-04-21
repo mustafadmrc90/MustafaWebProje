@@ -1905,7 +1905,7 @@
     const readVisibleCompanyCheckboxes = () =>
       companyCheckboxes.filter((item) => {
         const row = item.closest("[data-obus-rule-company-option-row='1']");
-        return row && row.hidden !== true;
+        return row && row.hidden !== true && String(row.style.display || "").trim() !== "none";
       });
 
     const updateCompanyTriggerLabel = () => {
@@ -1965,15 +1965,31 @@
       trigger.setAttribute("aria-expanded", "true");
     };
 
+    const readCompanyIsAbroadValue = (row, checkbox) =>
+      String(
+        checkbox?.dataset.companyIsabroad ||
+          row?.dataset.companyIsabroad ||
+          row?.getAttribute("data-company-isabroad") ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+
+    const setCompanyRowVisibility = (row, isVisible) => {
+      if (!row) return;
+      row.hidden = !isVisible;
+      row.style.display = isVisible ? "" : "none";
+    };
+
     const applyCompanyFilter = () => {
       const normalizedFilter = String(isAbroadFilterInput.value || "all").trim().toLowerCase();
       let visibleCount = 0;
 
       companyOptionRows.forEach((row) => {
         const checkbox = row.querySelector("[data-obus-rule-company-checkbox='1']");
-        const rowIsAbroad = String(checkbox?.dataset.companyIsabroad || "").trim().toLowerCase();
+        const rowIsAbroad = readCompanyIsAbroadValue(row, checkbox);
         const isMatch = normalizedFilter === "all" || rowIsAbroad === normalizedFilter;
-        row.hidden = !isMatch;
+        setCompanyRowVisibility(row, isMatch);
         if (!isMatch && checkbox) {
           checkbox.checked = false;
         }
@@ -1984,9 +2000,11 @@
 
       if (selectAllRow) {
         selectAllRow.hidden = visibleCount === 0;
+        selectAllRow.style.display = visibleCount === 0 ? "none" : "";
       }
       if (companyFilterEmptyEl) {
         companyFilterEmptyEl.hidden = visibleCount > 0;
+        companyFilterEmptyEl.style.display = visibleCount > 0 ? "none" : "";
       }
       syncSelectedCompanies();
       return visibleCount;
@@ -1995,7 +2013,9 @@
     const findMatchingCompanyOption = (queryText) => {
       const normalizedQuery = normalizeSearchText(queryText);
       if (!normalizedQuery) return null;
-      const optionRows = companyOptionRows.filter((row) => row.hidden !== true);
+      const optionRows = companyOptionRows.filter(
+        (row) => row.hidden !== true && String(row.style.display || "").trim() !== "none"
+      );
       return (
         optionRows.find((row) => {
           const labelText = String(row.querySelector("span")?.textContent || "");
