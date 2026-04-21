@@ -1816,6 +1816,255 @@
     }
   };
 
+  const initObusRuleDefineWorkbench = () => {
+    const root = document.querySelector("[data-obus-rule-define-page='1']");
+    if (!root) return;
+    if (root.dataset.bound === "1") return;
+    root.dataset.bound = "1";
+
+    const stepButtons = Array.from(root.querySelectorAll("[data-obus-rule-step-button]"));
+    const stepPanels = Array.from(root.querySelectorAll("[data-obus-rule-step-panel]"));
+    const fieldEls = {
+      name: root.querySelector("#obus-rule-name"),
+      code: root.querySelector("#obus-rule-code"),
+      company: root.querySelector("#obus-rule-company"),
+      trigger: root.querySelector("#obus-rule-trigger"),
+      action: root.querySelector("#obus-rule-action"),
+      priority: root.querySelector("#obus-rule-priority"),
+      endpointUrl: root.querySelector("#obus-rule-endpoint-url"),
+      notes: root.querySelector("#obus-rule-notes"),
+      active: root.querySelector("#obus-rule-active")
+    };
+    const bodyPreviewEl = root.querySelector("[data-obus-rule-body-preview]");
+    const requestPreviewEl = root.querySelector("[data-obus-rule-request-preview]");
+    const requestUrlEl = root.querySelector("[data-obus-rule-request-url]");
+    const responsePreviewEl = root.querySelector("[data-obus-rule-response-preview]");
+    const responseHttpEl = root.querySelector("[data-obus-rule-response-http]");
+    const statusEl = root.querySelector("[data-obus-rule-status='1']");
+    const summaryNameEl = root.querySelector("[data-obus-rule-summary-name]");
+    const summaryCompanyEl = root.querySelector("[data-obus-rule-summary-company]");
+    const summaryTriggerEl = root.querySelector("[data-obus-rule-summary-trigger]");
+    const summaryActionEl = root.querySelector("[data-obus-rule-summary-action]");
+    const summaryEndpointEl = root.querySelector("[data-obus-rule-summary-endpoint]");
+    const summaryUpdatedEl = root.querySelector("[data-obus-rule-summary-updated]");
+    const summaryStatePillEl = root.querySelector("[data-obus-rule-summary-state-pill]");
+    const activeLabelEl = root.querySelector("[data-obus-rule-active-label]");
+
+    if (
+      stepButtons.length === 0 ||
+      stepPanels.length === 0 ||
+      !fieldEls.name ||
+      !fieldEls.code ||
+      !fieldEls.company ||
+      !fieldEls.trigger ||
+      !fieldEls.action ||
+      !fieldEls.priority ||
+      !fieldEls.endpointUrl ||
+      !fieldEls.notes ||
+      !fieldEls.active ||
+      !bodyPreviewEl ||
+      !requestPreviewEl ||
+      !requestUrlEl ||
+      !responsePreviewEl ||
+      !responseHttpEl ||
+      !statusEl ||
+      !summaryNameEl ||
+      !summaryCompanyEl ||
+      !summaryTriggerEl ||
+      !summaryActionEl ||
+      !summaryEndpointEl ||
+      !summaryUpdatedEl ||
+      !summaryStatePillEl ||
+      !activeLabelEl
+    ) {
+      return;
+    }
+
+    const stepHints = {
+      body: "Body adimi kural alanlarini JSON body olarak uretir.",
+      request: "Request adimi gonderilecek method, URL, header ve body paketini ayri gosterir.",
+      response: "Response adimi beklenen servis cevabinin onizlemesini ayri panelde sunar."
+    };
+    let activeStep = "body";
+
+    const transliterate = (value) =>
+      String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/ı/g, "i")
+        .replace(/İ/g, "I");
+
+    const buildRuleCodeFallback = (name) => {
+      const normalized = transliterate(name)
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      return normalized || "OBUS_RULE";
+    };
+
+    const formatTimestamp = (date) => {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "-";
+      return date.toLocaleString("tr-TR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    };
+
+    const readValue = (element) => String(element?.value || "").trim();
+
+    const getSelectedOptionLabel = (selectEl) => {
+      const selectedOption = selectEl?.selectedOptions?.[0];
+      return String(selectedOption?.textContent || selectEl?.value || "").trim() || "-";
+    };
+
+    const buildPayload = () => {
+      const ruleName = readValue(fieldEls.name) || "Yeni Obus Kurali";
+      const ruleCode = readValue(fieldEls.code) || buildRuleCodeFallback(ruleName);
+      const companyCode = readValue(fieldEls.company) || "GENEL";
+      const triggerEvent = readValue(fieldEls.trigger) || "JourneyCreated";
+      const actionType = readValue(fieldEls.action) || "Notification";
+      const endpointUrl = readValue(fieldEls.endpointUrl) || "/api/obus-rules/define";
+      const priorityValue = Number.parseInt(readValue(fieldEls.priority), 10);
+      const notes = readValue(fieldEls.notes);
+      const isActive = Boolean(fieldEls.active.checked);
+
+      return {
+        ruleName,
+        ruleCode,
+        companyCode,
+        priority: Number.isFinite(priorityValue) ? priorityValue : 50,
+        trigger: {
+          source: "Obus",
+          event: triggerEvent,
+          stage: "pre-submit"
+        },
+        action: {
+          type: actionType,
+          endpointUrl,
+          mode: isActive ? "auto" : "draft"
+        },
+        notes,
+        isActive,
+        previewOnly: true
+      };
+    };
+
+    const buildRequestPreview = (payload) =>
+      JSON.stringify(
+        {
+          method: "POST",
+          url: payload.action.endpointUrl || "/api/obus-rules/define",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Rule-Code": payload.ruleCode,
+            "X-Preview-Mode": "1"
+          },
+          body: payload
+        },
+        null,
+        2
+      );
+
+    const buildResponsePreview = (payload) => {
+      const httpStatus = payload.isActive ? 200 : 202;
+      return JSON.stringify(
+        {
+          ok: true,
+          status: payload.isActive ? "active" : "draft",
+          httpStatus,
+          message: payload.isActive
+            ? "Kural kaydedilmeye hazir."
+            : "Kural taslak durumda, yayin oncesi kontrol bekliyor.",
+          data: {
+            ruleId: `${payload.ruleCode}-001`,
+            companyCode: payload.companyCode,
+            triggerEvent: payload.trigger.event,
+            actionType: payload.action.type,
+            endpointUrl: payload.action.endpointUrl,
+            nextStep: payload.isActive ? "publish" : "review"
+          }
+        },
+        null,
+        2
+      );
+    };
+
+    const applyStepState = (stepKey, scrollIntoView = false) => {
+      activeStep = String(stepKey || "").trim() || "body";
+
+      stepButtons.forEach((button) => {
+        const isActive = String(button.dataset.obusRuleStepButton || "").trim() === activeStep;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      stepPanels.forEach((panel) => {
+        const isActive = String(panel.dataset.obusRuleStepPanel || "").trim() === activeStep;
+        panel.classList.toggle("active", isActive);
+        if (isActive && scrollIntoView) {
+          panel.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "nearest"
+          });
+        }
+      });
+    };
+
+    const updateStatus = (payload) => {
+      const baseText = stepHints[activeStep] || "Kural onizlemesi hazir.";
+      const stateText = payload.isActive ? "Kural aktif modda hazir." : "Kural taslak modda izleniyor.";
+      statusEl.textContent = `${baseText} ${stateText}`;
+      statusEl.className = payload.isActive ? "obus-rule-define-status inline-success" : "obus-rule-define-status muted";
+    };
+
+    const updatePreview = () => {
+      const payload = buildPayload();
+      const now = new Date();
+      const httpStatus = payload.isActive ? 200 : 202;
+
+      bodyPreviewEl.textContent = JSON.stringify(payload, null, 2);
+      requestPreviewEl.textContent = buildRequestPreview(payload);
+      requestUrlEl.textContent = `URL: ${payload.action.endpointUrl || "/api/obus-rules/define"}`;
+      responsePreviewEl.textContent = buildResponsePreview(payload);
+      responseHttpEl.textContent = `HTTP ${httpStatus}`;
+      responseHttpEl.className = payload.isActive ? "pill" : "pill muted";
+
+      summaryNameEl.textContent = payload.ruleName;
+      summaryCompanyEl.textContent = getSelectedOptionLabel(fieldEls.company);
+      summaryTriggerEl.textContent = payload.trigger.event;
+      summaryActionEl.textContent = payload.action.type;
+      summaryEndpointEl.textContent = payload.action.endpointUrl || "/api/obus-rules/define";
+      summaryUpdatedEl.textContent = formatTimestamp(now);
+      summaryStatePillEl.textContent = payload.isActive ? "Aktif" : "Taslak";
+      summaryStatePillEl.className = payload.isActive ? "pill" : "pill muted";
+      activeLabelEl.textContent = payload.isActive ? "Aktif" : "Taslak";
+
+      updateStatus(payload);
+      applyStepState(activeStep, false);
+    };
+
+    stepButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        applyStepState(button.dataset.obusRuleStepButton || "body", true);
+        updateStatus(buildPayload());
+      });
+    });
+
+    Object.values(fieldEls).forEach((element) => {
+      element.addEventListener("input", updatePreview);
+      if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+        element.addEventListener("change", updatePreview);
+      }
+    });
+
+    updatePreview();
+  };
+
   const initStationPassengerInfoPage = () => {
     const page = document.querySelector("[data-station-passenger-page='1']");
     if (!page) return;
@@ -4616,6 +4865,7 @@
     initSlackReportLoading();
     initAllowedLinesLoading();
     initJourneySearchForm();
+    initObusRuleDefineWorkbench();
     initStationPassengerInfoPage();
     initObusUserCreateBuilder();
     initObusUserDeactivateForm();
