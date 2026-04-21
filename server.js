@@ -365,6 +365,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "obus-user-deactivate"
   },
   {
+    key: "obus-rule-define",
+    type: "item",
+    label: "Obus Kural Tanımla",
+    parentKey: "general",
+    route: "/general/obus-rule-define",
+    routeKey: "obus-rule-define",
+    sortOrder: 19,
+    iconKey: "obus-rule-define"
+  },
+  {
     key: "reports",
     type: "section",
     label: "Raporlar",
@@ -611,6 +621,13 @@ function classifyDbErrorForUser(err) {
     normalized.includes("access denied")
   ) {
     return "Veritabani kullanicisinin tablo olusturma/guncelleme yetkisi yok.";
+  }
+  if (
+    normalized.includes("compute time quota") ||
+    normalized.includes("exceeded the compute time quota") ||
+    (normalized.includes("quota") && normalized.includes("project"))
+  ) {
+    return "Veritabani kotasi dolmus veya askiya alinmis. Canli ortamdaki DATABASE_URL baglantisini ve saglayici plan limitlerini kontrol edin.";
   }
 
   return summary;
@@ -1388,6 +1405,7 @@ async function syncSidebarMenusAndPermissions() {
         CASE
           WHEN m.type = 'section' THEN true
           WHEN m.key = 'obus-user-deactivate' THEN true
+          WHEN m.key = 'obus-rule-define' THEN true
           WHEN m.key = 'journey-search' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
@@ -1424,6 +1442,7 @@ async function ensureSidebarPermissionsForUser(userId) {
         CASE
           WHEN m.type = 'section' THEN true
           WHEN m.key = 'obus-user-deactivate' THEN true
+          WHEN m.key = 'obus-rule-define' THEN true
           WHEN m.key = 'journey-search' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
@@ -16692,6 +16711,13 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
     filters,
     companies,
     report
+  });
+});
+
+app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-define"), (req, res) => {
+  res.render("general-obus-rule-define", {
+    user: req.session.user,
+    active: "obus-rule-define"
   });
 });
 
