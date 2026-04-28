@@ -24,7 +24,7 @@
             </span>
             <span>Obus Kural Tanımla</span>
           </h1>
-          <p>Firma, tarih ve rate alanlarına göre JSON istek ve örnek yanıt oluşturun.</p>
+          <p>Firma, tarih ve oran alanlarına göre kural ekleme veya güncelleme JSON istekleri oluşturun.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -40,10 +40,35 @@
           class="obus-rule-define-workbench"
           data-obus-rule-define-page="1"
           data-obus-rule-create-base-url="<%= ruleCreateBaseUrl || '' %>"
-          data-obus-rule-submit-url="/api/obus-rule-define/create"
+          data-obus-rule-update-base-url="<%= ruleUpdateBaseUrl || '' %>"
+          data-obus-rule-create-submit-url="/api/obus-rule-define/create"
+          data-obus-rule-update-submit-url="/api/obus-rule-define/update"
         >
           <aside class="obus-rule-define-title-card">
-            <h2>Kural Ekle</h2>
+            <h2>İşlem Tipi</h2>
+            <div class="obus-rule-define-mode-list" role="tablist" aria-label="Kural işlemleri">
+              <button
+                type="button"
+                class="obus-rule-define-mode-button <%= (filters?.mode || 'create') === 'create' ? 'is-active' : '' %>"
+                data-obus-rule-mode-button="create"
+                aria-pressed="<%= (filters?.mode || 'create') === 'create' ? 'true' : 'false' %>"
+              >
+                Kural Ekle
+              </button>
+              <button
+                type="button"
+                class="obus-rule-define-mode-button <%= filters?.mode === 'update' ? 'is-active' : '' %>"
+                data-obus-rule-mode-button="update"
+                aria-pressed="<%= filters?.mode === 'update' ? 'true' : 'false' %>"
+              >
+                Kural Güncelle
+              </button>
+            </div>
+            <p class="muted obus-rule-define-mode-description" data-obus-rule-mode-description="1">
+              <%= filters?.mode === 'update'
+                ? 'Seçilen firmalar için partner-rule-id kullanarak kural güncelleme isteği hazırlayın.'
+                : 'Seçilen firmalar için yeni partner kuralı oluşturma isteği hazırlayın.' %>
+            </p>
           </aside>
 
           <section class="obus-rule-define-config-card">
@@ -52,6 +77,7 @@
               id="obus-rule-selected-companies"
               value="<%= selectedCompaniesJson || '[]' %>"
             />
+            <input type="hidden" id="obus-rule-mode" value="<%= filters?.mode || 'create' %>" />
 
             <label class="obus-rule-define-field">
               <span>IsAbroad Filtresi</span>
@@ -112,6 +138,22 @@
                 </div>
               </div>
               <small class="muted">Liste Tüm Firmalar ekranındaki SQL verisinden gelir. Çoklu seçim yapılabilir.</small>
+            </label>
+
+            <label
+              class="obus-rule-define-field"
+              data-obus-rule-mode-only="update"
+              <%= filters?.mode === 'update' ? '' : 'hidden' %>
+            >
+              <span>PartnerRuleId</span>
+              <input
+                type="number"
+                id="obus-rule-partner-rule-id"
+                step="1"
+                min="1"
+                value="<%= filters?.partnerRuleId || '' %>"
+                autocomplete="off"
+              />
             </label>
 
             <div class="obus-rule-define-input-grid">

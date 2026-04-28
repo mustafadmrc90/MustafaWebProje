@@ -2971,6 +2971,7 @@ button.ghost {
   grid-column: 1 / -1;
   display: grid;
   align-content: start;
+  gap: 12px;
   padding-block: 12px;
 }
 
@@ -2979,6 +2980,42 @@ button.ghost {
   font-size: 18px;
   line-height: 1.2;
   color: #1f2735;
+}
+
+.obus-rule-define-mode-list {
+  display: grid;
+  grid-template-columns: minmax(0, 220px);
+  gap: 8px;
+}
+
+.obus-rule-define-mode-button {
+  border: 1px solid #b9c6d7;
+  border-radius: 12px;
+  background: #fff;
+  color: #1f2735;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.obus-rule-define-mode-button:hover {
+  border-color: #8ca4c0;
+  background: #eef4fb;
+}
+
+.obus-rule-define-mode-button.is-active {
+  border-color: #0f6bdc;
+  background: #0f6bdc;
+  color: #fff;
+}
+
+.obus-rule-define-mode-description {
+  margin: 0;
+  max-width: 720px;
+  line-height: 1.45;
 }
 
 .obus-rule-define-config-card {
@@ -4158,6 +4195,12 @@ button.ghost {
   cursor: pointer;
   font-size: 13px;
   color: #1f2735;
+}
+
+.obus-company-option[hidden],
+.obus-company-option-all[hidden],
+.obus-rule-define-company-empty[hidden] {
+  display: none !important;
 }
 
 .obus-company-option:hover {
@@ -5573,6 +5616,10 @@ button.ghost {
   }
 
   .obus-rule-define-input-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .obus-rule-define-mode-list {
     grid-template-columns: 1fr;
   }
 

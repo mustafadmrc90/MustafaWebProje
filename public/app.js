@@ -1823,8 +1823,12 @@
     root.dataset.bound = "1";
 
     const multiselect = root.querySelector(".obus-company-multiselect");
-    const requestBaseUrl = String(root.getAttribute("data-obus-rule-create-base-url") || "").trim();
-    const submitUrl = String(root.getAttribute("data-obus-rule-submit-url") || "").trim() || "/api/obus-rule-define/create";
+    const createRequestBaseUrl = String(root.getAttribute("data-obus-rule-create-base-url") || "").trim();
+    const updateRequestBaseUrl = String(root.getAttribute("data-obus-rule-update-base-url") || "").trim();
+    const createSubmitUrl =
+      String(root.getAttribute("data-obus-rule-create-submit-url") || "").trim() || "/api/obus-rule-define/create";
+    const updateSubmitUrl =
+      String(root.getAttribute("data-obus-rule-update-submit-url") || "").trim() || "/api/obus-rule-define/update";
     const trigger = root.querySelector("#obus-rule-company-trigger");
     const dropdown = root.querySelector("#obus-rule-company-dropdown");
     const isAbroadFilterInput = root.querySelector("#obus-rule-isabroad-filter");
@@ -1834,6 +1838,11 @@
     const companyOptionRows = Array.from(root.querySelectorAll(".obus-company-option[data-obus-rule-company-option-row='1']"));
     const companyFilterEmptyEl = root.querySelector("[data-obus-rule-company-filter-empty='1']");
     const selectedCompaniesInput = root.querySelector("#obus-rule-selected-companies");
+    const modeInput = root.querySelector("#obus-rule-mode");
+    const modeButtons = Array.from(root.querySelectorAll("[data-obus-rule-mode-button]"));
+    const modeDescriptionEl = root.querySelector("[data-obus-rule-mode-description='1']");
+    const partnerRuleIdField = root.querySelector("[data-obus-rule-mode-only='update']");
+    const partnerRuleIdInput = root.querySelector("#obus-rule-partner-rule-id");
     const startDateInput = root.querySelector("#obus-rule-start-date");
     const endDateInput = root.querySelector("#obus-rule-end-date");
     const rateInput = root.querySelector("#obus-rule-rate");
@@ -1851,9 +1860,11 @@
       !requestPreviewEl ||
       !statusEl ||
       !selectedCompaniesInput ||
+      !modeInput ||
       !startDateInput ||
       !endDateInput ||
       !rateInput ||
+      !partnerRuleIdInput ||
       !capacityBeginInput ||
       !capacityEndInput ||
       !submitButton ||
@@ -1874,10 +1885,50 @@
       }
     };
 
+    const normalizeObusRuleMode = (value) => (String(value || "").trim().toLowerCase() === "update" ? "update" : "create");
+    const obusRuleModeConfigs = {
+      create: {
+        key: "create",
+        title: "Kural Ekle",
+        actionName: "CreatePartnerRule",
+        requestBaseUrl: createRequestBaseUrl,
+        submitUrl: createSubmitUrl,
+        requiresPartnerRuleId: false,
+        description: "Seçilen firmalar için yeni partner kuralı oluşturma isteği hazırlayın.",
+        idleMessage: "Firma, startDate, endDate, rate ve capacity alanlarını güncelledikçe JSON çıktıları yenilenir.",
+        pendingMessage: "İstek henüz gönderilmedi.",
+        loadingMessage: "CreatePartnerRule istekleri gönderiliyor...",
+        readyMessage: (count) => `${count} firma için istek hazır. Göndermek için butonu kullanın.`,
+        successMessage: (count) => `${count} firma için CreatePartnerRule isteği başarıyla tamamlandı.`,
+        failureMessage: "CreatePartnerRule isteği başarısız.",
+        transportErrorMessage: "CreatePartnerRule isteği gönderilemedi.",
+        responseFallbackMessage: "CreatePartnerRule sonucu alınamadı"
+      },
+      update: {
+        key: "update",
+        title: "Kural Güncelle",
+        actionName: "UpdatePartnerRule",
+        requestBaseUrl: updateRequestBaseUrl,
+        submitUrl: updateSubmitUrl,
+        requiresPartnerRuleId: true,
+        description: "Seçilen firmalar için partner-rule-id kullanarak kural güncelleme isteği hazırlayın.",
+        idleMessage:
+          "Firma, partnerRuleId, startDate, endDate, rate ve capacity alanlarını güncelledikçe JSON çıktıları yenilenir.",
+        pendingMessage: "İstek henüz gönderilmedi.",
+        loadingMessage: "UpdatePartnerRule istekleri gönderiliyor...",
+        readyMessage: (count) => `${count} firma için güncelleme isteği hazır. Göndermek için butonu kullanın.`,
+        successMessage: (count) => `${count} firma için UpdatePartnerRule isteği başarıyla tamamlandı.`,
+        failureMessage: "UpdatePartnerRule isteği başarısız.",
+        transportErrorMessage: "UpdatePartnerRule isteği gönderilemedi.",
+        responseFallbackMessage: "UpdatePartnerRule sonucu alınamadı"
+      }
+    };
+    const getActiveMode = () => normalizeObusRuleMode(modeInput.value);
+    const getActiveModeConfig = () => obusRuleModeConfigs[getActiveMode()] || obusRuleModeConfigs.create;
     const buildIdleResponsePreview = (errorText = "") =>
       errorText
         ? { ok: false, error: String(errorText || "").trim() }
-        : { ok: false, message: "İstek henüz gönderilmedi." };
+        : { ok: false, message: getActiveModeConfig().pendingMessage };
     const normalizeSearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
     const clearTypeAhead = () => {
       typeAheadText = "";
@@ -1952,6 +2003,31 @@
         item.checked = selectedSet.has(String(item.value || "").trim());
       });
       syncSelectedCompanies();
+    };
+
+    const applyModeUi = (nextMode) => {
+      const normalizedMode = normalizeObusRuleMode(nextMode);
+      modeInput.value = normalizedMode;
+      const modeConfig = getActiveModeConfig();
+
+      modeButtons.forEach((button) => {
+        const buttonMode = normalizeObusRuleMode(button.getAttribute("data-obus-rule-mode-button"));
+        const isActive = buttonMode === normalizedMode;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      if (partnerRuleIdField) {
+        const showPartnerRuleId = modeConfig.requiresPartnerRuleId === true;
+        partnerRuleIdField.hidden = !showPartnerRuleId;
+        partnerRuleIdField.style.display = showPartnerRuleId ? "" : "none";
+      }
+      if (partnerRuleIdInput) {
+        partnerRuleIdInput.disabled = modeConfig.requiresPartnerRuleId !== true;
+      }
+      if (modeDescriptionEl) {
+        modeDescriptionEl.textContent = modeConfig.description;
+      }
     };
 
     const closeDropdown = () => {
@@ -2074,6 +2150,58 @@
         }))
         .filter((item) => item.value && item.code);
 
+    const parseIntegerFieldState = (value) => {
+      const text = String(value || "").trim();
+      if (!text) {
+        return {
+          text: "",
+          value: null,
+          valid: true,
+          hasValue: false
+        };
+      }
+      if (!/^-?\d+$/.test(text)) {
+        return {
+          text,
+          value: null,
+          valid: false,
+          hasValue: true
+        };
+      }
+      const parsed = Number.parseInt(text, 10);
+      return {
+        text,
+        value: Number.isInteger(parsed) ? parsed : null,
+        valid: Number.isInteger(parsed),
+        hasValue: true
+      };
+    };
+
+    const readFormState = () => {
+      const mode = getActiveMode();
+      const selectedCompanies = readSelectedCompanies();
+      const startDate = String(startDateInput.value || "").trim();
+      const endDate = String(endDateInput.value || "").trim();
+      const rateText = String(rateInput.value || "").trim().replace(",", ".");
+      const parsedRate = Number.parseFloat(rateText);
+      const capacityBeginState = parseIntegerFieldState(capacityBeginInput.value);
+      const capacityEndState = parseIntegerFieldState(capacityEndInput.value);
+      const partnerRuleIdState = parseIntegerFieldState(partnerRuleIdInput.value);
+
+      return {
+        mode,
+        modeConfig: getActiveModeConfig(),
+        selectedCompanies,
+        startDate,
+        endDate,
+        rateText,
+        parsedRate,
+        capacityBeginState,
+        capacityEndState,
+        partnerRuleIdState
+      };
+    };
+
     const normalizeIsoDateInput = (value) => {
       const text = String(value || "").trim();
       return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
@@ -2092,7 +2220,9 @@
       return /^cluster\d+$/.test(normalized) ? normalized : "";
     };
 
-    const buildRequestUrl = (clusterLabel) => {
+    const buildRequestUrl = (clusterLabel, mode = getActiveMode()) => {
+      const modeConfig = obusRuleModeConfigs[normalizeObusRuleMode(mode)] || obusRuleModeConfigs.create;
+      const requestBaseUrl = String(modeConfig.requestBaseUrl || "").trim();
       const normalizedCluster = normalizeObusClusterLabel(clusterLabel);
       if (!requestBaseUrl || !normalizedCluster || !/cluster\d+/i.test(requestBaseUrl)) {
         return "";
@@ -2102,31 +2232,22 @@
       return matchedCluster === normalizedCluster ? nextUrl : "";
     };
 
-    const buildRequestBodyForCompany = (company, { usePlaceholders = true } = {}) => {
-      const startDate = String(startDateInput.value || "").trim();
-      const endDate = String(endDateInput.value || "").trim();
-      const rateText = String(rateInput.value || "").trim().replace(",", ".");
-      const parsedRate = Number.parseFloat(rateText);
-      const capacityBeginText = String(capacityBeginInput.value || "").trim();
-      const capacityEndText = String(capacityEndInput.value || "").trim();
-      const parsedCapacityBegin = Number.parseInt(capacityBeginText, 10);
-      const parsedCapacityEnd = Number.parseInt(capacityEndText, 10);
-
+    const buildCreateRequestBodyForCompany = (company, { usePlaceholders = true, formState = readFormState() } = {}) => {
       return {
         data: {
           "partner-id": Number.parseInt(String(company?.id || "0").trim(), 10) || 0,
           "rule-id": 2,
           data: {
-            StartDate: buildIsoDateText(startDate, false),
+            StartDate: buildIsoDateText(formState.startDate, false),
             StartTime: "00:00",
-            EndDate: buildIsoDateText(endDate, true),
+            EndDate: buildIsoDateText(formState.endDate, true),
             EndTime: "23:59",
             BranchType: 1,
-            CapacityBegin: Number.isInteger(parsedCapacityBegin) ? parsedCapacityBegin : capacityBeginText,
-            CapacityEnd: Number.isInteger(parsedCapacityEnd) ? parsedCapacityEnd : capacityEndText,
+            CapacityBegin: formState.capacityBeginState.hasValue ? formState.capacityBeginState.value : formState.capacityBeginState.text,
+            CapacityEnd: formState.capacityEndState.hasValue ? formState.capacityEndState.value : formState.capacityEndState.text,
             IsActive: true,
             PriceChange: "Decrease",
-            Rate: Number.isFinite(parsedRate) ? parsedRate : rateText,
+            Rate: Number.isFinite(formState.parsedRate) ? formState.parsedRate : formState.rateText,
             Weekdays: "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday",
             IncludedBranches: "",
             IgnoredBranches: "",
@@ -2147,19 +2268,65 @@
       };
     };
 
+    const buildUpdateRequestBodyForCompany = (company, { usePlaceholders = true, formState = readFormState() } = {}) => ({
+      data: {
+        "partner-id": Number.parseInt(String(company?.id || "0").trim(), 10) || 0,
+        "partner-rule-id": formState.partnerRuleIdState.hasValue ? formState.partnerRuleIdState.value : 0,
+        data: {
+          StartDate: buildIsoDateText(formState.startDate, false),
+          StartTime: "00:00",
+          EndDate: buildIsoDateText(formState.endDate, true),
+          EndTime: "23:59",
+          Description: null,
+          BranchType: 1,
+          CapacityBegin: formState.capacityBeginState.hasValue ? formState.capacityBeginState.value : null,
+          CapacityEnd: formState.capacityEndState.hasValue ? formState.capacityEndState.value : null,
+          IsActive: true,
+          PriceChange: "Decrease",
+          MinutesToDepartureTime: null,
+          Rate: Number.isFinite(formState.parsedRate) ? formState.parsedRate : null,
+          Weekdays: "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday",
+          IncludedBranches: "",
+          IgnoredBranches: "",
+          IncludedRoutes: "",
+          IgnoredRoutes: "",
+          IncludedUsers: "",
+          IgnoredUsers: ""
+        },
+        "partner-rule-station": []
+      },
+      "device-session": {
+        "session-id": usePlaceholders ? "{{sessionId}}" : "",
+        "device-id": usePlaceholders ? "{{deviceId}}" : ""
+      },
+      date: new Date().toISOString().slice(0, 19).replace("T", " "),
+      language: "tr-TR",
+      token: usePlaceholders ? "{{token}}" : ""
+    });
+
     const buildValidationState = () => {
-      const selectedCompanies = readSelectedCompanies();
-      const startDate = String(startDateInput.value || "").trim();
-      const endDate = String(endDateInput.value || "").trim();
-      const rateText = String(rateInput.value || "").trim().replace(",", ".");
-      const parsedRate = Number.parseFloat(rateText);
-      const capacityBeginText = String(capacityBeginInput.value || "").trim();
-      const capacityEndText = String(capacityEndInput.value || "").trim();
-      const parsedCapacityBegin = Number.parseInt(capacityBeginText, 10);
-      const parsedCapacityEnd = Number.parseInt(capacityEndText, 10);
+      const formState = readFormState();
+      const {
+        mode,
+        selectedCompanies,
+        startDate,
+        endDate,
+        parsedRate,
+        capacityBeginState,
+        capacityEndState,
+        partnerRuleIdState
+      } = formState;
 
       if (selectedCompanies.length === 0) {
         return { ok: false, error: "En az bir firma seçmelisiniz." };
+      }
+      if (mode === "update") {
+        if (!partnerRuleIdState.valid || !partnerRuleIdState.hasValue || !Number.isInteger(partnerRuleIdState.value)) {
+          return { ok: false, error: "Geçerli bir PartnerRuleId girilmelidir." };
+        }
+        if (partnerRuleIdState.value <= 0) {
+          return { ok: false, error: "PartnerRuleId 0'dan büyük olmalıdır." };
+        }
       }
       if (!normalizeIsoDateInput(startDate) || !normalizeIsoDateInput(endDate)) {
         return { ok: false, error: "StartDate ve EndDate zorunludur." };
@@ -2170,37 +2337,57 @@
       if (!Number.isFinite(parsedRate)) {
         return { ok: false, error: "Geçerli bir Rate girilmelidir." };
       }
-      if (!Number.isInteger(parsedCapacityBegin) || parsedCapacityBegin < 0) {
-        return { ok: false, error: "Geçerli bir CapacityBegin girilmelidir." };
+      if (mode === "create") {
+        if (!capacityBeginState.valid || !capacityBeginState.hasValue || !Number.isInteger(capacityBeginState.value) || capacityBeginState.value < 0) {
+          return { ok: false, error: "Geçerli bir CapacityBegin girilmelidir." };
+        }
+        if (!capacityEndState.valid || !capacityEndState.hasValue || !Number.isInteger(capacityEndState.value) || capacityEndState.value < 0) {
+          return { ok: false, error: "Geçerli bir CapacityEnd girilmelidir." };
+        }
+      } else {
+        if (capacityBeginState.hasValue && (!capacityBeginState.valid || !Number.isInteger(capacityBeginState.value) || capacityBeginState.value < 0)) {
+          return { ok: false, error: "CapacityBegin girilmişse geçerli bir sayı olmalıdır." };
+        }
+        if (capacityEndState.hasValue && (!capacityEndState.valid || !Number.isInteger(capacityEndState.value) || capacityEndState.value < 0)) {
+          return { ok: false, error: "CapacityEnd girilmişse geçerli bir sayı olmalıdır." };
+        }
       }
-      if (!Number.isInteger(parsedCapacityEnd) || parsedCapacityEnd < 0) {
-        return { ok: false, error: "Geçerli bir CapacityEnd girilmelidir." };
-      }
-      if (parsedCapacityBegin > parsedCapacityEnd) {
+      if (
+        capacityBeginState.hasValue &&
+        capacityEndState.hasValue &&
+        Number.isInteger(capacityBeginState.value) &&
+        Number.isInteger(capacityEndState.value) &&
+        capacityBeginState.value > capacityEndState.value
+      ) {
         return { ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." };
       }
       return {
         ok: true,
+        mode,
         companyCount: selectedCompanies.length,
         startDate,
         endDate,
         rate: parsedRate,
-        capacityBegin: parsedCapacityBegin,
-        capacityEnd: parsedCapacityEnd
+        capacityBegin: capacityBeginState.value,
+        capacityEnd: capacityEndState.value,
+        partnerRuleId: partnerRuleIdState.value
       };
     };
 
     const buildBodyPreviewPayload = () => {
-      const selectedCompanies = readSelectedCompanies();
+      const formState = readFormState();
+      const selectedCompanies = formState.selectedCompanies;
+      const mode = formState.mode;
+      const buildRequestBodyForCompany = mode === "update" ? buildUpdateRequestBodyForCompany : buildCreateRequestBodyForCompany;
       if (selectedCompanies.length === 0) return [];
       const entries = selectedCompanies.map((company) => {
-        const payload = buildRequestBodyForCompany(company, { usePlaceholders: true });
+        const payload = buildRequestBodyForCompany(company, { usePlaceholders: true, formState });
         if (selectedCompanies.length === 1) {
           return payload;
         }
         return {
           company: company.code,
-          requestUrl: buildRequestUrl(company.cluster),
+          requestUrl: buildRequestUrl(company.cluster, mode),
           body: payload
         };
       });
@@ -2247,13 +2434,14 @@
     };
 
     const updateStatus = (validationState, options = {}) => {
+      const modeConfig = getActiveModeConfig();
       if (options.loading) {
-        statusEl.textContent = "CreatePartnerRule istekleri gönderiliyor...";
+        statusEl.textContent = modeConfig.loadingMessage;
         statusEl.className = "obus-rule-define-status muted";
         return;
       }
       if (validationState?.ok) {
-        statusEl.textContent = `${Number(validationState.companyCount || 0)} firma için istek hazır. Göndermek için butonu kullanın.`;
+        statusEl.textContent = modeConfig.readyMessage(Number(validationState.companyCount || 0));
         statusEl.className = "obus-rule-define-status inline-success";
         return;
       }
@@ -2262,7 +2450,7 @@
         statusEl.className = "obus-rule-define-status alert inline-alert";
         return;
       }
-      statusEl.textContent = "Firma, startDate, endDate, rate ve capacity alanlarını güncelledikçe JSON çıktıları yenilenir.";
+      statusEl.textContent = modeConfig.idleMessage;
       statusEl.className = "obus-rule-define-status muted";
     };
 
@@ -2316,6 +2504,7 @@
     }
 
     submitButton.addEventListener("click", async () => {
+      const modeConfig = getActiveModeConfig();
       const validationState = updatePreview({ preserveResponse: true });
       if (!validationState.ok) return;
 
@@ -2324,7 +2513,7 @@
       updateStatus(validationState, { loading: true });
 
       try {
-        const response = await fetch(submitUrl, {
+        const response = await fetch(modeConfig.submitUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -2335,6 +2524,7 @@
             startDate: String(startDateInput.value || "").trim(),
             endDate: String(endDateInput.value || "").trim(),
             rate: String(rateInput.value || "").trim(),
+            partnerRuleId: String(partnerRuleIdInput.value || "").trim(),
             capacityBegin: String(capacityBeginInput.value || "").trim(),
             capacityEnd: String(capacityEndInput.value || "").trim()
           })
@@ -2342,7 +2532,7 @@
         const data = await parseJsonResponse(response);
         const payload = data || {
           ok: false,
-          error: getApiErrorMessage(response, data, "CreatePartnerRule sonucu alınamadı")
+          error: getApiErrorMessage(response, data, modeConfig.responseFallbackMessage)
         };
         requestPreviewEl.textContent = JSON.stringify(buildResponsePreviewPayload(payload), null, 2);
 
@@ -2351,24 +2541,24 @@
             statusEl.textContent = `${Number(payload.successCount || 0)} başarılı, ${Number(payload.failureCount || 0)} başarısız istek tamamlandı.`;
             statusEl.className = "obus-rule-define-status alert inline-alert";
           } else {
-            statusEl.textContent = String(payload?.error || "CreatePartnerRule isteği başarısız.").trim();
+            statusEl.textContent = String(payload?.error || modeConfig.failureMessage).trim();
             statusEl.className = "obus-rule-define-status alert inline-alert";
           }
           return;
         }
 
-        statusEl.textContent = `${Number(payload.successCount || 0)} firma için CreatePartnerRule isteği başarıyla tamamlandı.`;
+        statusEl.textContent = modeConfig.successMessage(Number(payload.successCount || 0));
         statusEl.className = "obus-rule-define-status inline-success";
       } catch (err) {
         requestPreviewEl.textContent = JSON.stringify(
           {
             ok: false,
-            error: String(err?.message || "CreatePartnerRule isteği gönderilemedi.").trim()
+            error: String(err?.message || modeConfig.transportErrorMessage).trim()
           },
           null,
           2
         );
-        statusEl.textContent = String(err?.message || "CreatePartnerRule isteği gönderilemedi.").trim();
+        statusEl.textContent = String(err?.message || modeConfig.transportErrorMessage).trim();
         statusEl.className = "obus-rule-define-status alert inline-alert";
       } finally {
         submitButton.disabled = false;
@@ -2390,7 +2580,7 @@
       });
     });
 
-    [startDateInput, endDateInput, rateInput, capacityBeginInput, capacityEndInput].forEach((input) => {
+    [partnerRuleIdInput, startDateInput, endDateInput, rateInput, capacityBeginInput, capacityEndInput].forEach((input) => {
       input.addEventListener("input", updatePreview);
       input.addEventListener("change", updatePreview);
     });
@@ -2400,6 +2590,14 @@
       updatePreview();
     });
 
+    modeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        applyModeUi(button.getAttribute("data-obus-rule-mode-button"));
+        updatePreview();
+      });
+    });
+
+    applyModeUi(getActiveMode());
     applyInitialCompanySelection();
     applyCompanyFilter();
     updatePreview();
