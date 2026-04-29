@@ -339,6 +339,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "journey-search"
   },
   {
+    key: "journey-update",
+    type: "item",
+    label: "Sefer Güncelleme",
+    parentKey: "general",
+    route: "/general/journey-update",
+    routeKey: "journey-update",
+    sortOrder: 17,
+    iconKey: "journey-update"
+  },
+  {
     key: "station-passenger-info",
     type: "item",
     label: "Durak Yolcu Bilgisi",
@@ -1423,6 +1433,7 @@ async function syncSidebarMenusAndPermissions() {
           WHEN m.key = 'obus-user-deactivate' THEN true
           WHEN m.key = 'obus-rule-define' THEN true
           WHEN m.key = 'journey-search' THEN true
+          WHEN m.key = 'journey-update' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1460,6 +1471,7 @@ async function ensureSidebarPermissionsForUser(userId) {
           WHEN m.key = 'obus-user-deactivate' THEN true
           WHEN m.key = 'obus-rule-define' THEN true
           WHEN m.key = 'journey-search' THEN true
+          WHEN m.key = 'journey-update' THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -12449,6 +12461,24 @@ function buildAuthorizedLinesReportModel() {
   };
 }
 
+function buildJourneyUpdateReportModel() {
+  return {
+    requested: false,
+    status: null,
+    error: null,
+    errorDetail: "",
+    userMessage: "",
+    requestUrl: "",
+    requestBody: "",
+    responseBody: "",
+    sessionId: "",
+    deviceId: "",
+    branchId: "",
+    loginToken: "",
+    loginUrl: ""
+  };
+}
+
 function buildObusJobsReportModel() {
   return {
     requested: false,
@@ -16775,6 +16805,113 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
     user: req.session.user,
     active: "dashboard",
     loginSuccess: req.query.login === "1"
+  });
+});
+
+app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-update"), async (req, res) => {
+  const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
+  const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+
+  const selectedCompanyOption = companies.find(
+    (item) => !item.disabled && item.value === requestedCompany && item.meta
+  );
+  const parsedCompany = parseCompanyOptionValue(requestedCompany);
+  const matchedParsedCompany =
+    parsedCompany &&
+    partnerItems.find(
+      (item) =>
+        item.code === parsedCompany.code &&
+        String(item.id || "") === String(parsedCompany.id || "") &&
+        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+    );
+  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+  const filters = {
+    endpointUrl: String(req.query.endpointUrl || "").trim(),
+    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
+    username: String(req.query.username || "").trim(),
+    password: String(req.query.password || "")
+  };
+  const report = buildJourneyUpdateReportModel();
+
+  if (requestedCompany && !selectedCompanyMeta) {
+    report.requested = true;
+    report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+  }
+
+  res.render("general-journey-update", {
+    user: req.session.user,
+    active: "journey-update",
+    filters,
+    companies,
+    companySourceBaseUrl: "",
+    report,
+    partnerError
+  });
+});
+
+app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-update"), async (req, res) => {
+  const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
+  const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+
+  const selectedCompanyOption = companies.find(
+    (item) => !item.disabled && item.value === requestedCompany && item.meta
+  );
+  const parsedCompany = parseCompanyOptionValue(requestedCompany);
+  const matchedParsedCompany =
+    parsedCompany &&
+    partnerItems.find(
+      (item) =>
+        item.code === parsedCompany.code &&
+        String(item.id || "") === String(parsedCompany.id || "") &&
+        String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
+    );
+  const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+
+  const filters = {
+    endpointUrl: String(req.body.endpointUrl || "").trim(),
+    company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
+    username: String(req.body.username || "").trim(),
+    password: String(req.body.password || "")
+  };
+  const report = buildJourneyUpdateReportModel();
+
+  if (requestedCompany && !selectedCompanyMeta) {
+    report.requested = true;
+    report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+  } else {
+    report.requested = true;
+    report.userMessage = "Firma, kullanıcı adı ve şifre yapısı hazır. Yeni servis URL ve body bilgisi bekleniyor.";
+    report.requestBody = JSON.stringify(
+      {
+        company: filters.company || "",
+        username: filters.username || "",
+        password: filters.password ? "***" : ""
+      },
+      null,
+      2
+    );
+    report.responseBody = JSON.stringify(
+      {
+        ok: false,
+        message: "Servis URL ve body tanımı henüz eklenmedi."
+      },
+      null,
+      2
+    );
+    if (partnerError) {
+      report.errorDetail = partnerError;
+    }
+  }
+
+  res.render("general-journey-update", {
+    user: req.session.user,
+    active: "journey-update",
+    filters,
+    companies,
+    companySourceBaseUrl: "",
+    report,
+    partnerError
   });
 });
 
