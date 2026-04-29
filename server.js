@@ -13048,19 +13048,17 @@ const JOURNEY_UPDATE_EDITOR_FIELDS = Object.freeze([
     key: "reservationOption",
     parameterType: "ReservationOption",
     label: getJourneyUpdateParameterDisplayLabel("ReservationOption"),
-    inputType: "number",
-    valueType: "text",
-    step: "1",
-    min: "0"
+    inputType: "time",
+    valueType: "time",
+    step: "60"
   },
   {
     key: "refundOption",
     parameterType: "RefundOption",
     label: getJourneyUpdateParameterDisplayLabel("RefundOption"),
-    inputType: "number",
-    valueType: "text",
-    step: "1",
-    min: "0"
+    inputType: "time",
+    valueType: "time",
+    step: "60"
   },
   {
     key: "maxTotalDiscountCount",
@@ -13432,7 +13430,7 @@ function normalizeJourneyUpdateEditorInputState(source = {}) {
   const rawSource = source && typeof source === "object" ? source : {};
   return JOURNEY_UPDATE_EDITOR_FIELDS.reduce((acc, field) => {
     const rawValue = rawSource[`update_${field.key}`];
-    acc[field.key] = String(rawValue ?? "").trim();
+    acc[field.key] = normalizeJourneyUpdateEditorFieldValue(field, rawValue);
     return acc;
   }, {});
 }
@@ -13441,8 +13439,32 @@ function buildJourneyUpdateEditorFieldsForView(values = {}) {
   const inputState = values && typeof values === "object" ? values : {};
   return JOURNEY_UPDATE_EDITOR_FIELDS.map((field) => ({
     ...field,
-    value: String(inputState[field.key] ?? "").trim()
+    value: normalizeJourneyUpdateEditorFieldValue(field, inputState[field.key])
   }));
+}
+
+function normalizeJourneyUpdateHourMinuteValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return text;
+
+  const hour = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2], 10);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return text;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return text;
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeJourneyUpdateEditorFieldValue(field, value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (String(field?.valueType || "").trim() === "time") {
+    return normalizeJourneyUpdateHourMinuteValue(text);
+  }
+  return text;
 }
 
 function parseJourneyUpdateBooleanEditorValue(value) {
@@ -13455,7 +13477,7 @@ function parseJourneyUpdateBooleanEditorValue(value) {
 function buildJourneyUpdateParametersFromEditorState(values = {}) {
   const inputState = values && typeof values === "object" ? values : {};
   return JOURNEY_UPDATE_EDITOR_FIELDS.map((field) => {
-    const rawValue = String(inputState[field.key] ?? "").trim();
+    const rawValue = normalizeJourneyUpdateEditorFieldValue(field, inputState[field.key]);
     if (!rawValue) return null;
     if (field.valueType === "boolean") {
       const parsedBoolean = parseJourneyUpdateBooleanEditorValue(rawValue);

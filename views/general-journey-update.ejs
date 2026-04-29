@@ -212,7 +212,7 @@
                         data-journey-update-editor-key="<%= field.key %>"
                         data-journey-update-param-type="<%= field.parameterType %>"
                         data-journey-update-value-type="<%= field.valueType %>"
-                        placeholder="Değer girin"
+                        placeholder="<%= field.valueType === 'time' ? '00:00' : 'Değer girin' %>"
                         <% if (field.step) { %>step="<%= field.step %>"<% } %>
                         <% if (field.min) { %>min="<%= field.min %>"<% } %>
                       />
