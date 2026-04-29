@@ -12754,6 +12754,30 @@ function normalizeJourneyUpdateParameterColumnKey(typeLabel = "") {
   return normalized ? `parameter_${normalized}` : "";
 }
 
+const JOURNEY_UPDATE_PARAMETER_LABEL_MAP = Object.freeze({
+  WebWarning: "Web Uyarısı",
+  RouteFilterBeforeXMinutes: "Web Site Rota Listeleme Süresi",
+  ReservationOption: "Rezervasyon Opsiyon Süresi",
+  RefundOption: "İade ve Transfer Opsiyon Süresi",
+  MaxTotalDiscountCount: "Azami İndirimli Adedi",
+  MaxSingleSeatCount: "Azami Tek koltuk Adedi",
+  MaxSingleFemaleCount: "Azami Tek Bayan Adedi",
+  MaxReservationCount: "Azami Rezervasyon Adedi",
+  MaxPointSalesCount: "Azami Puanlı Satış Adedi",
+  MaxInfantCount: "Azami Çocuk Adedi",
+  MaxGuestCount: "Azami Misafir Adedi",
+  MaxDisabledCount: "Azami Engelli Adedi",
+  CanStopAtWayStation: "Ara Durakta Durmaz",
+  CanSellThroughWeb: "İnternetten Satışa Açık",
+  CanApplyDiscount: "İndirim Yapılamaz"
+});
+
+function getJourneyUpdateParameterDisplayLabel(typeLabel = "") {
+  const rawLabel = String(typeLabel || "").trim();
+  if (!rawLabel) return "";
+  return JOURNEY_UPDATE_PARAMETER_LABEL_MAP[rawLabel] || rawLabel;
+}
+
 function isJourneyUpdateSummaryNode(node) {
   if (!node || typeof node !== "object" || Array.isArray(node)) return false;
   const idValue = readPartnerRawValueByAliases(node, ["id"]);
@@ -12814,11 +12838,35 @@ function extractJourneyUpdateSummaryNodes(payload) {
   return collected;
 }
 
+function resolveJourneyUpdateDetailRecord(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+
+  const directIdValue = readPartnerRawValueByAliases(node, ["id"]);
+  const directParametersValue = readPartnerRawValueByAliases(node, ["parameters", "parameter", "params"]);
+  if (directIdValue !== undefined && Array.isArray(directParametersValue)) {
+    return {
+      id: String(directIdValue || "").trim(),
+      parameters: directParametersValue
+    };
+  }
+
+  const nestedDataValue = readPartnerRawValueByAliases(node, ["data"]);
+  if (nestedDataValue && typeof nestedDataValue === "object" && !Array.isArray(nestedDataValue)) {
+    const nestedIdValue = readPartnerRawValueByAliases(nestedDataValue, ["id"]);
+    const nestedParametersValue = readPartnerRawValueByAliases(nestedDataValue, ["parameters", "parameter", "params"]);
+    if (nestedIdValue !== undefined && Array.isArray(nestedParametersValue)) {
+      return {
+        id: String(nestedIdValue || "").trim(),
+        parameters: nestedParametersValue
+      };
+    }
+  }
+
+  return null;
+}
+
 function isJourneyUpdateDetailNode(node) {
-  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
-  const idValue = readPartnerRawValueByAliases(node, ["id"]);
-  const parametersValue = readPartnerRawValueByAliases(node, ["parameters", "parameter", "params"]);
-  return idValue !== undefined && Array.isArray(parametersValue);
+  return Boolean(resolveJourneyUpdateDetailRecord(node));
 }
 
 function extractJourneyUpdateDetailNodes(payload) {
@@ -12874,7 +12922,7 @@ function extractJourneyUpdateParameterEntries(parameters) {
         "";
       return {
         key: columnKey,
-        label: typeLabel,
+        label: getJourneyUpdateParameterDisplayLabel(typeLabel),
         value: formatJourneyUpdateTableCell(value)
       };
     })
@@ -12886,11 +12934,10 @@ function buildJourneyUpdateDetailMap(payload) {
   const detailColumnsByKey = new Map();
 
   extractJourneyUpdateDetailNodes(payload).forEach((node) => {
-    const idText = String(readPartnerRawValueByAliases(node, ["id"]) || "").trim();
+    const detailRecord = resolveJourneyUpdateDetailRecord(node);
+    const idText = String(detailRecord?.id || "").trim();
     if (!idText) return;
-    const parameterEntries = extractJourneyUpdateParameterEntries(
-      readPartnerRawValueByAliases(node, ["parameters", "parameter", "params"])
-    );
+    const parameterEntries = extractJourneyUpdateParameterEntries(detailRecord?.parameters);
     if (parameterEntries.length === 0) return;
 
     const existing = detailsById.get(idText) || {};

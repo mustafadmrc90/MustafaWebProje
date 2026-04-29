@@ -1249,6 +1249,116 @@
     applyFilters();
   };
 
+  const initJourneyUpdateFloatingScrollbar = () => {
+    if (typeof window.__journeyUpdateFloatingScrollbarCleanup === "function") {
+      window.__journeyUpdateFloatingScrollbarCleanup();
+      window.__journeyUpdateFloatingScrollbarCleanup = null;
+    }
+
+    const card = document.querySelector("[data-journey-update-card='1']");
+    const source = document.querySelector("[data-journey-table-scroll='1']");
+    const floating = document.querySelector("[data-journey-floating-scroll='1']");
+    const track = document.querySelector("[data-journey-floating-scroll-track='1']");
+    if (!card || !source || !floating || !track) return;
+
+    const listenerCleanups = [];
+    let resizeObserver = null;
+    let animationFrameId = 0;
+    let syncingFromSource = false;
+    let syncingFromFloating = false;
+
+    const addListener = (target, eventName, handler, options) => {
+      if (!target) return;
+      target.addEventListener(eventName, handler, options);
+      listenerCleanups.push(() => target.removeEventListener(eventName, handler, options));
+    };
+
+    const syncTrackWidth = () => {
+      track.style.width = `${Math.max(source.scrollWidth, source.clientWidth)}px`;
+    };
+
+    const hideFloating = () => {
+      floating.hidden = true;
+    };
+
+    const updateFloating = () => {
+      animationFrameId = 0;
+      syncTrackWidth();
+
+      const sourceRect = source.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const gap = 12;
+      const barHeight = Math.max(floating.offsetHeight || 0, 16);
+      const hasOverflow = source.scrollWidth > source.clientWidth + 1;
+      const width = Math.min(sourceRect.width, viewportWidth - gap * 2);
+      const minTop = Math.max(sourceRect.top, gap);
+      const maxTop = Math.min(sourceRect.bottom - barHeight, viewportHeight - gap - barHeight);
+      if (!hasOverflow || sourceRect.width <= 0 || width <= 0 || maxTop < minTop) {
+        hideFloating();
+        return;
+      }
+
+      const left = Math.min(Math.max(sourceRect.left, gap), viewportWidth - gap - width);
+      floating.style.left = `${left}px`;
+      floating.style.top = `${maxTop}px`;
+      floating.style.width = `${width}px`;
+      floating.hidden = false;
+
+      if (Math.abs(floating.scrollLeft - source.scrollLeft) > 1) {
+        syncingFromSource = true;
+        floating.scrollLeft = source.scrollLeft;
+        syncingFromSource = false;
+      }
+    };
+
+    const scheduleUpdate = () => {
+      if (animationFrameId) return;
+      animationFrameId = window.requestAnimationFrame(updateFloating);
+    };
+
+    const handleSourceScroll = () => {
+      if (syncingFromFloating) return;
+      syncingFromSource = true;
+      floating.scrollLeft = source.scrollLeft;
+      syncingFromSource = false;
+      scheduleUpdate();
+    };
+
+    const handleFloatingScroll = () => {
+      if (syncingFromSource) return;
+      syncingFromFloating = true;
+      source.scrollLeft = floating.scrollLeft;
+      syncingFromFloating = false;
+    };
+
+    addListener(source, "scroll", handleSourceScroll, { passive: true });
+    addListener(floating, "scroll", handleFloatingScroll, { passive: true });
+    addListener(window, "scroll", scheduleUpdate, { passive: true });
+    addListener(window, "resize", scheduleUpdate, { passive: true });
+
+    if (typeof ResizeObserver === "function") {
+      resizeObserver = new ResizeObserver(() => {
+        scheduleUpdate();
+      });
+      resizeObserver.observe(card);
+      resizeObserver.observe(source);
+      resizeObserver.observe(track);
+    }
+
+    window.__journeyUpdateFloatingScrollbarCleanup = () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+      resizeObserver?.disconnect();
+      listenerCleanups.forEach((cleanup) => cleanup());
+      floating.hidden = true;
+    };
+
+    scheduleUpdate();
+  };
+
   const initJourneySearchForm = () => {
     const form = document.querySelector("[data-journey-search-form='1']");
     if (!form) return;
@@ -5585,6 +5695,7 @@
     initSlackReportLoading();
     initAllowedLinesLoading();
     initJourneyUpdateTableFilters();
+    initJourneyUpdateFloatingScrollbar();
     initJourneySearchForm();
     initObusRuleDefineWorkbench();
     initStationPassengerInfoPage();

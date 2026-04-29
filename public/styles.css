@@ -2705,10 +2705,33 @@ button.ghost {
 
 .journey-update-table-card {
   margin-top: 12px;
+  padding-bottom: 32px;
 }
 
 .journey-update-filter-clear {
   align-self: center;
+}
+
+.journey-update-floating-scroll {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 50;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 16px;
+  border: 1px solid #d7e0ec;
+  border-radius: 999px;
+  background: rgba(247, 249, 252, 0.96);
+  box-shadow: 0 10px 28px rgba(31, 39, 53, 0.12);
+}
+
+.journey-update-floating-scroll[hidden] {
+  display: none !important;
+}
+
+.journey-update-floating-scroll-track {
+  min-height: 1px;
 }
 
 .journey-update-column-filter {

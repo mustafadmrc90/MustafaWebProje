@@ -160,7 +160,7 @@
         <%
           const journeyColumns = Array.isArray(report.tableColumns) ? report.tableColumns : [];
         %>
-        <section class="table-card panel-card journey-update-table-card">
+        <section class="table-card panel-card journey-update-table-card" data-journey-update-card="1">
           <div class="table-head">
             <h2>Sefer Listesi</h2>
             <div class="table-actions">
@@ -171,7 +171,10 @@
             </div>
           </div>
           <% if (Array.isArray(report.tableRows) && report.tableRows.length) { %>
-            <div class="table-scroll">
+            <div class="journey-update-floating-scroll" data-journey-floating-scroll="1" hidden>
+              <div class="journey-update-floating-scroll-track" data-journey-floating-scroll-track="1"></div>
+            </div>
+            <div class="table-scroll" data-journey-table-scroll="1">
               <table class="partners-raw-table" data-journey-update-table="1">
                 <thead>
                   <tr>
