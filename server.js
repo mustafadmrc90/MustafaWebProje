@@ -12562,6 +12562,54 @@ function buildJourneyUpdateTableRows(items, { requestDate = "", companyCode = ""
   });
 }
 
+function dedupeJourneyUpdateTableRows(rows) {
+  const uniqueRows = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = [
+      formatJourneyUpdateTableCell(row?.id),
+      formatJourneyUpdateTableCell(row?.departureTime),
+      formatJourneyUpdateTableCell(row?.origin),
+      formatJourneyUpdateTableCell(row?.destination),
+      formatJourneyUpdateTableCell(row?.status),
+      formatJourneyUpdateTableCell(row?.journeyCode),
+      formatJourneyUpdateTableCell(row?.description),
+      formatJourneyUpdateTableCell(row?.seatModel),
+      formatJourneyUpdateTableCell(row?.plate),
+      formatJourneyUpdateTableCell(row?.journeyType),
+      formatJourneyUpdateTableCell(row?.routeInfo),
+      formatJourneyUpdateTableCell(row?.duration),
+      formatJourneyUpdateTableCell(row?.distance),
+      formatJourneyUpdateTableCell(row?.lastExtendTime)
+    ]
+      .join("|||")
+      .toLocaleLowerCase("tr");
+    if (!uniqueRows.has(key)) {
+      uniqueRows.set(key, row);
+    }
+  });
+  return Array.from(uniqueRows.values());
+}
+
+function sortJourneyUpdateTableRows(rows) {
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const aDateKey = buildStationPassengerComparableDateTimeKey(a?.departureTime);
+    const bDateKey = buildStationPassengerComparableDateTimeKey(b?.departureTime);
+    if (aDateKey && bDateKey && aDateKey !== bDateKey) {
+      return aDateKey.localeCompare(bDateKey, "tr");
+    }
+    if (aDateKey && !bDateKey) return -1;
+    if (!aDateKey && bDateKey) return 1;
+
+    const byId = String(a?.id || "").localeCompare(String(b?.id || ""), "tr");
+    if (byId !== 0) return byId;
+
+    const byRoute = String(a?.routeInfo || "").localeCompare(String(b?.routeInfo || ""), "tr");
+    if (byRoute !== 0) return byRoute;
+
+    return String(a?.plate || "").localeCompare(String(b?.plate || ""), "tr");
+  });
+}
+
 function buildObusJobsReportModel() {
   return {
     requested: false,
@@ -17062,15 +17110,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
           });
         }
 
-        tableRows.sort((a, b) => {
-          const byDate = String(a.requestDate || "").localeCompare(String(b.requestDate || ""), "tr");
-          if (byDate !== 0) return byDate;
-          const byTime = getStationPassengerSortMinutes(a.departureTime) - getStationPassengerSortMinutes(b.departureTime);
-          if (byTime !== 0) return byTime;
-          const byRoute = String(a.routeInfo || "").localeCompare(String(b.routeInfo || ""), "tr");
-          if (byRoute !== 0) return byRoute;
-          return String(a.plate || "").localeCompare(String(b.plate || ""), "tr");
-        });
+        const uniqueTableRows = sortJourneyUpdateTableRows(dedupeJourneyUpdateTableRows(tableRows));
 
         const successfulDayCount = dayResults.filter((item) => item.ok).length;
         const dataDayCount = dayResults.filter((item) => item.ok && item.rowCount > 0).length;
@@ -17095,7 +17135,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             dataDays: dataDayCount,
             successfulDays: successfulDayCount,
             failedDays: failedDayCount,
-            listedRows: tableRows.length,
+            listedRows: uniqueTableRows.length,
             days: visibleDayResults.map((item) => ({
               date: item.date,
               ok: item.ok,
@@ -17107,7 +17147,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
           null,
           2
         );
-        report.tableRows = tableRows;
+        report.tableRows = uniqueTableRows;
         report.dayResults = dayResults;
         report.status =
           failedDayCount === 0
@@ -17118,13 +17158,13 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
 
         if (failedDayCount === 0) {
           report.userMessage =
-            tableRows.length > 0
-              ? `${dailyRanges.length} gün tarandı. Veri bulunan ${dataDayCount} gün için ${tableRows.length} sefer satırı listelendi.`
+            uniqueTableRows.length > 0
+              ? `${dailyRanges.length} gün tarandı. Veri bulunan ${dataDayCount} gün için ${uniqueTableRows.length} tekil sefer satırı listelendi.`
               : "Seçilen tarih aralığında veri bulunamadı.";
         } else if (successfulDayCount > 0) {
           report.userMessage =
             `${dailyRanges.length} günün ${successfulDayCount} tanesi başarılı tamamlandı. ` +
-            `${failedDayCount} gün hata verdi, veri bulunan ${dataDayCount} gün için ${tableRows.length} satır listelendi.`;
+            `${failedDayCount} gün hata verdi, veri bulunan ${dataDayCount} gün için ${uniqueTableRows.length} tekil satır listelendi.`;
         } else {
           report.error = String(dayResults[0]?.error || "").trim() || "GetDailyJourneySummaries başarısız.";
           report.errorDetail = dayResults
