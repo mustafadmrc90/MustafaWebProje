@@ -1082,6 +1082,173 @@
     });
   };
 
+  const initJourneyUpdateTableFilters = () => {
+    const table = document.querySelector("[data-journey-update-table='1']");
+    if (!table) return;
+    if (table.dataset.filtersBound === "1") return;
+    table.dataset.filtersBound = "1";
+
+    const tbody = table.querySelector("tbody");
+    const rows = Array.from(tbody?.querySelectorAll("tr") || []);
+    const filters = Array.from(table.querySelectorAll("[data-journey-filter-key]"));
+    const sortButtons = Array.from(table.querySelectorAll("[data-journey-sort-key]"));
+    const countEl = document.querySelector("[data-journey-update-count='1']");
+    const emptyEl = document.querySelector("[data-journey-update-empty='1']");
+    const clearBtn = document.querySelector("[data-journey-clear-filters='1']");
+    const totalCount = rows.length;
+    const originalOrder = rows.slice();
+    let sortState = {
+      key: "",
+      direction: "",
+      type: "text"
+    };
+
+    if (!rows.length || !filters.length) return;
+
+    const normalize = (value) => String(value || "").trim().toLocaleLowerCase("tr");
+    const getCellText = (row, key) => String(row.querySelector(`[data-journey-cell='${key}']`)?.textContent || "").trim();
+    const parseDateKey = (value) => {
+      const text = String(value || "").trim();
+      const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+      if (match) {
+        return `${match[1]}${match[2]}${match[3]}${match[4] || "00"}${match[5] || "00"}${match[6] || "00"}`;
+      }
+      const parsed = new Date(text);
+      if (Number.isNaN(parsed.getTime())) return "";
+      const year = String(parsed.getFullYear()).padStart(4, "0");
+      const month = String(parsed.getMonth() + 1).padStart(2, "0");
+      const day = String(parsed.getDate()).padStart(2, "0");
+      const hour = String(parsed.getHours()).padStart(2, "0");
+      const minute = String(parsed.getMinutes()).padStart(2, "0");
+      const second = String(parsed.getSeconds()).padStart(2, "0");
+      return `${year}${month}${day}${hour}${minute}${second}`;
+    };
+    const parseNumberValue = (value) => {
+      const numeric = Number.parseFloat(String(value || "").replace(",", "."));
+      return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+    };
+    const parseDurationValue = (value) => {
+      const match = String(value || "").trim().match(/^(\d{2}):(\d{2}):(\d{2})$/);
+      if (!match) return Number.POSITIVE_INFINITY;
+      return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+    };
+
+    const updateCount = (visibleCount) => {
+      if (!countEl) return;
+      countEl.textContent =
+        visibleCount === totalCount ? `${totalCount} satır` : `${visibleCount} / ${totalCount} satır`;
+    };
+
+    const compareRows = (rowA, rowB) => {
+      if (!sortState.key || !sortState.direction) {
+        return originalOrder.indexOf(rowA) - originalOrder.indexOf(rowB);
+      }
+
+      const valueA = getCellText(rowA, sortState.key);
+      const valueB = getCellText(rowB, sortState.key);
+      let comparison = 0;
+
+      if (sortState.type === "date") {
+        comparison = parseDateKey(valueA).localeCompare(parseDateKey(valueB), "tr");
+      } else if (sortState.type === "number") {
+        comparison = parseNumberValue(valueA) - parseNumberValue(valueB);
+      } else if (sortState.type === "duration") {
+        comparison = parseDurationValue(valueA) - parseDurationValue(valueB);
+      } else {
+        comparison = normalize(valueA).localeCompare(normalize(valueB), "tr");
+      }
+
+      if (comparison === 0) {
+        comparison = originalOrder.indexOf(rowA) - originalOrder.indexOf(rowB);
+      }
+      return sortState.direction === "desc" ? comparison * -1 : comparison;
+    };
+
+    const updateSortButtons = () => {
+      sortButtons.forEach((buttonEl) => {
+        const key = String(buttonEl.getAttribute("data-journey-sort-key") || "").trim();
+        const isActive = key === sortState.key && Boolean(sortState.direction);
+        buttonEl.dataset.sortDirection = isActive ? sortState.direction : "";
+        buttonEl.textContent = !isActive ? "↕" : sortState.direction === "asc" ? "↑" : "↓";
+      });
+    };
+
+    const applyFilters = () => {
+      const sortedRows = rows.slice().sort(compareRows);
+      const fragment = document.createDocumentFragment();
+      let visibleCount = 0;
+
+      sortedRows.forEach((row) => {
+        const matches = filters.every((filterEl) => {
+          const key = String(filterEl.getAttribute("data-journey-filter-key") || "").trim();
+          if (!key) return true;
+
+          const rawFilterValue = String(filterEl.value || "").trim();
+          const filterValue = normalize(rawFilterValue);
+          if (!filterValue) return true;
+
+          const rawCellText = getCellText(row, key);
+          const cellText = normalize(rawCellText);
+          const filterType = String(filterEl.getAttribute("data-journey-filter-type") || "").trim();
+          const matchMode = String(filterEl.getAttribute("data-journey-filter-match") || "contains").trim();
+          if (filterType === "date") {
+            return rawCellText.startsWith(rawFilterValue);
+          }
+          if (matchMode === "exact") {
+            return cellText === filterValue;
+          }
+          return cellText.includes(filterValue);
+        });
+
+        row.hidden = !matches;
+        if (matches) visibleCount += 1;
+        fragment.appendChild(row);
+      });
+
+      tbody?.appendChild(fragment);
+      updateCount(visibleCount);
+      updateSortButtons();
+      if (emptyEl) {
+        emptyEl.hidden = visibleCount > 0;
+      }
+    };
+
+    filters.forEach((filterEl) => {
+      const eventName = filterEl.tagName === "SELECT" ? "change" : "input";
+      filterEl.addEventListener(eventName, applyFilters);
+    });
+
+    clearBtn?.addEventListener("click", () => {
+      filters.forEach((filterEl) => {
+        filterEl.value = "";
+      });
+      applyFilters();
+      const firstTextInput = filters.find((filterEl) => filterEl.tagName === "INPUT");
+      firstTextInput?.focus();
+    });
+
+    sortButtons.forEach((buttonEl) => {
+      buttonEl.addEventListener("click", () => {
+        const key = String(buttonEl.getAttribute("data-journey-sort-key") || "").trim();
+        const type = String(buttonEl.getAttribute("data-journey-sort-type") || "text").trim();
+        if (!key) return;
+
+        if (sortState.key !== key) {
+          sortState = { key, direction: "asc", type };
+        } else if (sortState.direction === "asc") {
+          sortState = { key, direction: "desc", type };
+        } else if (sortState.direction === "desc") {
+          sortState = { key: "", direction: "", type: "text" };
+        } else {
+          sortState = { key, direction: "asc", type };
+        }
+        applyFilters();
+      });
+    });
+
+    applyFilters();
+  };
+
   const initJourneySearchForm = () => {
     const form = document.querySelector("[data-journey-search-form='1']");
     if (!form) return;
@@ -5417,6 +5584,7 @@
     initSalesReportLoading();
     initSlackReportLoading();
     initAllowedLinesLoading();
+    initJourneyUpdateTableFilters();
     initJourneySearchForm();
     initObusRuleDefineWorkbench();
     initStationPassengerInfoPage();

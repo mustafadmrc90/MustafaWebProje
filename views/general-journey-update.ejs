@@ -157,55 +157,102 @@
       </section>
 
       <% if (report.requested) { %>
+        <%
+          const journeyColumns = [
+            { key: "id", label: "Id", filterType: "text", sortType: "number" },
+            { key: "departureTime", label: "Departure-Time", filterType: "date", sortType: "date" },
+            { key: "origin", label: "Origin", filterType: "text", sortType: "text" },
+            { key: "destination", label: "Destination", filterType: "text", sortType: "text" },
+            {
+              key: "status",
+              label: "Status",
+              filterType: "select",
+              sortType: "text",
+              options: ["true", "false"]
+            },
+            { key: "journeyCode", label: "Journey-Code", filterType: "text", sortType: "text" },
+            { key: "description", label: "Description", filterType: "text", sortType: "text" },
+            { key: "seatModel", label: "Seat-Model", filterType: "text", sortType: "text" },
+            { key: "plate", label: "Plaka", filterType: "text", sortType: "text" },
+            {
+              key: "journeyType",
+              label: "Journey-Type",
+              filterType: "select",
+              sortType: "text",
+              options: ["true", "false"]
+            },
+            { key: "routeInfo", label: "Route-Info", filterType: "text", sortType: "text" },
+            { key: "duration", label: "Duration", filterType: "text", sortType: "duration" },
+            { key: "distance", label: "Distance", filterType: "text", sortType: "number" },
+            { key: "lastExtendTime", label: "Last-Extend-Time", filterType: "date", sortType: "date" }
+          ];
+        %>
         <section class="table-card panel-card journey-update-table-card">
           <div class="table-head">
             <h2>Sefer Listesi</h2>
             <div class="table-actions">
-              <span class="pill"><%= Array.isArray(report.tableRows) ? report.tableRows.length : 0 %> satır</span>
+              <span class="pill" data-journey-update-count="1"><%= Array.isArray(report.tableRows) ? report.tableRows.length : 0 %> satır</span>
+              <button type="button" class="button-link journey-update-filter-clear" data-journey-clear-filters="1">
+                Filtreleri Temizle
+              </button>
             </div>
           </div>
           <% if (Array.isArray(report.tableRows) && report.tableRows.length) { %>
             <div class="table-scroll">
-              <table class="partners-raw-table">
+              <table class="partners-raw-table" data-journey-update-table="1">
                 <thead>
                   <tr>
-                    <th>Id</th>
-                    <th>Departure-Time</th>
-                    <th>Origin</th>
-                    <th>Destination</th>
-                    <th>Status</th>
-                    <th>Journey-Code</th>
-                    <th>Description</th>
-                    <th>Seat-Model</th>
-                    <th>Plaka</th>
-                    <th>Journey-Type</th>
-                    <th>Route-Info</th>
-                    <th>Duration</th>
-                    <th>Distance</th>
-                    <th>Last-Extend-Time</th>
+                    <% journeyColumns.forEach((column) => { %>
+                      <th>
+                        <div class="journey-update-column-filter">
+                          <div class="journey-update-column-head">
+                            <span><%= column.label %></span>
+                            <button
+                              type="button"
+                              class="journey-update-sort-button"
+                              data-journey-sort-key="<%= column.key %>"
+                              data-journey-sort-type="<%= column.sortType %>"
+                              data-sort-direction=""
+                              aria-label="<%= `${column.label} kolonunu sirala` %>"
+                              title="Sırala"
+                            >
+                              ↕
+                            </button>
+                          </div>
+                          <% if (column.filterType === "select") { %>
+                            <select data-journey-filter-key="<%= column.key %>" data-journey-filter-match="exact">
+                              <option value="">Tümü</option>
+                              <% (column.options || []).forEach((optionValue) => { %>
+                                <option value="<%= optionValue %>"><%= optionValue %></option>
+                              <% }) %>
+                            </select>
+                          <% } else if (column.filterType === "date") { %>
+                            <input
+                              type="date"
+                              data-journey-filter-key="<%= column.key %>"
+                              data-journey-filter-type="date"
+                            />
+                          <% } else { %>
+                            <input type="text" data-journey-filter-key="<%= column.key %>" placeholder="Ara" />
+                          <% } %>
+                        </div>
+                      </th>
+                    <% }) %>
                   </tr>
                 </thead>
                 <tbody>
                   <% report.tableRows.forEach((row) => { %>
                     <tr>
-                      <td><%= row.id || '-' %></td>
-                      <td><%= row.departureTime || '-' %></td>
-                      <td><%= row.origin || '-' %></td>
-                      <td><%= row.destination || '-' %></td>
-                      <td><%= row.status || '-' %></td>
-                      <td><%= row.journeyCode || '-' %></td>
-                      <td><%= row.description || '-' %></td>
-                      <td><%= row.seatModel || '-' %></td>
-                      <td><%= row.plate || '-' %></td>
-                      <td><%= row.journeyType || '-' %></td>
-                      <td><%= row.routeInfo || '-' %></td>
-                      <td><%= row.duration || '-' %></td>
-                      <td><%= row.distance || '-' %></td>
-                      <td><%= row.lastExtendTime || '-' %></td>
+                      <% journeyColumns.forEach((column) => { %>
+                        <td data-journey-cell="<%= column.key %>"><%= row[column.key] || "-" %></td>
+                      <% }) %>
                     </tr>
                   <% }) %>
                 </tbody>
               </table>
+            </div>
+            <div class="pill muted journey-update-empty-result" data-journey-update-empty="1" hidden>
+              Filtreye uygun kayıt bulunamadı.
             </div>
           <% } else if (report.error) { %>
             <div class="pill muted">Satır listesi oluşturulamadı.</div>
