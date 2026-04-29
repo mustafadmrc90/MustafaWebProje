@@ -2628,6 +2628,28 @@ button.ghost {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.allowed-lines-actions .journey-update-show-button {
+  background: #1f8f4e;
+  border-color: #1f8f4e;
+  color: #fff;
+}
+
+.allowed-lines-actions .journey-update-show-button:hover {
+  background: #197341;
+  border-color: #197341;
+}
+
+.allowed-lines-actions .journey-update-apply-button {
+  background: #c83a33;
+  border-color: #c83a33;
+  color: #fff;
+}
+
+.allowed-lines-actions .journey-update-apply-button:hover {
+  background: #a92e28;
+  border-color: #a92e28;
+}
+
 .allowed-lines-form.is-loading {
   opacity: 0.9;
 }
