@@ -12522,19 +12522,76 @@ function formatJourneyUpdateTableCell(value, fallback = "-") {
   return text || fallback;
 }
 
-function buildJourneyUpdateTableRows(items, { requestDate = "", companyCode = "", partnerId = "", cluster = "" } = {}) {
-  return (Array.isArray(items) ? items : []).map((item) => {
-    const raw = item?.raw && typeof item.raw === "object" ? item.raw : {};
+function isJourneyUpdateSummaryNode(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+  const idValue = readPartnerRawValueByAliases(node, ["id"]);
+  const departureValue = readPartnerRawValueByAliases(node, ["departure-time", "departure_time", "departureTime"]);
+  if (idValue === undefined || departureValue === undefined) return false;
+
+  const extraFieldCount = [
+    readPartnerRawValueByAliases(node, ["origin"]),
+    readPartnerRawValueByAliases(node, ["destination"]),
+    readPartnerRawValueByAliases(node, ["status"]),
+    readPartnerRawValueByAliases(node, ["journey-code", "journey_code", "journeyCode"]),
+    readPartnerRawValueByAliases(node, ["description"]),
+    readPartnerRawValueByAliases(node, ["seat-model", "seat_model", "seatModel"]),
+    readPartnerRawValueByAliases(node, ["plate"]),
+    readPartnerRawValueByAliases(node, ["journey-type", "journey_type", "journeyType"]),
+    readPartnerRawValueByAliases(node, ["route-info", "route_info", "routeInfo"]),
+    readPartnerRawValueByAliases(node, ["duration"]),
+    readPartnerRawValueByAliases(node, ["distance"]),
+    readPartnerRawValueByAliases(node, ["last-extend-time", "last_extend_time", "lastExtendTime"])
+  ].filter((value) => value !== undefined).length;
+
+  return extraFieldCount >= 2;
+}
+
+function extractJourneyUpdateSummaryNodes(payload) {
+  const collected = [];
+  const visited = new Set();
+
+  const walk = (node, depth = 0) => {
+    if (depth > 8 || node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed, depth + 1);
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+
+    if (isJourneyUpdateSummaryNode(node)) {
+      collected.push(node);
+      return;
+    }
+
+    Object.values(node).forEach((value) => walk(value, depth + 1));
+  };
+
+  walk(payload);
+  return collected;
+}
+
+function buildJourneyUpdateTableRows(payload, { requestDate = "", companyCode = "", partnerId = "", cluster = "" } = {}) {
+  return extractJourneyUpdateSummaryNodes(payload).map((raw) => {
     return {
       requestDate: String(requestDate || "").trim(),
-      companyCode: String(companyCode || item?.companyCode || "").trim(),
+      companyCode: String(companyCode || "").trim(),
       partnerId: String(partnerId || "").trim(),
-      cluster: extractClusterLabel(cluster || item?.cluster || ""),
-      id: formatJourneyUpdateTableCell(
-        readPartnerRawValueByAliases(raw, ["id"]) ?? item?.id ?? item?.journeyId ?? item?.tripId ?? item?.seferId
-      ),
+      cluster: extractClusterLabel(cluster),
+      id: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["id"])),
       departureTime: formatJourneyUpdateTableCell(
-        readPartnerRawValueByAliases(raw, ["departure-time", "departure_time", "departureTime"]) ?? item?.departureTime
+        readPartnerRawValueByAliases(raw, ["departure-time", "departure_time", "departureTime"])
       ),
       origin: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["origin"])),
       destination: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["destination"])),
@@ -12546,12 +12603,12 @@ function buildJourneyUpdateTableRows(items, { requestDate = "", companyCode = ""
       seatModel: formatJourneyUpdateTableCell(
         readPartnerRawValueByAliases(raw, ["seat-model", "seat_model", "seatModel"])
       ),
-      plate: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["plate"]) ?? item?.plate),
+      plate: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["plate"])),
       journeyType: formatJourneyUpdateTableCell(
         readPartnerRawValueByAliases(raw, ["journey-type", "journey_type", "journeyType"])
       ),
       routeInfo: formatJourneyUpdateTableCell(
-        readPartnerRawValueByAliases(raw, ["route-info", "route_info", "routeInfo"]) ?? item?.routeInfo
+        readPartnerRawValueByAliases(raw, ["route-info", "route_info", "routeInfo"])
       ),
       duration: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["duration"])),
       distance: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["distance"])),
@@ -17092,7 +17149,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             authorization: STATION_PASSENGER_INFO_API_AUTH
           });
 
-          const currentTableRows = buildJourneyUpdateTableRows(fetchResult.items, {
+          const currentTableRows = buildJourneyUpdateTableRows(fetchResult.responsePayload, {
             requestDate,
             companyCode: String(selectedCompanyMeta?.code || "").trim(),
             partnerId: String(selectedCompanyMeta?.id || "").trim(),
