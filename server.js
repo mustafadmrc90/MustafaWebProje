@@ -10117,15 +10117,32 @@ function pushObusLiveJobEvent(job, event) {
   const normalizedEvent = event && typeof event === "object" ? event : {};
   const now = Date.now();
   const seq = Number(job.nextSeq || 1);
-  const ok = normalizedEvent.ok === true;
+  const rawStatusKind = String(normalizedEvent.statusKind || "").trim().toLocaleLowerCase("tr");
+  const inferredStatusKind =
+    rawStatusKind === "progress" || rawStatusKind === "info" || rawStatusKind === "pending"
+      ? rawStatusKind
+      : normalizedEvent.ok === true
+        ? "success"
+        : "failure";
+  const finalize =
+    Object.prototype.hasOwnProperty.call(normalizedEvent, "finalize")
+      ? normalizedEvent.finalize === true
+      : inferredStatusKind === "success" || inferredStatusKind === "failure";
+  const ok = inferredStatusKind === "success" ? true : inferredStatusKind === "failure" ? false : null;
   const record = {
     seq,
     key: String(normalizedEvent.key || "").trim(),
     label: String(normalizedEvent.label || "").trim(),
     ok,
+    finalize,
+    statusKind: inferredStatusKind,
     message: String(normalizedEvent.message || "").trim(),
     error: String(normalizedEvent.error || "").trim(),
     errorDetail: String(normalizedEvent.errorDetail || "").trim(),
+    detailText: String(normalizedEvent.detailText || "").trim(),
+    logLines: (Array.isArray(normalizedEvent.logLines) ? normalizedEvent.logLines : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean),
     updatedAt: now
   };
 
@@ -10136,12 +10153,14 @@ function pushObusLiveJobEvent(job, event) {
     job.events.splice(0, job.events.length - maxEvents);
   }
 
-  if (ok) {
-    job.successCount += 1;
-  } else {
-    job.failureCount += 1;
+  if (finalize) {
+    if (ok === true) {
+      job.successCount += 1;
+    } else if (ok === false) {
+      job.failureCount += 1;
+    }
+    job.processedCount = job.successCount + job.failureCount;
   }
-  job.processedCount = job.successCount + job.failureCount;
   job.updatedAt = now;
   return record;
 }
@@ -16128,6 +16147,48 @@ function buildObusUserDeactivateItemLabel(item) {
   return `${code} - ${partnerId || "?"} - ${username || "?"} - ${id || "?"}`;
 }
 
+function stringifyObusUserDeactivateTraceValue(value, maxLength = 900) {
+  let text = "";
+  if (typeof value === "string") {
+    text = value.trim();
+  } else {
+    try {
+      text = JSON.stringify(value);
+    } catch (err) {
+      text = String(value ?? "").trim();
+    }
+  }
+
+  if (!text) return "";
+  const normalizedMax = Number.isFinite(Number(maxLength)) ? Math.max(120, Number(maxLength)) : 900;
+  if (text.length <= normalizedMax) return text;
+  return `${text.slice(0, normalizedMax - 3)}...`;
+}
+
+function buildObusUserDeactivateTraceText({
+  cluster = "",
+  loginUrl = "",
+  deleteUrl = "",
+  requestBody = null,
+  responseBody = null,
+  errorDetail = ""
+} = {}) {
+  const lines = [];
+  if (cluster) lines.push(`Cluster: ${cluster}`);
+  if (loginUrl) lines.push(`Login URL: ${loginUrl}`);
+  if (deleteUrl) lines.push(`Delete URL: ${deleteUrl}`);
+  if (requestBody !== null && requestBody !== undefined) {
+    lines.push(`Request: ${stringifyObusUserDeactivateTraceValue(requestBody, 2000)}`);
+  }
+  if (responseBody !== null && responseBody !== undefined && String(responseBody).trim() !== "") {
+    lines.push(`Response: ${stringifyObusUserDeactivateTraceValue(responseBody, 2400)}`);
+  }
+  if (errorDetail) {
+    lines.push(`Detay: ${errorDetail}`);
+  }
+  return lines.join("\n");
+}
+
 function normalizeObusDeleteUserIdValue(rawValue) {
   const text = String(rawValue || "").trim();
   if (!/^-?\d+$/.test(text)) return null;
@@ -16138,12 +16199,18 @@ function normalizeObusDeleteUserIdValue(rawValue) {
 async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, token, userId }) {
   const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
   if (!normalizedEndpointUrl) {
-    return { ok: false, error: "DeleteUser endpoint URL geçersiz." };
+    return { ok: false, error: "DeleteUser endpoint URL geçersiz.", requestUrl: "", requestBody: null, responseBody: null };
   }
 
   const normalizedUserId = normalizeObusDeleteUserIdValue(userId);
   if (!Number.isInteger(normalizedUserId)) {
-    return { ok: false, error: "Silinecek kullanıcı id bilgisi boş." };
+    return {
+      ok: false,
+      error: "Silinecek kullanıcı id bilgisi boş.",
+      requestUrl: normalizedEndpointUrl,
+      requestBody: null,
+      responseBody: null
+    };
   }
 
   const controller = new AbortController();
@@ -16189,7 +16256,11 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
       return {
         ok: false,
         error: `HTTP ${response.status}: ${errorText}`,
-        errorDetail
+        errorDetail,
+        requestUrl: normalizedEndpointUrl,
+        requestBody: requestBodyObject,
+        responseBody: parsed ?? raw,
+        status: response.status
       };
     }
 
@@ -16198,18 +16269,38 @@ async function sendObusDeleteUserRequest({ endpointUrl, sessionId, deviceId, tok
       return {
         ok: false,
         error: errorText || "İşlem başarısız döndü.",
-        errorDetail
+        errorDetail,
+        requestUrl: normalizedEndpointUrl,
+        requestBody: requestBodyObject,
+        responseBody: parsed ?? raw,
+        status: response.status
       };
     }
 
     return {
       ok: true,
-      message: String(errorText || "Kullanıcı pasife alındı.").trim()
+      message: String(errorText || "Kullanıcı pasife alındı.").trim(),
+      requestUrl: normalizedEndpointUrl,
+      requestBody: requestBodyObject,
+      responseBody: parsed ?? raw,
+      status: response.status
     };
   } catch (err) {
     return {
       ok: false,
-      error: err?.message || "DeleteUser isteği gönderilemedi."
+      error: err?.message || "DeleteUser isteği gönderilemedi.",
+      requestUrl: normalizedEndpointUrl,
+      requestBody: {
+        data: [normalizedUserId],
+        "device-session": {
+          "session-id": String(sessionId || "").trim(),
+          "device-id": String(deviceId || "").trim()
+        },
+        token: String(token || "").trim(),
+        date: "2016-03-11T11:33:00",
+        language: "tr-TR"
+      },
+      responseBody: null
     };
   } finally {
     clearTimeout(timeout);
@@ -16288,12 +16379,14 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
           notifyItemResult({
             key: String(item?.value || "").trim(),
             label: record.label,
+            statusKind: "success",
+            finalize: true,
             ok: true,
             message: record.message
           });
         }
       };
-      const pushLocalFailure = (item, errorText, errorDetail = "") => {
+      const pushLocalFailure = (item, errorText, errorDetail = "", extra = {}) => {
         const record = {
           label: buildObusUserDeactivateItemLabel(item),
           error: String(errorText || "DeleteUser başarısız.").trim(),
@@ -16304,11 +16397,27 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
           notifyItemResult({
             key: String(item?.value || "").trim(),
             label: record.label,
+            statusKind: "failure",
+            finalize: true,
             ok: false,
             error: record.error,
-            errorDetail: record.errorDetail
+            errorDetail: record.errorDetail,
+            detailText: String(extra?.detailText || "").trim(),
+            logLines: Array.isArray(extra?.logLines) ? extra.logLines : []
           });
         }
+      };
+      const pushLocalProgress = (item, message, extra = {}) => {
+        if (!notifyItemResult) return;
+        notifyItemResult({
+          key: String(item?.value || "").trim(),
+          label: buildObusUserDeactivateItemLabel(item),
+          statusKind: "progress",
+          finalize: false,
+          message: String(message || "").trim(),
+          detailText: String(extra?.detailText || "").trim(),
+          logLines: Array.isArray(extra?.logLines) ? extra.logLines : []
+        });
       };
 
       const cluster = extractClusterLabel(contextGroup?.cluster || "");
@@ -16331,9 +16440,27 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
         const loginPartnerId = String(clusterItems[0]?.["partner-id"] || "").trim();
         const loginBranchId = String(contextFromMap?.loginBranchId || "").trim();
 
+        clusterItems.forEach((item) => {
+          pushLocalProgress(item, `${cluster}: UserLogin başlatıldı.`, {
+            logLines: [
+              `PartnerCode: ${partnerCode || "-"}`,
+              `PartnerId: ${loginPartnerId || "-"}`,
+              `Delete URL: ${deleteEndpointUrl || "-"}`
+            ]
+          });
+        });
+
         if (!deleteEndpointUrl) {
           clusterItems.forEach((item) => {
-            pushLocalFailure(item, `${cluster}: DeleteUser URL oluşturulamadı.`);
+            const detailText = buildObusUserDeactivateTraceText({
+              cluster,
+              deleteUrl: deleteEndpointUrl,
+              errorDetail: "DeleteUser URL oluşturulamadı."
+            });
+            pushLocalFailure(item, `${cluster}: DeleteUser URL oluşturulamadı.`, "", {
+              logLines: ["DeleteUser URL oluşturulamadı."],
+              detailText
+            });
           });
           return {
             successItems: localSuccessItems,
@@ -16356,7 +16483,22 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
         });
         if (!loginResult.ok) {
           clusterItems.forEach((item) => {
-            pushLocalFailure(item, `${cluster}: ${loginResult.error || "UserLogin başarısız."}`);
+            const detailText = buildObusUserDeactivateTraceText({
+              cluster,
+              loginUrl: String(loginResult?.loginUrl || "").trim(),
+              deleteUrl: deleteEndpointUrl,
+              errorDetail:
+                String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
+                String(loginResult?.error || "").trim()
+            });
+            pushLocalFailure(item, `${cluster}: ${loginResult.error || "UserLogin başarısız."}`, "", {
+              logLines: [
+                `UserLogin: hata`,
+                `Login URL: ${String(loginResult?.loginUrl || "").trim() || "-"}`,
+                `Delete URL: ${deleteEndpointUrl || "-"}`
+              ],
+              detailText
+            });
           });
           return {
             successItems: localSuccessItems,
@@ -16369,7 +16511,19 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
         const token = String(loginResult.token || "").trim();
         if (!sessionId || !deviceId || !token) {
           clusterItems.forEach((item) => {
-            pushLocalFailure(item, `${cluster}: UserLogin sonrası session/device/token eksik.`);
+            const detailText = buildObusUserDeactivateTraceText({
+              cluster,
+              loginUrl: String(loginResult?.loginUrl || "").trim(),
+              deleteUrl: deleteEndpointUrl,
+              errorDetail: "UserLogin sonrası session/device/token eksik."
+            });
+            pushLocalFailure(item, `${cluster}: UserLogin sonrası session/device/token eksik.`, "", {
+              logLines: [
+                "UserLogin: eksik session/device/token",
+                `Login URL: ${String(loginResult?.loginUrl || "").trim() || "-"}`
+              ],
+              detailText
+            });
           });
           return {
             successItems: localSuccessItems,
@@ -16377,10 +16531,41 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
           };
         }
 
+        clusterItems.forEach((item) => {
+          pushLocalProgress(item, `${cluster}: UserLogin başarılı.`, {
+            logLines: [
+              `Login URL: ${String(loginResult?.loginUrl || "").trim() || "-"}`,
+              `Delete URL: ${deleteEndpointUrl || "-"}`
+            ]
+          });
+        });
+
         const deleteResults = await runWithConcurrency(
           clusterItems,
           Math.max(1, Math.min(clusterItems.length || 1, OBUS_USER_DEACTIVATE_DELETE_CONCURRENCY)),
           async (item) => {
+            const requestPreview = {
+              data: [normalizeObusDeleteUserIdValue(item?.id)],
+              "device-session": {
+                "session-id": sessionId,
+                "device-id": deviceId
+              },
+              token,
+              date: "2016-03-11T11:33:00",
+              language: "tr-TR"
+            };
+            pushLocalProgress(item, `${cluster}: DeleteUser isteği gönderildi.`, {
+              logLines: [
+                `UserId: ${String(item?.id || "").trim() || "-"}`,
+                `Request: ${stringifyObusUserDeactivateTraceValue(requestPreview, 420)}`
+              ],
+              detailText: buildObusUserDeactivateTraceText({
+                cluster,
+                loginUrl: String(loginResult?.loginUrl || "").trim(),
+                deleteUrl: deleteEndpointUrl,
+                requestBody: requestPreview
+              })
+            });
             const result = await sendObusDeleteUserRequest({
               endpointUrl: deleteEndpointUrl,
               sessionId,
@@ -16400,19 +16585,59 @@ async function deactivateObusUsersBySelection({ selectedItems, cacheRows, onItem
           const result = entry?.result;
           if (!item || !result || typeof result !== "object") return;
           if (result.ok) {
-            pushLocalSuccess(item, result.message);
+            const detailText = buildObusUserDeactivateTraceText({
+              cluster,
+              deleteUrl: String(result?.requestUrl || deleteEndpointUrl || "").trim(),
+              requestBody: result?.requestBody,
+              responseBody: result?.responseBody
+            });
+            const record = {
+              label: buildObusUserDeactivateItemLabel(item),
+              message: String(result.message || "Kullanıcı pasife alındı.").trim()
+            };
+            localSuccessItems.push(record);
+            if (notifyItemResult) {
+              notifyItemResult({
+                key: String(item?.value || "").trim(),
+                label: record.label,
+                statusKind: "success",
+                finalize: true,
+                ok: true,
+                message: `${cluster}: ${record.message}`,
+                detailText,
+                logLines: [
+                  `Response: ${stringifyObusUserDeactivateTraceValue(result?.responseBody, 420) || "OK"}`
+                ]
+              });
+            }
           } else {
+            const detailText = buildObusUserDeactivateTraceText({
+              cluster,
+              deleteUrl: String(result?.requestUrl || deleteEndpointUrl || "").trim(),
+              requestBody: result?.requestBody,
+              responseBody: result?.responseBody,
+              errorDetail: String(result?.errorDetail || "").trim()
+            });
             pushLocalFailure(
               item,
               `${cluster}: ${String(result.error || "DeleteUser başarısız.").trim()}`,
-              String(result.errorDetail || "").trim()
+              String(result.errorDetail || "").trim(),
+              {
+                logLines: [
+                  `Response: ${stringifyObusUserDeactivateTraceValue(result?.responseBody, 420) || "-"}`
+                ],
+                detailText
+              }
             );
           }
         });
       } catch (err) {
         const fallbackError = `${cluster || "cluster"}: ${err?.message || "Pasife alma işlemi tamamlanamadı."}`;
         clusterItems.forEach((item) => {
-          pushLocalFailure(item, fallbackError);
+          pushLocalFailure(item, fallbackError, "", {
+            logLines: [fallbackError],
+            detailText: fallbackError
+          });
         });
       }
 
@@ -18150,10 +18375,14 @@ async function startObusUserCreateLiveProcess({ req, res, bulkMode = false }) {
               pushObusLiveJobEvent(job, {
                 key: String(itemResult?.key || "").trim(),
                 label: String(itemResult?.label || "").trim(),
+                statusKind: String(itemResult?.statusKind || "").trim(),
+                finalize: itemResult?.finalize === true,
                 ok: itemResult?.ok === true,
                 message: String(itemResult?.message || "").trim(),
                 error: String(itemResult?.error || "").trim(),
-                errorDetail: String(itemResult?.errorDetail || "").trim()
+                errorDetail: String(itemResult?.errorDetail || "").trim(),
+                detailText: String(itemResult?.detailText || "").trim(),
+                logLines: Array.isArray(itemResult?.logLines) ? itemResult.logLines : []
               });
             }
           });
@@ -19234,10 +19463,14 @@ app.post(
               pushObusLiveJobEvent(job, {
                 key: String(itemResult?.key || "").trim(),
                 label: String(itemResult?.label || "").trim(),
+                statusKind: String(itemResult?.statusKind || "").trim(),
+                finalize: itemResult?.finalize === true,
                 ok: itemResult?.ok === true,
                 message: String(itemResult?.message || "").trim(),
                 error: String(itemResult?.error || "").trim(),
-                errorDetail: String(itemResult?.errorDetail || "").trim()
+                errorDetail: String(itemResult?.errorDetail || "").trim(),
+                detailText: String(itemResult?.detailText || "").trim(),
+                logLines: Array.isArray(itemResult?.logLines) ? itemResult.logLines : []
               });
             }
           });

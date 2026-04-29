@@ -4488,8 +4488,10 @@ button.ghost {
 
 .obus-live-status {
   font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
+  font-weight: 600;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .obus-live-status.pending {
@@ -5178,7 +5180,7 @@ button.ghost {
 }
 
 .obus-user-deactivate-table-scroll .partners-raw-table {
-  min-width: 920px;
+  min-width: 1320px;
 }
 
 .obus-user-deactivate-table-scroll .partners-raw-table thead th {
@@ -5186,6 +5188,13 @@ button.ghost {
   top: 0;
   z-index: 3;
   background: #f7f9fc;
+}
+
+.obus-user-deactivate-table-scroll .partners-raw-table th:last-child,
+.obus-user-deactivate-table-scroll .partners-raw-table td:last-child {
+  min-width: 520px;
+  width: 520px;
+  vertical-align: top;
 }
 
 .slack-analysis-summary-table {

@@ -5389,6 +5389,7 @@
     const liveSuccess = deleteForm.querySelector("[data-obus-live-success='1']");
     const liveFailure = deleteForm.querySelector("[data-obus-live-failure='1']");
     const rowByKey = new Map();
+    const rowStatusStateByKey = new Map();
     const wait = (ms) =>
       new Promise((resolve) => {
         window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
@@ -5410,18 +5411,20 @@
         liveFailure.textContent = `Hatalı: ${failure}`;
       }
     };
-    const shortenStatusText = (text, maxLength = 96) => {
-      const normalized = String(text || "").replace(/\s+/g, " ").trim();
-      if (!normalized) return "";
-      if (normalized.length <= maxLength) return normalized;
-      return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
-    };
-    const setDeactivateRowStatus = (row, text, kind, detail = "") => {
+    const normalizeStatusLine = (text = "") =>
+      String(text || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const getRowStatusKey = (row) => String(row?.getAttribute("data-obus-user-row-key") || "").trim();
+    const renderDeactivateRowStatus = (row, kind = "pending") => {
       const cell = row?.querySelector("[data-obus-user-status-cell='1']");
       if (!cell) return;
-      cell.textContent = String(text || "").trim() || "-";
+      const rowKey = getRowStatusKey(row);
+      const state = rowStatusStateByKey.get(rowKey) || { lines: [], detailBlocks: [] };
+      const visibleLines = state.lines.length > 0 ? state.lines : ["Bekliyor"];
+      cell.textContent = visibleLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
       cell.className = `obus-live-status ${kind || "pending"}`;
-      const tooltip = String(detail || "").trim();
+      const tooltip = state.detailBlocks.join("\n\n").trim();
       if (tooltip) {
         cell.setAttribute("title", tooltip);
         cell.classList.add("has-detail");
@@ -5430,19 +5433,68 @@
         cell.classList.remove("has-detail");
       }
     };
+    const resetDeactivateRowStatus = (row, text = "Bekliyor", kind = "pending") => {
+      const rowKey = getRowStatusKey(row);
+      if (!rowKey) return;
+      const normalizedText = normalizeStatusLine(text) || "Bekliyor";
+      rowStatusStateByKey.set(rowKey, {
+        lines: [normalizedText],
+        detailBlocks: []
+      });
+      renderDeactivateRowStatus(row, kind);
+    };
+    const appendDeactivateRowStatus = (row, { kind = "pending", lines = [], detailBlocks = [] } = {}) => {
+      const rowKey = getRowStatusKey(row);
+      if (!rowKey) return;
+      const currentState = rowStatusStateByKey.get(rowKey) || { lines: [], detailBlocks: [] };
+      const nextLines = currentState.lines.slice();
+      const nextDetails = currentState.detailBlocks.slice();
+
+      (Array.isArray(lines) ? lines : [lines]).forEach((line) => {
+        const normalizedLine = normalizeStatusLine(line);
+        if (normalizedLine) nextLines.push(normalizedLine);
+      });
+      (Array.isArray(detailBlocks) ? detailBlocks : [detailBlocks]).forEach((detail) => {
+        const normalizedDetail = String(detail || "").trim();
+        if (normalizedDetail) nextDetails.push(normalizedDetail);
+      });
+
+      rowStatusStateByKey.set(rowKey, {
+        lines: nextLines,
+        detailBlocks: nextDetails
+      });
+      renderDeactivateRowStatus(row, kind);
+    };
     const applyDeactivateEventToRow = (eventItem) => {
       const key = String(eventItem?.key || "").trim();
       const row = rowByKey.get(key);
       if (!row) return;
-      if (eventItem?.ok === true) {
-        setDeactivateRowStatus(row, eventItem.message || "Pasife alındı", "success");
-      } else {
-        const errorText = String(eventItem?.error || "").trim() || "İşlem başarısız";
-        const errorDetail = String(eventItem?.errorDetail || "").trim();
-        const visibleText = shortenStatusText(errorDetail || errorText);
-        const tooltipText = errorDetail && errorDetail !== errorText ? `${errorText} | ${errorDetail}` : errorDetail || errorText;
-        setDeactivateRowStatus(row, visibleText, "failure", tooltipText);
-      }
+      const statusKind = String(eventItem?.statusKind || "").trim() || (eventItem?.ok === true ? "success" : "failure");
+      const primaryText =
+        statusKind === "failure"
+          ? String(eventItem?.error || eventItem?.message || "").trim() || "İşlem başarısız"
+          : String(eventItem?.message || "").trim() || (statusKind === "success" ? "Pasife alındı" : "İşleniyor");
+      const visibleLines = [];
+      if (primaryText) visibleLines.push(primaryText);
+      (Array.isArray(eventItem?.logLines) ? eventItem.logLines : []).forEach((line) => {
+        const normalizedLine = normalizeStatusLine(line);
+        if (normalizedLine && normalizedLine !== primaryText) {
+          visibleLines.push(normalizedLine);
+        }
+      });
+
+      const detailBlocks = [];
+      if (primaryText) detailBlocks.push(primaryText);
+      const errorDetail = String(eventItem?.errorDetail || "").trim();
+      const detailText = String(eventItem?.detailText || "").trim();
+      if (errorDetail) detailBlocks.push(errorDetail);
+      if (detailText) detailBlocks.push(detailText);
+
+      appendDeactivateRowStatus(row, {
+        kind: statusKind,
+        lines: visibleLines,
+        detailBlocks
+      });
     };
     const pollLiveJob = async (jobId, onEvent) => {
       let cursor = 0;
@@ -5495,6 +5547,11 @@
         const key = String(row.getAttribute("data-obus-user-row-key") || "").trim();
         if (!key) return;
         rowByKey.set(key, row);
+        rowStatusStateByKey.set(key, {
+          lines: ["Bekliyor"],
+          detailBlocks: []
+        });
+        renderDeactivateRowStatus(row, "pending");
       });
     };
 
@@ -5561,7 +5618,7 @@
 
         selectedItems.forEach((item) => {
           const row = rowByKey.get(String(item.value || "").trim());
-          if (row) setDeactivateRowStatus(row, "İşleniyor...", "progress");
+          if (row) resetDeactivateRowStatus(row, "Canlı işlem başlatılıyor...", "progress");
         });
 
         submitBtn.disabled = true;
