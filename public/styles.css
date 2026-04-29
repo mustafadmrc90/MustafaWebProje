@@ -2708,6 +2708,48 @@ button.ghost {
   padding-bottom: 32px;
 }
 
+.journey-update-editor-card {
+  margin-top: 12px;
+}
+
+.journey-update-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.journey-update-editor-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.journey-update-editor-field span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f6176;
+}
+
+.journey-update-editor-field input,
+.journey-update-editor-field select {
+  width: 100%;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid #c6d2e0;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #1f2735;
+}
+
+.journey-update-editor-field input:focus,
+.journey-update-editor-field select:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fdfefe;
+}
+
 .journey-update-filter-clear {
   align-self: center;
 }
@@ -5677,6 +5719,10 @@ button.ghost {
   }
 
   .allowed-lines-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .journey-update-editor-grid {
     grid-template-columns: 1fr;
   }
 
