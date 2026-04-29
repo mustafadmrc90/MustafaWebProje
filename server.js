@@ -12995,10 +12995,32 @@ const JOURNEY_UPDATE_PARAMETER_LABEL_MAP = Object.freeze({
   CanApplyDiscount: "İndirim Yapılamaz"
 });
 
+function formatJourneyUpdateDynamicFieldLabel(value = "") {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return "";
+
+  const tokens = rawValue
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+
+  return tokens
+    .map((token) => {
+      if (/^[A-Z0-9]+$/.test(token)) return token;
+      const lower = token.toLocaleLowerCase("tr");
+      return `${lower.charAt(0).toLocaleUpperCase("tr")}${lower.slice(1)}`;
+    })
+    .join("-");
+}
+
 function getJourneyUpdateParameterDisplayLabel(typeLabel = "") {
   const rawLabel = String(typeLabel || "").trim();
   if (!rawLabel) return "";
-  return JOURNEY_UPDATE_PARAMETER_LABEL_MAP[rawLabel] || rawLabel;
+  return JOURNEY_UPDATE_PARAMETER_LABEL_MAP[rawLabel] || formatJourneyUpdateDynamicFieldLabel(rawLabel);
 }
 
 const JOURNEY_UPDATE_EDITOR_FIELDS = Object.freeze([
@@ -13324,6 +13346,10 @@ function isJourneyUpdateSummaryNode(node) {
   return extraFieldCount >= 2;
 }
 
+function buildJourneyUpdateBaseColumnNormalizedKeySet() {
+  return new Set(buildJourneyUpdateBaseColumns().map((column) => normalizeTokenName(column?.key)));
+}
+
 function extractJourneyUpdateSummaryNodes(payload) {
   const collected = [];
   const visited = new Set();
@@ -13368,7 +13394,8 @@ function resolveJourneyUpdateDetailRecord(node) {
   if (directIdValue !== undefined && Array.isArray(directParametersValue)) {
     return {
       id: String(directIdValue || "").trim(),
-      parameters: directParametersValue
+      parameters: directParametersValue,
+      fieldSource: node
     };
   }
 
@@ -13379,7 +13406,8 @@ function resolveJourneyUpdateDetailRecord(node) {
     if (nestedIdValue !== undefined && Array.isArray(nestedParametersValue)) {
       return {
         id: String(nestedIdValue || "").trim(),
-        parameters: nestedParametersValue
+        parameters: nestedParametersValue,
+        fieldSource: nestedDataValue
       };
     }
   }
@@ -13452,6 +13480,37 @@ function extractJourneyUpdateParameterEntries(parameters) {
     .filter(Boolean);
 }
 
+function isJourneyUpdateDetailScalarValue(value) {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function extractJourneyUpdateDirectFieldEntries(detailRecord) {
+  const fieldSource = detailRecord?.fieldSource;
+  if (!fieldSource || typeof fieldSource !== "object" || Array.isArray(fieldSource)) return [];
+
+  const baseColumnKeySet = buildJourneyUpdateBaseColumnNormalizedKeySet();
+
+  return Object.entries(fieldSource)
+    .map(([fieldKey, fieldValue]) => {
+      const normalizedFieldKey = normalizeTokenName(fieldKey);
+      if (!normalizedFieldKey) return null;
+      if (["id", "parameters", "parameter", "params"].includes(normalizedFieldKey)) return null;
+      if (baseColumnKeySet.has(normalizedFieldKey)) return null;
+      if (!isJourneyUpdateDetailScalarValue(fieldValue)) return null;
+
+      const column = buildJourneyUpdateParameterColumn(fieldKey);
+      if (!column) return null;
+
+      return {
+        type: fieldKey,
+        key: column.key,
+        label: column.label,
+        value: formatJourneyUpdateTableCell(fieldValue)
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildJourneyUpdateDetailMap(payload) {
   const detailsById = new Map();
   const detailColumnsByKey = new Map();
@@ -13460,11 +13519,13 @@ function buildJourneyUpdateDetailMap(payload) {
     const detailRecord = resolveJourneyUpdateDetailRecord(node);
     const idText = String(detailRecord?.id || "").trim();
     if (!idText) return;
+    const directFieldEntries = extractJourneyUpdateDirectFieldEntries(detailRecord);
     const parameterEntries = extractJourneyUpdateParameterEntries(detailRecord?.parameters);
-    if (parameterEntries.length === 0) return;
+    const detailEntries = directFieldEntries.concat(parameterEntries);
+    if (detailEntries.length === 0) return;
 
     const existing = detailsById.get(idText) || {};
-    parameterEntries.forEach((entry) => {
+    detailEntries.forEach((entry) => {
       detailColumnsByKey.set(entry.key, buildJourneyUpdateParameterColumn(entry.type) || {
         key: entry.key,
         label: entry.label,
