@@ -4210,32 +4210,33 @@ function buildJourneyUpdateDetailRequestBody({
 function buildJourneyUpdateUpdateRequestBody({
   journeyId = "",
   parameters = [],
+  dataPayload = null,
   sessionId = "",
   deviceId = "",
   token = "",
   dateValue = "",
   usePlaceholders = false
 } = {}) {
-  const normalizedParameters = (Array.isArray(parameters) ? parameters : [])
-    .map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const type = String(item.type || "").trim();
-      if (!type) return null;
-      const rawValue = item.value;
-      if (typeof rawValue === "boolean") {
-        return { type, value: rawValue };
-      }
-      const textValue = String(rawValue ?? "").trim();
-      if (!textValue) return null;
-      return { type, value: textValue };
-    })
-    .filter(Boolean);
+  const normalizedParameters = normalizeJourneyUpdateUpdateParameters(parameters);
   const normalizedDateValue = String(dateValue || "").trim() || buildJourneyUpdateUpdateRequestDate();
+  const clonedDataPayload = cloneJsonCompatibleValue(dataPayload);
+  const normalizedDataPayload =
+    clonedDataPayload && typeof clonedDataPayload === "object" && !Array.isArray(clonedDataPayload)
+      ? clonedDataPayload
+      : {
+          id: normalizeStationPassengerJourneyIdForRequest(journeyId),
+          parameters: normalizedParameters
+        };
+
+  if (normalizedDataPayload.id === undefined || normalizedDataPayload.id === null || String(normalizedDataPayload.id).trim() === "") {
+    normalizedDataPayload.id = normalizeStationPassengerJourneyIdForRequest(journeyId);
+  }
+  if (!Array.isArray(normalizedDataPayload.parameters)) {
+    normalizedDataPayload.parameters = normalizedParameters;
+  }
+
   return {
-    data: {
-      id: normalizeStationPassengerJourneyIdForRequest(journeyId),
-      parameters: normalizedParameters
-    },
+    data: normalizedDataPayload,
     "device-session": {
       "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
       "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
@@ -5844,6 +5845,7 @@ async function fetchJourneyUpdateUpdatePayload({
   token,
   journeyId = "",
   parameters = [],
+  dataPayload = null,
   authorization = STATION_PASSENGER_INFO_API_AUTH
 }) {
   const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
@@ -5856,6 +5858,7 @@ async function fetchJourneyUpdateUpdatePayload({
   const requestBody = buildJourneyUpdateUpdateRequestBody({
     journeyId: normalizedJourneyId,
     parameters: normalizedParameters,
+    dataPayload,
     sessionId: normalizedSessionId,
     deviceId: normalizedDeviceId,
     token: normalizedToken,
@@ -12943,6 +12946,7 @@ function buildJourneyUpdateReportModel() {
     updateRequestDate: "",
     updateEditorValues: {},
     updateJourneyIdsCsv: "",
+    updateDetailState: "",
     tableRowsState: "",
     tableColumnsState: ""
   };
@@ -13164,6 +13168,266 @@ function buildJourneyUpdateParameterColumn(columnType = "") {
   };
 }
 
+function buildJourneyUpdateRequestFieldAliases(fieldName = "", extraAliases = []) {
+  return Array.from(
+    new Set(
+      [fieldName, normalizeJourneyUpdateParameterColumnKey(fieldName), ...(Array.isArray(extraAliases) ? extraAliases : [])]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+const JOURNEY_UPDATE_REQUEST_DATA_FIELD_SPECS = Object.freeze([
+  {
+    field: "description",
+    aliases: buildJourneyUpdateRequestFieldAliases("description"),
+    valueType: "string"
+  },
+  {
+    field: "bus-id",
+    aliases: buildJourneyUpdateRequestFieldAliases("bus-id"),
+    valueType: "nullable-number"
+  },
+  {
+    field: "original-bus-type-id",
+    aliases: buildJourneyUpdateRequestFieldAliases("original-bus-type-id"),
+    valueType: "nullable-number"
+  },
+  {
+    field: "destination-display-name",
+    aliases: buildJourneyUpdateRequestFieldAliases("destination-display-name"),
+    valueType: "string"
+  },
+  {
+    field: "is-active",
+    aliases: buildJourneyUpdateRequestFieldAliases("is-active"),
+    valueType: "boolean"
+  },
+  {
+    field: "is-additional",
+    aliases: buildJourneyUpdateRequestFieldAliases("is-additional"),
+    valueType: "boolean"
+  },
+  {
+    field: "duration",
+    aliases: buildJourneyUpdateRequestFieldAliases("duration"),
+    valueType: "nullable-string"
+  },
+  {
+    field: "type",
+    aliases: buildJourneyUpdateRequestFieldAliases("type", ["journeyType", "journey-type"]),
+    valueType: "boolean"
+  },
+  {
+    field: "distance",
+    aliases: buildJourneyUpdateRequestFieldAliases("distance"),
+    valueType: "nullable-number"
+  },
+  {
+    field: "code",
+    aliases: buildJourneyUpdateRequestFieldAliases("code", ["journeyCode", "journey-code"]),
+    valueType: "string"
+  },
+  {
+    field: "departure-time",
+    aliases: buildJourneyUpdateRequestFieldAliases("departure-time", ["departureTime"]),
+    valueType: "string"
+  },
+  {
+    field: "id",
+    aliases: buildJourneyUpdateRequestFieldAliases("id"),
+    valueType: "journey-id"
+  },
+  {
+    field: "route-id",
+    aliases: buildJourneyUpdateRequestFieldAliases("route-id"),
+    valueType: "nullable-number"
+  },
+  {
+    field: "name",
+    aliases: buildJourneyUpdateRequestFieldAliases("name"),
+    valueType: "string"
+  },
+  {
+    field: "extend-journey-activation",
+    aliases: buildJourneyUpdateRequestFieldAliases("extend-journey-activation"),
+    valueType: "boolean"
+  }
+]);
+
+function cloneJsonCompatibleValue(value) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (err) {
+    return undefined;
+  }
+}
+
+function normalizeJourneyUpdateCellText(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-" || /^(null|undefined)$/i.test(text)) return "";
+  return text;
+}
+
+function hasJourneyUpdateRowValue(value) {
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return Boolean(normalizeJourneyUpdateCellText(value));
+}
+
+function buildJourneyUpdateRowLookup(row = {}, columns = []) {
+  const lookup = new Map();
+  const normalizedRow = row && typeof row === "object" && !Array.isArray(row) ? row : {};
+
+  Object.entries(normalizedRow).forEach(([key, value]) => {
+    const normalizedKey = normalizeTokenName(key);
+    if (!normalizedKey || lookup.has(normalizedKey)) return;
+    lookup.set(normalizedKey, value);
+  });
+
+  (Array.isArray(columns) ? columns : []).forEach((column) => {
+    const columnKey = String(column?.key || "").trim();
+    if (!columnKey) return;
+    const value = normalizedRow[columnKey];
+    const normalizedColumnKey = normalizeTokenName(columnKey);
+    const normalizedColumnLabel = normalizeTokenName(column?.label);
+
+    if (normalizedColumnKey && !lookup.has(normalizedColumnKey)) {
+      lookup.set(normalizedColumnKey, value);
+    }
+    if (normalizedColumnLabel && !lookup.has(normalizedColumnLabel)) {
+      lookup.set(normalizedColumnLabel, value);
+    }
+  });
+
+  return lookup;
+}
+
+function readJourneyUpdateRowLookupValue(lookup, aliases = []) {
+  const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+  for (const alias of aliasList) {
+    const normalizedAlias = normalizeTokenName(alias);
+    if (!normalizedAlias || !lookup.has(normalizedAlias)) continue;
+    return lookup.get(normalizedAlias);
+  }
+  return undefined;
+}
+
+function parseJourneyUpdateNullableNumberValue(value) {
+  const text = normalizeJourneyUpdateCellText(value);
+  if (!text) return null;
+  if (/^-?\d+$/.test(text)) {
+    const parsedInteger = Number.parseInt(text, 10);
+    if (Number.isSafeInteger(parsedInteger)) return parsedInteger;
+  }
+  const parsedNumber = Number(text.replace(",", "."));
+  return Number.isFinite(parsedNumber) ? parsedNumber : null;
+}
+
+function parseJourneyUpdateFieldValueByType(value, valueType = "string") {
+  switch (String(valueType || "").trim()) {
+    case "journey-id":
+      return normalizeStationPassengerJourneyIdForRequest(value);
+    case "nullable-number":
+      return parseJourneyUpdateNullableNumberValue(value);
+    case "nullable-string": {
+      const text = normalizeJourneyUpdateCellText(value);
+      return text || null;
+    }
+    case "boolean": {
+      const parsedBoolean = parseAllCompaniesBooleanValue(value);
+      return parsedBoolean === null ? undefined : parsedBoolean;
+    }
+    case "string":
+    default: {
+      const text = normalizeJourneyUpdateCellText(value);
+      return text || "";
+    }
+  }
+}
+
+function normalizeJourneyUpdateUpdateParameterEntry(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const type = String(item.type || "").trim();
+  if (!type) return null;
+  const rawValue = item.value;
+  if (typeof rawValue === "boolean") {
+    return { type, value: rawValue };
+  }
+  if (typeof rawValue === "number") {
+    return Number.isFinite(rawValue) ? { type, value: rawValue } : null;
+  }
+  const textValue = String(rawValue ?? "").trim();
+  if (!textValue) return null;
+  return { type, value: textValue };
+}
+
+function normalizeJourneyUpdateUpdateParameters(parameters = []) {
+  return (Array.isArray(parameters) ? parameters : []).map(normalizeJourneyUpdateUpdateParameterEntry).filter(Boolean);
+}
+
+function mergeJourneyUpdateRequestParameters(existingParameters = [], overrideParameters = []) {
+  const normalizedExisting = normalizeJourneyUpdateUpdateParameters(existingParameters);
+  const normalizedOverrides = normalizeJourneyUpdateUpdateParameters(overrideParameters);
+  const merged = [];
+  const indexByType = new Map();
+
+  normalizedExisting.forEach((item) => {
+    const normalizedType = normalizeTokenName(item.type);
+    if (!normalizedType || indexByType.has(normalizedType)) return;
+    indexByType.set(normalizedType, merged.length);
+    merged.push(item);
+  });
+
+  normalizedOverrides.forEach((item) => {
+    const normalizedType = normalizeTokenName(item.type);
+    if (!normalizedType) return;
+    if (indexByType.has(normalizedType)) {
+      merged[indexByType.get(normalizedType)] = item;
+      return;
+    }
+    indexByType.set(normalizedType, merged.length);
+    merged.push(item);
+  });
+
+  return merged;
+}
+
+function buildJourneyUpdateUpdateDataPayload({
+  journeyId = "",
+  row = {},
+  tableColumns = [],
+  detailStateById = {},
+  overrideParameters = []
+} = {}) {
+  const normalizedJourneyId = String(journeyId || row?.id || "").trim();
+  const detailState =
+    detailStateById && typeof detailStateById === "object" && !Array.isArray(detailStateById) ? detailStateById : {};
+  const baseDetailData = cloneJsonCompatibleValue(detailState[normalizedJourneyId]);
+  const dataPayload =
+    baseDetailData && typeof baseDetailData === "object" && !Array.isArray(baseDetailData) ? baseDetailData : {};
+  const rowLookup = buildJourneyUpdateRowLookup(row, tableColumns);
+
+  JOURNEY_UPDATE_REQUEST_DATA_FIELD_SPECS.forEach((spec) => {
+    const rawRowValue = readJourneyUpdateRowLookupValue(rowLookup, spec.aliases);
+    if (!hasJourneyUpdateRowValue(rawRowValue)) return;
+    const parsedValue = parseJourneyUpdateFieldValueByType(rawRowValue, spec.valueType);
+    if (parsedValue !== undefined) {
+      dataPayload[spec.field] = parsedValue;
+    }
+  });
+
+  dataPayload.id = normalizeStationPassengerJourneyIdForRequest(dataPayload.id || normalizedJourneyId);
+  dataPayload.parameters = mergeJourneyUpdateRequestParameters(dataPayload.parameters, overrideParameters);
+  if (!Array.isArray(dataPayload.staffs)) {
+    dataPayload.staffs = [];
+  }
+
+  return dataPayload;
+}
+
 function normalizeJourneyUpdateEditorInputState(source = {}) {
   const rawSource = source && typeof source === "object" ? source : {};
   return JOURNEY_UPDATE_EDITOR_FIELDS.reduce((acc, field) => {
@@ -13209,7 +13473,7 @@ function buildJourneyUpdateParametersFromEditorState(values = {}) {
 }
 
 function buildJourneyUpdateUpdateRequestDate(date = new Date()) {
-  return formatDateTimeToSecondPrecisionInTimeZone(date, STATION_PASSENGER_INFO_TIME_ZONE).replace(" ", "T");
+  return formatDateTimeToSecondPrecisionInTimeZone(date, STATION_PASSENGER_INFO_TIME_ZONE);
 }
 
 function parseJourneyUpdateRowIdsInput(value) {
@@ -13253,6 +13517,21 @@ function parseJourneyUpdateTableColumnsState(value) {
   return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
 }
 
+function parseJourneyUpdateDetailState(value) {
+  const parsed = parseBase64JsonState(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+  return Object.entries(parsed).reduce((acc, [key, item]) => {
+    const normalizedKey = String(key || "").trim();
+    const clonedItem = cloneJsonCompatibleValue(item);
+    if (!normalizedKey || !clonedItem || typeof clonedItem !== "object" || Array.isArray(clonedItem)) {
+      return acc;
+    }
+    acc[normalizedKey] = clonedItem;
+    return acc;
+  }, {});
+}
+
 function buildJourneyUpdateUpdateRequestHeadersText() {
   return JSON.stringify(
     {
@@ -13266,30 +13545,43 @@ function buildJourneyUpdateUpdateRequestHeadersText() {
 
 function buildJourneyUpdateUpdatePreviewBody({
   endpointUrl = "",
-  journeyIds = [],
+  tableRows = [],
+  tableColumns = [],
+  detailState = {},
   editorValues = {},
   sampleLimit = 3
 } = {}) {
   const normalizedEndpointUrl = String(endpointUrl || "").trim();
-  const normalizedJourneyIds = parseJourneyUpdateRowIdsInput(journeyIds);
-  const parameters = buildJourneyUpdateParametersFromEditorState(editorValues);
+  const normalizedRows = (Array.isArray(tableRows) ? tableRows : []).filter(
+    (row) => row && typeof row === "object" && !Array.isArray(row)
+  );
+  const normalizedColumns = Array.isArray(tableColumns) ? tableColumns : [];
+  const normalizedDetailState =
+    detailState && typeof detailState === "object" && !Array.isArray(detailState) ? detailState : {};
+  const overrideParameters = buildJourneyUpdateParametersFromEditorState(editorValues);
   const requestDate = buildJourneyUpdateUpdateRequestDate();
-  const sampleBodies = normalizedJourneyIds.slice(0, Math.max(1, sampleLimit)).map((journeyId) =>
+  const sampleBodies = normalizedRows.slice(0, Math.max(1, sampleLimit)).map((row) =>
     buildJourneyUpdateUpdateRequestBody({
-      journeyId,
-      parameters,
+      journeyId: row?.id,
+      dataPayload: buildJourneyUpdateUpdateDataPayload({
+        journeyId: row?.id,
+        row,
+        tableColumns: normalizedColumns,
+        detailStateById: normalizedDetailState,
+        overrideParameters
+      }),
       usePlaceholders: true,
       dateValue: requestDate
     })
   );
   const preview = {
     requestUrl: normalizedEndpointUrl,
-    requestCount: normalizedJourneyIds.length,
-    parameterTypes: parameters.map((item) => String(item.type || "").trim()).filter(Boolean),
+    requestCount: normalizedRows.length,
+    parameterTypes: overrideParameters.map((item) => String(item.type || "").trim()).filter(Boolean),
     requests: sampleBodies
   };
-  if (normalizedJourneyIds.length > sampleBodies.length) {
-    preview.moreRequests = normalizedJourneyIds.length - sampleBodies.length;
+  if (normalizedRows.length > sampleBodies.length) {
+    preview.moreRequests = normalizedRows.length - sampleBodies.length;
   }
   return {
     requestDate,
@@ -13297,17 +13589,24 @@ function buildJourneyUpdateUpdatePreviewBody({
   };
 }
 
-function applyJourneyUpdateEditorStateToReport(report, { endpointUrl = "", editorValues = {}, tableRows = [], tableColumns = [] } = {}) {
+function applyJourneyUpdateEditorStateToReport(
+  report,
+  { endpointUrl = "", editorValues = {}, tableRows = [], tableColumns = [], detailState = {} } = {}
+) {
   const nextReport = report && typeof report === "object" ? report : buildJourneyUpdateReportModel();
   const normalizedRows = Array.isArray(tableRows) ? tableRows : [];
   const normalizedColumns = Array.isArray(tableColumns) ? tableColumns : [];
+  const normalizedDetailState =
+    detailState && typeof detailState === "object" && !Array.isArray(detailState) ? detailState : {};
   const normalizedEditorValues = normalizeJourneyUpdateEditorInputState(editorValues);
   const journeyIds = normalizedRows
     .map((row) => String(row?.id || "").trim())
     .filter((idValue) => Boolean(idValue) && idValue !== "-");
   const preview = buildJourneyUpdateUpdatePreviewBody({
     endpointUrl,
-    journeyIds,
+    tableRows: normalizedRows,
+    tableColumns: normalizedColumns,
+    detailState: normalizedDetailState,
     editorValues: normalizedEditorValues
   });
 
@@ -13317,6 +13616,7 @@ function applyJourneyUpdateEditorStateToReport(report, { endpointUrl = "", edito
   nextReport.updateRequestDate = preview.requestDate;
   nextReport.updateEditorValues = normalizedEditorValues;
   nextReport.updateJourneyIdsCsv = journeyIds.join(",");
+  nextReport.updateDetailState = encodeJsonStateToBase64(normalizedDetailState);
   nextReport.tableRowsState = encodeJsonStateToBase64(normalizedRows);
   nextReport.tableColumnsState = encodeJsonStateToBase64(normalizedColumns);
   return nextReport;
@@ -13514,6 +13814,7 @@ function extractJourneyUpdateDirectFieldEntries(detailRecord) {
 function buildJourneyUpdateDetailMap(payload) {
   const detailsById = new Map();
   const detailColumnsByKey = new Map();
+  const detailDataById = {};
 
   extractJourneyUpdateDetailNodes(payload).forEach((node) => {
     const detailRecord = resolveJourneyUpdateDetailRecord(node);
@@ -13525,6 +13826,14 @@ function buildJourneyUpdateDetailMap(payload) {
     if (detailEntries.length === 0) return;
 
     const existing = detailsById.get(idText) || {};
+    const clonedDetailData = cloneJsonCompatibleValue(detailRecord?.fieldSource);
+    if (clonedDetailData && typeof clonedDetailData === "object" && !Array.isArray(clonedDetailData)) {
+      if (clonedDetailData.id === undefined || clonedDetailData.id === null || String(clonedDetailData.id).trim() === "") {
+        clonedDetailData.id = normalizeStationPassengerJourneyIdForRequest(idText);
+      }
+      detailDataById[idText] = clonedDetailData;
+    }
+
     detailEntries.forEach((entry) => {
       detailColumnsByKey.set(entry.key, buildJourneyUpdateParameterColumn(entry.type) || {
         key: entry.key,
@@ -13544,6 +13853,7 @@ function buildJourneyUpdateDetailMap(payload) {
 
   return {
     detailsById,
+    detailDataById,
     detailColumns: Array.from(detailColumnsByKey.values()).sort((a, b) =>
       String(a.label || "").localeCompare(String(b.label || ""), "tr")
     )
@@ -13655,6 +13965,29 @@ function applyJourneyUpdateParametersToRows(rows, parameters, successfulIds) {
     });
     return nextRow;
   });
+}
+
+function applyJourneyUpdateParametersToDetailState(detailStateById, parameters, successfulIds) {
+  const normalizedDetailState =
+    detailStateById && typeof detailStateById === "object" && !Array.isArray(detailStateById) ? detailStateById : {};
+  const normalizedParameters = normalizeJourneyUpdateUpdateParameters(parameters);
+  const targetIds = new Set(parseJourneyUpdateRowIdsInput(successfulIds));
+  if (!targetIds.size || !normalizedParameters.length) {
+    return { ...normalizedDetailState };
+  }
+
+  return Object.entries(normalizedDetailState).reduce((acc, [id, rawDetailData]) => {
+    const normalizedId = String(id || "").trim();
+    const clonedDetailData = cloneJsonCompatibleValue(rawDetailData);
+    if (!normalizedId || !clonedDetailData || typeof clonedDetailData !== "object" || Array.isArray(clonedDetailData)) {
+      return acc;
+    }
+    if (targetIds.has(normalizedId)) {
+      clonedDetailData.parameters = mergeJourneyUpdateRequestParameters(clonedDetailData.parameters, normalizedParameters);
+    }
+    acc[normalizedId] = clonedDetailData;
+    return acc;
+  }, {});
 }
 
 function dedupeJourneyUpdateTableRows(rows) {
@@ -18069,6 +18402,7 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
   applyJourneyUpdateEditorStateToReport(report, {
     endpointUrl: resolvedUpdateEndpointUrl,
     editorValues: report.updateEditorValues,
+    detailState: {},
     tableRows: report.tableRows,
     tableColumns: report.tableColumns
   });
@@ -18128,18 +18462,26 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   };
   const report = buildJourneyUpdateReportModel();
   report.requested = true;
+  let detailStateForRender = {};
 
   report.updateEditorValues = normalizeJourneyUpdateEditorInputState(req.body);
 
   if (isUpdateAction) {
     const submittedTableRows = parseJourneyUpdateTableRowsState(req.body.tableRowsState);
     const submittedTableColumns = parseJourneyUpdateTableColumnsState(req.body.tableColumnsState);
+    const submittedDetailState = parseJourneyUpdateDetailState(req.body.detailState);
     const requestedJourneyIds = parseJourneyUpdateRowIdsInput(req.body.journeyIds);
     const journeyIds =
       requestedJourneyIds.length > 0
         ? requestedJourneyIds
         : submittedTableRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
     const parameters = buildJourneyUpdateParametersFromEditorState(report.updateEditorValues);
+    const rowsById = new Map(
+      submittedTableRows
+        .map((row) => [String(row?.id || "").trim(), row])
+        .filter(([rowId]) => Boolean(rowId))
+    );
+    detailStateForRender = submittedDetailState;
 
     report.tableRows = submittedTableRows;
     report.tableColumns = submittedTableColumns.length ? submittedTableColumns : buildJourneyUpdateTableColumns([]);
@@ -18182,17 +18524,26 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
           String(partnerError || "").trim();
       } else {
         const updateResults = await runWithConcurrency(journeyIds, 4, async (journeyId) => {
+          const row = rowsById.get(String(journeyId || "").trim()) || {};
+          const dataPayload = buildJourneyUpdateUpdateDataPayload({
+            journeyId,
+            row,
+            tableColumns: report.tableColumns,
+            detailStateById: submittedDetailState,
+            overrideParameters: parameters
+          });
           const result = await fetchJourneyUpdateUpdatePayload({
             endpointUrl: resolvedUpdateEndpointUrl,
             sessionId: loginResult.sessionId,
             deviceId: loginResult.deviceId,
             token: loginResult.token,
             journeyId,
-            parameters,
+            dataPayload,
             authorization: STATION_PASSENGER_INFO_API_AUTH
           });
           return {
             journeyId,
+            dataPayload,
             ...result
           };
         });
@@ -18200,9 +18551,16 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
         const successItems = updateResults.filter((item) => item?.ok === true);
         const failureItems = updateResults.filter((item) => item?.ok !== true);
         const successfulIds = successItems.map((item) => String(item?.journeyId || "").trim()).filter(Boolean);
+        const nextDetailState =
+          successfulIds.length > 0
+            ? applyJourneyUpdateParametersToDetailState(submittedDetailState, parameters, successfulIds)
+            : submittedDetailState;
+        detailStateForRender = nextDetailState;
         const requestPreview = buildJourneyUpdateUpdatePreviewBody({
           endpointUrl: resolvedUpdateEndpointUrl,
-          journeyIds,
+          tableRows: report.tableRows,
+          tableColumns: report.tableColumns,
+          detailState: nextDetailState,
           editorValues: report.updateEditorValues,
           sampleLimit: 5
         });
@@ -18307,6 +18665,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
         const dayResults = [];
         const tableRows = [];
         const detailColumnsByKey = new Map();
+        const detailDataById = {};
 
         for (const range of dailyRanges) {
           const requestDate = String(range.startDate || "").trim();
@@ -18347,7 +18706,8 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
                     error: "GetJourneyDetail için satır id değeri bulunamadı.",
                     detail: "",
                     detailValues: {},
-                    detailColumns: []
+                    detailColumns: [],
+                    detailDataById: {}
                   };
                 }
 
@@ -18367,18 +18727,20 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
                     error: String(detailResult.error || "").trim(),
                     detail: String(detailResult.detail || "").trim(),
                     detailValues: {},
-                    detailColumns: []
+                    detailColumns: [],
+                    detailDataById: {}
                   };
                 }
 
-                const { detailsById, detailColumns } = buildJourneyUpdateDetailMap(detailResult.responsePayload);
+                const { detailsById, detailColumns, detailDataById } = buildJourneyUpdateDetailMap(detailResult.responsePayload);
                 return {
                   row,
                   ok: true,
                   error: "",
                   detail: "",
                   detailValues: detailsById.get(journeyId) || {},
-                  detailColumns
+                  detailColumns,
+                  detailDataById
                 };
               })
             : [];
@@ -18388,6 +18750,14 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             if (detailItem && Array.isArray(detailItem.detailColumns)) {
               detailItem.detailColumns.forEach((column) => {
                 detailColumnsByKey.set(column.key, column);
+              });
+            }
+            if (detailItem?.detailDataById && typeof detailItem.detailDataById === "object") {
+              Object.entries(detailItem.detailDataById).forEach(([detailId, detailData]) => {
+                const normalizedDetailId = String(detailId || "").trim();
+                const clonedDetailData = cloneJsonCompatibleValue(detailData);
+                if (!normalizedDetailId || !clonedDetailData) return;
+                detailDataById[normalizedDetailId] = clonedDetailData;
               });
             }
             return {
@@ -18476,6 +18846,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
         report.tableRows = uniqueTableRows;
         report.tableColumns = tableColumns;
         report.dayResults = dayResults;
+        detailStateForRender = detailDataById;
         report.status =
           failedDayCount === 0
             ? 200
@@ -18510,6 +18881,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   applyJourneyUpdateEditorStateToReport(report, {
     endpointUrl: resolvedUpdateEndpointUrl,
     editorValues: report.updateEditorValues,
+    detailState: detailStateForRender,
     tableRows: report.tableRows,
     tableColumns: report.tableColumns
   });

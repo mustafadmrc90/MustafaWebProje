@@ -1257,6 +1257,9 @@
 
     const fieldEls = Array.from(form.querySelectorAll("[data-journey-update-editor-key]"));
     const rowIdsInput = form.querySelector("[data-journey-update-row-ids='1']");
+    const detailStateInput = form.querySelector("[data-journey-update-detail-state='1']");
+    const tableRowsStateInput = form.querySelector("input[name='tableRowsState']");
+    const tableColumnsStateInput = form.querySelector("input[name='tableColumnsState']");
     const requestUrlEl = form.querySelector("[data-journey-update-request-url]");
     const requestHeadersEl = form.querySelector("[data-journey-update-request-headers]");
     const requestBodyEl = form.querySelector("[data-journey-update-request-body]");
@@ -1264,6 +1267,41 @@
     const submitButton = form.querySelector("button[type='submit']");
     const loadingMessage = form.querySelector(".journey-update-editor-loading");
     const endpointUrl = String(form.dataset.journeyUpdateEndpointUrl || "").trim();
+
+    const normalizeTokenName = (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+    const buildDynamicColumnKey = (fieldName) => {
+      const normalized = normalizeTokenName(fieldName);
+      return normalized ? `parameter_${normalized}` : "";
+    };
+
+    const buildFieldAliases = (fieldName, extraAliases = []) =>
+      Array.from(new Set([fieldName, buildDynamicColumnKey(fieldName), ...(Array.isArray(extraAliases) ? extraAliases : [])]));
+
+    const requestFieldSpecs = [
+      { field: "description", aliases: buildFieldAliases("description"), valueType: "string" },
+      { field: "bus-id", aliases: buildFieldAliases("bus-id"), valueType: "nullable-number" },
+      { field: "original-bus-type-id", aliases: buildFieldAliases("original-bus-type-id"), valueType: "nullable-number" },
+      { field: "destination-display-name", aliases: buildFieldAliases("destination-display-name"), valueType: "string" },
+      { field: "is-active", aliases: buildFieldAliases("is-active"), valueType: "boolean" },
+      { field: "is-additional", aliases: buildFieldAliases("is-additional"), valueType: "boolean" },
+      { field: "duration", aliases: buildFieldAliases("duration"), valueType: "nullable-string" },
+      { field: "type", aliases: buildFieldAliases("type", ["journeyType", "journey-type"]), valueType: "boolean" },
+      { field: "distance", aliases: buildFieldAliases("distance"), valueType: "nullable-number" },
+      { field: "code", aliases: buildFieldAliases("code", ["journeyCode", "journey-code"]), valueType: "string" },
+      { field: "departure-time", aliases: buildFieldAliases("departure-time", ["departureTime"]), valueType: "string" },
+      { field: "id", aliases: buildFieldAliases("id"), valueType: "journey-id" },
+      { field: "route-id", aliases: buildFieldAliases("route-id"), valueType: "nullable-number" },
+      { field: "name", aliases: buildFieldAliases("name"), valueType: "string" },
+      {
+        field: "extend-journey-activation",
+        aliases: buildFieldAliases("extend-journey-activation"),
+        valueType: "boolean"
+      }
+    ];
 
     const parseJourneyId = (value) => {
       const text = String(value || "").trim();
@@ -1281,6 +1319,117 @@
         .map((item) => String(item || "").trim())
         .filter(Boolean);
 
+    const decodeBase64Utf8 = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        const binary = window.atob(raw);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        if (typeof TextDecoder !== "undefined") {
+          return new TextDecoder("utf-8").decode(bytes);
+        }
+        return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+      } catch (err) {
+        return "";
+      }
+    };
+
+    const parseBase64Json = (value) => {
+      const text = decodeBase64Utf8(value);
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        return null;
+      }
+    };
+
+    const getTableRows = () => {
+      const parsed = parseBase64Json(tableRowsStateInput?.value || "");
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+      }
+      return getJourneyIds().map((id) => ({ id }));
+    };
+
+    const getTableColumns = () => {
+      const parsed = parseBase64Json(tableColumnsStateInput?.value || "");
+      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
+    };
+
+    const getDetailState = () => {
+      const parsed = parseBase64Json(detailStateInput?.value || "");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    };
+
+    const cloneJson = (value) => {
+      if (value === undefined) return undefined;
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (err) {
+        return undefined;
+      }
+    };
+
+    const normalizeCellText = (value) => {
+      const text = String(value ?? "").trim();
+      if (!text || text === "-" || /^(null|undefined)$/i.test(text)) return "";
+      return text;
+    };
+
+    const hasRowValue = (value) => {
+      if (typeof value === "boolean") return true;
+      if (typeof value === "number") return Number.isFinite(value);
+      return Boolean(normalizeCellText(value));
+    };
+
+    const parseBooleanValue = (value) => {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") {
+        if (value === 1) return true;
+        if (value === 0) return false;
+        return null;
+      }
+      const normalized = normalizeTokenName(value);
+      if (!normalized) return null;
+      if (["true", "1", "yes", "evet", "t", "y", "on"].includes(normalized)) return true;
+      if (["false", "0", "no", "hayir", "f", "n", "off"].includes(normalized)) return false;
+      return null;
+    };
+
+    const parseNullableNumberValue = (value) => {
+      const text = normalizeCellText(value);
+      if (!text) return null;
+      if (/^-?\d+$/.test(text)) {
+        const parsed = Number.parseInt(text, 10);
+        if (Number.isSafeInteger(parsed)) return parsed;
+      }
+      const parsedNumber = Number(text.replace(",", "."));
+      return Number.isFinite(parsedNumber) ? parsedNumber : null;
+    };
+
+    const parseFieldValueByType = (value, valueType = "string") => {
+      switch (String(valueType || "").trim()) {
+        case "journey-id":
+          return parseJourneyId(value);
+        case "nullable-number":
+          return parseNullableNumberValue(value);
+        case "nullable-string": {
+          const text = normalizeCellText(value);
+          return text || null;
+        }
+        case "boolean": {
+          const parsedBoolean = parseBooleanValue(value);
+          return parsedBoolean === null ? undefined : parsedBoolean;
+        }
+        case "string":
+        default: {
+          const text = normalizeCellText(value);
+          return text || "";
+        }
+      }
+    };
+
     const buildRequestDate = () => {
       const fromDataset = String(form.dataset.journeyUpdateRequestDate || "").trim();
       if (fromDataset) return fromDataset;
@@ -1291,7 +1440,7 @@
       const hour = String(now.getHours()).padStart(2, "0");
       const minute = String(now.getMinutes()).padStart(2, "0");
       const second = String(now.getSeconds()).padStart(2, "0");
-      return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
     };
 
     const buildParameters = () =>
@@ -1318,10 +1467,114 @@
         })
         .filter(Boolean);
 
-    const buildRequestBody = (journeyId, parameters, requestDate) => ({
+    const normalizeParameterEntry = (item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const type = String(item.type || "").trim();
+      if (!type) return null;
+      if (typeof item.value === "boolean") return { type, value: item.value };
+      if (typeof item.value === "number") {
+        return Number.isFinite(item.value) ? { type, value: item.value } : null;
+      }
+      const textValue = String(item.value ?? "").trim();
+      return textValue ? { type, value: textValue } : null;
+    };
+
+    const mergeParameters = (existingParameters, overrideParameters) => {
+      const merged = [];
+      const indexByType = new Map();
+
+      (Array.isArray(existingParameters) ? existingParameters : [])
+        .map(normalizeParameterEntry)
+        .filter(Boolean)
+        .forEach((item) => {
+          const normalizedType = normalizeTokenName(item.type);
+          if (!normalizedType || indexByType.has(normalizedType)) return;
+          indexByType.set(normalizedType, merged.length);
+          merged.push(item);
+        });
+
+      (Array.isArray(overrideParameters) ? overrideParameters : [])
+        .map(normalizeParameterEntry)
+        .filter(Boolean)
+        .forEach((item) => {
+          const normalizedType = normalizeTokenName(item.type);
+          if (!normalizedType) return;
+          if (indexByType.has(normalizedType)) {
+            merged[indexByType.get(normalizedType)] = item;
+            return;
+          }
+          indexByType.set(normalizedType, merged.length);
+          merged.push(item);
+        });
+
+      return merged;
+    };
+
+    const buildRowLookup = (row, columns) => {
+      const lookup = new Map();
+      const safeRow = row && typeof row === "object" && !Array.isArray(row) ? row : {};
+
+      Object.entries(safeRow).forEach(([key, value]) => {
+        const normalizedKey = normalizeTokenName(key);
+        if (!normalizedKey || lookup.has(normalizedKey)) return;
+        lookup.set(normalizedKey, value);
+      });
+
+      (Array.isArray(columns) ? columns : []).forEach((column) => {
+        const columnKey = String(column?.key || "").trim();
+        if (!columnKey) return;
+        const value = safeRow[columnKey];
+        const normalizedColumnKey = normalizeTokenName(columnKey);
+        const normalizedColumnLabel = normalizeTokenName(column?.label);
+        if (normalizedColumnKey && !lookup.has(normalizedColumnKey)) {
+          lookup.set(normalizedColumnKey, value);
+        }
+        if (normalizedColumnLabel && !lookup.has(normalizedColumnLabel)) {
+          lookup.set(normalizedColumnLabel, value);
+        }
+      });
+
+      return lookup;
+    };
+
+    const readLookupValue = (lookup, aliases) => {
+      const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+      for (const alias of aliasList) {
+        const normalizedAlias = normalizeTokenName(alias);
+        if (!normalizedAlias || !lookup.has(normalizedAlias)) continue;
+        return lookup.get(normalizedAlias);
+      }
+      return undefined;
+    };
+
+    const buildRequestData = (row, columns, detailState, overrideParameters) => {
+      const journeyId = String(row?.id || "").trim();
+      const safeDetailState = detailState && typeof detailState === "object" && !Array.isArray(detailState) ? detailState : {};
+      const baseDetailData = cloneJson(safeDetailState[journeyId]);
+      const data = baseDetailData && typeof baseDetailData === "object" && !Array.isArray(baseDetailData) ? baseDetailData : {};
+      const lookup = buildRowLookup(row, columns);
+
+      requestFieldSpecs.forEach((spec) => {
+        const rawValue = readLookupValue(lookup, spec.aliases);
+        if (!hasRowValue(rawValue)) return;
+        const parsedValue = parseFieldValueByType(rawValue, spec.valueType);
+        if (parsedValue !== undefined) {
+          data[spec.field] = parsedValue;
+        }
+      });
+
+      data.id = parseJourneyId(data.id || journeyId);
+      data.parameters = mergeParameters(data.parameters, overrideParameters);
+      if (!Array.isArray(data.staffs)) {
+        data.staffs = [];
+      }
+
+      return data;
+    };
+
+    const buildRequestBody = (row, columns, detailState, parameters, requestDate) => ({
       data: {
-        id: parseJourneyId(journeyId),
-        parameters
+        ...buildRequestData(row, columns, detailState, parameters)
       },
       "device-session": {
         "session-id": "{{sessionId}}",
@@ -1333,18 +1586,22 @@
     });
 
     const syncPreview = () => {
-      const journeyIds = getJourneyIds();
+      const tableRows = getTableRows();
+      const tableColumns = getTableColumns();
+      const detailState = getDetailState();
       const parameters = buildParameters();
       const requestDate = buildRequestDate();
-      const sampleBodies = journeyIds.slice(0, 3).map((journeyId) => buildRequestBody(journeyId, parameters, requestDate));
+      const sampleBodies = tableRows
+        .slice(0, 3)
+        .map((row) => buildRequestBody(row, tableColumns, detailState, parameters, requestDate));
       const previewPayload = {
         requestUrl: endpointUrl,
-        requestCount: journeyIds.length,
+        requestCount: tableRows.length,
         parameterTypes: parameters.map((item) => item.type),
         requests: sampleBodies
       };
-      if (journeyIds.length > sampleBodies.length) {
-        previewPayload.moreRequests = journeyIds.length - sampleBodies.length;
+      if (tableRows.length > sampleBodies.length) {
+        previewPayload.moreRequests = tableRows.length - sampleBodies.length;
       }
 
       if (requestUrlEl) {
@@ -1364,7 +1621,7 @@
         requestBodyEl.textContent = JSON.stringify(previewPayload, null, 2);
       }
       if (countEl) {
-        countEl.textContent = `${journeyIds.length} istek`;
+        countEl.textContent = `${tableRows.length} istek`;
       }
     };
 
