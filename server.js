@@ -4174,6 +4174,26 @@ function buildStationPassengerJourneyStationsRequestBody({
   };
 }
 
+function buildJourneyUpdateDetailRequestBody({
+  journeyId = "",
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  dateValue = ""
+} = {}) {
+  const normalizedDateValue = String(dateValue || "").trim();
+  return {
+    data: normalizeStationPassengerJourneyIdForRequest(journeyId),
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE,
+    token: String(token || "").trim(),
+    date: normalizedDateValue ? `${normalizedDateValue} 00:00:00` : ""
+  };
+}
+
 function formatDateTimeToOffsetPrecisionInTimeZone(
   date = new Date(),
   timeZone = STATION_PASSENGER_INFO_TIME_ZONE,
@@ -5596,31 +5616,28 @@ async function fetchJourneyUpdateDetailPayload({
   sessionId,
   deviceId,
   token,
+  journeyId = "",
   dateValue = "",
-  includeDateField = true,
   authorization = STATION_PASSENGER_INFO_API_AUTH
 }) {
   const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
   const normalizedSessionId = String(sessionId || "").trim();
   const normalizedDeviceId = String(deviceId || "").trim();
   const normalizedToken = String(token || "").trim();
+  const normalizedJourneyId = String(journeyId || "").trim();
   const fallbackRequestDateParts = buildStationPassengerRequestDateParts(new Date());
   const normalizedRequestDate = normalizeIsoDateInput(String(dateValue || "").trim()) || fallbackRequestDateParts.isoDate;
-  const requestBody = buildStationPassengerDailySummariesRequestBody({
+  const requestBody = buildJourneyUpdateDetailRequestBody({
+    journeyId: normalizedJourneyId,
     sessionId: normalizedSessionId,
     deviceId: normalizedDeviceId,
     token: normalizedToken,
-    dateValue: normalizedRequestDate,
-    includeDateField
+    dateValue: normalizedRequestDate
   });
-  const requestBodyPreview = includeDateField
-    ? {
-        data: normalizedRequestDate,
-        date: normalizedRequestDate ? `${normalizedRequestDate} 00:00:00` : ""
-      }
-    : {
-        data: normalizedRequestDate
-      };
+  const requestBodyPreview = {
+    data: normalizeStationPassengerJourneyIdForRequest(normalizedJourneyId),
+    date: normalizedRequestDate ? `${normalizedRequestDate} 00:00:00` : ""
+  };
 
   if (!normalizedEndpointUrl) {
     return {
@@ -5644,6 +5661,19 @@ async function fetchJourneyUpdateDetailPayload({
       responsePayload: null,
       status: null,
       error: "GetJourneyDetail için session/device/token eksik.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedJourneyId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: normalizedRequestDate,
+      requestBodyPreview,
+      responsePayload: null,
+      status: null,
+      error: "GetJourneyDetail için journey-id zorunludur.",
       detail: ""
     };
   }
@@ -17468,55 +17498,96 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             authorization: STATION_PASSENGER_INFO_API_AUTH
           });
 
-          const detailResult = fetchResult.ok
-            ? await fetchJourneyUpdateDetailPayload({
-                endpointUrl: resolvedDetailEndpointUrl,
-                sessionId: loginResult.sessionId,
-                deviceId: loginResult.deviceId,
-                token: loginResult.token,
-                dateValue: requestDate,
-                includeDateField: true,
-                authorization: STATION_PASSENGER_INFO_API_AUTH
-              })
-            : null;
-
-          const { detailsById, detailColumns } = detailResult?.ok
-            ? buildJourneyUpdateDetailMap(detailResult.responsePayload)
-            : { detailsById: new Map(), detailColumns: [] };
-          detailColumns.forEach((column) => {
-            detailColumnsByKey.set(column.key, column);
-          });
-
           const summaryRows = buildJourneyUpdateTableRows(fetchResult.responsePayload, {
             requestDate,
             companyCode: String(selectedCompanyMeta?.code || "").trim(),
             partnerId: String(selectedCompanyMeta?.id || "").trim(),
             cluster: selectedCompanyCluster
           });
-          const currentTableRows = mergeJourneyUpdateRowDetails(summaryRows, detailsById);
+          const detailResults = fetchResult.ok
+            ? await runWithConcurrency(summaryRows, 4, async (row) => {
+                const journeyId = String(row?.id || "").trim();
+                if (!journeyId || journeyId === "-") {
+                  return {
+                    row,
+                    ok: false,
+                    error: "GetJourneyDetail için satır id değeri bulunamadı.",
+                    detail: "",
+                    detailValues: {},
+                    detailColumns: []
+                  };
+                }
+
+                const detailResult = await fetchJourneyUpdateDetailPayload({
+                  endpointUrl: resolvedDetailEndpointUrl,
+                  sessionId: loginResult.sessionId,
+                  deviceId: loginResult.deviceId,
+                  token: loginResult.token,
+                  journeyId,
+                  dateValue: requestDate,
+                  authorization: STATION_PASSENGER_INFO_API_AUTH
+                });
+                if (!detailResult.ok) {
+                  return {
+                    row,
+                    ok: false,
+                    error: String(detailResult.error || "").trim(),
+                    detail: String(detailResult.detail || "").trim(),
+                    detailValues: {},
+                    detailColumns: []
+                  };
+                }
+
+                const { detailsById, detailColumns } = buildJourneyUpdateDetailMap(detailResult.responsePayload);
+                return {
+                  row,
+                  ok: true,
+                  error: "",
+                  detail: "",
+                  detailValues: detailsById.get(journeyId) || {},
+                  detailColumns
+                };
+              })
+            : [];
+
+          const currentTableRows = summaryRows.map((row, index) => {
+            const detailItem = Array.isArray(detailResults) ? detailResults[index] : null;
+            if (detailItem && Array.isArray(detailItem.detailColumns)) {
+              detailItem.detailColumns.forEach((column) => {
+                detailColumnsByKey.set(column.key, column);
+              });
+            }
+            return {
+              ...row,
+              ...((detailItem?.detailValues && typeof detailItem.detailValues === "object") ? detailItem.detailValues : {})
+            };
+          });
           tableRows.push(...currentTableRows);
 
           const dayErrorParts = [];
           if (!fetchResult.ok) {
             dayErrorParts.push(String(fetchResult.error || "").trim());
           }
-          if (detailResult && !detailResult.ok) {
-            dayErrorParts.push(String(detailResult.error || "").trim());
-          }
+          (Array.isArray(detailResults) ? detailResults : [])
+            .filter((item) => item && item.ok === false && String(item.error || "").trim())
+            .forEach((item) => {
+              dayErrorParts.push(String(item.error || "").trim());
+            });
           const dayDetailParts = [];
           if (!fetchResult.ok && fetchResult.detail) {
             dayDetailParts.push(String(fetchResult.detail || "").trim());
           }
-          if (detailResult && !detailResult.ok && detailResult.detail) {
-            dayDetailParts.push(String(detailResult.detail || "").trim());
-          }
+          (Array.isArray(detailResults) ? detailResults : [])
+            .filter((item) => item && item.ok === false && String(item.detail || "").trim())
+            .forEach((item) => {
+              dayDetailParts.push(String(item.detail || "").trim());
+            });
+          const detailSuccess = (Array.isArray(detailResults) ? detailResults : []).every((item) => item?.ok !== false);
 
           dayResults.push({
             date: requestDate,
-            ok: fetchResult.ok === true && (!detailResult || detailResult.ok === true),
-            status: Number.isFinite(Number(detailResult?.status || fetchResult.status))
-              ? Number(detailResult?.status || fetchResult.status)
-              : null,
+            ok: fetchResult.ok === true && detailSuccess,
+            status: Number.isFinite(Number(fetchResult.status)) ? Number(fetchResult.status) : null,
             rowCount: currentTableRows.length,
             error: dayErrorParts.join(" | "),
             detail: dayDetailParts.join(" | ")
