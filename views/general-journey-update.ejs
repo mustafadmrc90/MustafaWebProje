@@ -159,54 +159,93 @@
       <% if (report.requested) { %>
         <%
           const journeyColumns = Array.isArray(report.tableColumns) ? report.tableColumns : [];
-          const journeyUpdateEditorFields = [
-            { key: "webWarning", label: "Web Uyarısı", type: "text" },
-            { key: "routeFilterBeforeXMinutes", label: "Web Site Rota Listeleme Süresi", type: "number", step: "1", min: "0" },
-            { key: "reservationOption", label: "Rezervasyon Opsiyon Süresi", type: "number", step: "1", min: "0" },
-            { key: "refundOption", label: "İade ve Transfer Opsiyon Süresi", type: "number", step: "1", min: "0" },
-            { key: "maxTotalDiscountCount", label: "Azami İndirimli Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxSingleSeatCount", label: "Azami Tek koltuk Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxSingleFemaleCount", label: "Azami Tek Bayan Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxReservationCount", label: "Azami Rezervasyon Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxPointSalesCount", label: "Azami Puanlı Satış Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxInfantCount", label: "Azami Çocuk Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxGuestCount", label: "Azami Misafir Adedi", type: "number", step: "1", min: "0" },
-            { key: "maxDisabledCount", label: "Azami Engelli Adedi", type: "number", step: "1", min: "0" },
-            { key: "canStopAtWayStation", label: "Ara Durakta Durmaz", type: "select" },
-            { key: "canSellThroughWeb", label: "İnternetten Satışa Açık", type: "select" },
-            { key: "canApplyDiscount", label: "İndirim Yapılamaz", type: "select" }
-          ];
+          const updateEditorFields = Array.isArray(journeyUpdateEditorFields) ? journeyUpdateEditorFields : [];
+          const showJourneyUpdateEditor = Array.isArray(report.tableRows) && report.tableRows.length > 0;
         %>
-        <section class="table-card panel-card journey-update-editor-card">
-          <div class="table-head">
-            <h2>Güncelleme Alanları</h2>
-            <div class="table-actions">
-              <span class="pill muted">Düzenlenebilir</span>
+        <% if (showJourneyUpdateEditor) { %>
+          <section class="table-card panel-card journey-update-editor-card">
+            <div class="table-head">
+              <h2>Güncelleme Alanları</h2>
+              <div class="table-actions">
+                <span class="pill muted" data-journey-update-preview-count="1"><%= Array.isArray(report.tableRows) ? report.tableRows.length : 0 %> istek</span>
+              </div>
             </div>
-          </div>
-          <div class="journey-update-editor-grid">
-            <% journeyUpdateEditorFields.forEach((field) => { %>
-              <label class="journey-update-editor-field">
-                <span><%= field.label %></span>
-                <% if (field.type === "select") { %>
-                  <select data-journey-update-editor-key="<%= field.key %>">
-                    <option value="">Seçiniz</option>
-                    <option value="true">Evet</option>
-                    <option value="false">Hayır</option>
-                  </select>
-                <% } else { %>
-                  <input
-                    type="<%= field.type %>"
-                    data-journey-update-editor-key="<%= field.key %>"
-                    placeholder="Değer girin"
-                    <% if (field.step) { %>step="<%= field.step %>"<% } %>
-                    <% if (field.min) { %>min="<%= field.min %>"<% } %>
-                  />
-                <% } %>
-              </label>
-            <% }) %>
-          </div>
-        </section>
+            <form
+              class="journey-update-editor-form"
+              method="post"
+              action="/general/journey-update"
+              data-journey-update-editor-form="1"
+              data-journey-update-endpoint-url="<%= report.updateEndpointUrl || '' %>"
+              data-journey-update-request-date="<%= report.updateRequestDate || '' %>"
+            >
+              <input type="hidden" name="submitAction" value="journey-update-apply" />
+              <input type="hidden" name="company" value="<%= filters.company || '' %>" />
+              <input type="hidden" name="username" value="<%= filters.username || '' %>" />
+              <input type="hidden" name="password" value="<%= filters.password || '' %>" />
+              <input type="hidden" name="startDate" value="<%= filters.startDate || '' %>" />
+              <input type="hidden" name="endDate" value="<%= filters.endDate || '' %>" />
+              <input type="hidden" name="journeyIds" value="<%= report.updateJourneyIdsCsv || '' %>" data-journey-update-row-ids="1" />
+              <input type="hidden" name="tableRowsState" value="<%= report.tableRowsState || '' %>" />
+              <input type="hidden" name="tableColumnsState" value="<%= report.tableColumnsState || '' %>" />
+
+              <div class="journey-update-editor-grid">
+                <% updateEditorFields.forEach((field) => { %>
+                  <label class="journey-update-editor-field">
+                    <span><%= field.label %></span>
+                    <% if (field.inputType === "select") { %>
+                      <select
+                        name="<%= `update_${field.key}` %>"
+                        data-journey-update-editor-key="<%= field.key %>"
+                        data-journey-update-param-type="<%= field.parameterType %>"
+                        data-journey-update-value-type="<%= field.valueType %>"
+                      >
+                        <option value="">Seçiniz</option>
+                        <option value="true" <%= field.value === "true" ? "selected" : "" %>>Evet</option>
+                        <option value="false" <%= field.value === "false" ? "selected" : "" %>>Hayır</option>
+                      </select>
+                    <% } else { %>
+                      <input
+                        type="<%= field.inputType %>"
+                        name="<%= `update_${field.key}` %>"
+                        value="<%= field.value || '' %>"
+                        data-journey-update-editor-key="<%= field.key %>"
+                        data-journey-update-param-type="<%= field.parameterType %>"
+                        data-journey-update-value-type="<%= field.valueType %>"
+                        placeholder="Değer girin"
+                        <% if (field.step) { %>step="<%= field.step %>"<% } %>
+                        <% if (field.min) { %>min="<%= field.min %>"<% } %>
+                      />
+                    <% } %>
+                  </label>
+                <% }) %>
+              </div>
+
+              <div class="journey-update-editor-preview-grid">
+                <div class="journey-update-editor-preview-item">
+                  <div class="label">İstek URL</div>
+                  <pre class="allowed-lines-debug-pre" data-journey-update-request-url><%= report.updateEndpointUrl || "-" %></pre>
+                </div>
+                <div class="journey-update-editor-preview-item">
+                  <div class="label">Header</div>
+                  <pre class="allowed-lines-debug-pre" data-journey-update-request-headers><%= report.updateRequestHeaders || "{}" %></pre>
+                </div>
+                <div class="journey-update-editor-preview-item journey-update-editor-preview-item--body">
+                  <div class="label">İstek Body</div>
+                  <pre class="allowed-lines-debug-pre" data-journey-update-request-body><%= report.updateRequestBodyPreview || "{}" %></pre>
+                </div>
+              </div>
+
+              <div class="allowed-lines-actions journey-update-editor-actions">
+                <button type="submit" data-default-label="Seferleri Güncelle" data-loading-label="Gönderiliyor...">
+                  Seferleri Güncelle
+                </button>
+              </div>
+              <div class="allowed-lines-loading-message journey-update-editor-loading" hidden>
+                UpdateJourney istekleri hazırlanıyor, lütfen bekleyin...
+              </div>
+            </form>
+          </section>
+        <% } %>
         <section class="table-card panel-card journey-update-table-card" data-journey-update-card="1">
           <div class="table-head">
             <h2>Sefer Listesi</h2>

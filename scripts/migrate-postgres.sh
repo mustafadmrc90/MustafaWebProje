@@ -6,6 +6,7 @@ usage() {
   cat <<'EOF'
 Kullanim:
   ./scripts/migrate-postgres.sh "<SOURCE_DATABASE_URL>" "<TARGET_DATABASE_URL>" [OUTPUT_DIR]
+  SOURCE_DATABASE_URL="postgresql://..." TARGET_DATABASE_URL="postgresql://..." ./scripts/migrate-postgres.sh [OUTPUT_DIR]
 
 Ornek:
   ./scripts/migrate-postgres.sh \
@@ -15,6 +16,7 @@ Ornek:
 Notlar:
   - Komut kaynak DB'den plain SQL dump alir ve hedef DB'ye yukler.
   - Varsayilan olarak cikti data/migrations/<timestamp>/ altina yazilir.
+  - SSL varsayilan olarak require edilir. Gerekirse PGSSLMODE ile override edebilirsiniz.
 EOF
 }
 
@@ -23,14 +25,21 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
+if [[ $# -gt 3 ]]; then
   usage
   exit 1
 fi
 
-SOURCE_DATABASE_URL="$1"
-TARGET_DATABASE_URL="$2"
-OUTPUT_DIR="${3:-data/migrations/$(date +%Y%m%d-%H%M%S)}"
+SOURCE_DATABASE_URL="${1:-${SOURCE_DATABASE_URL:-}}"
+TARGET_DATABASE_URL="${2:-${TARGET_DATABASE_URL:-}}"
+OUTPUT_DIR="${3:-${OUTPUT_DIR:-data/migrations/$(date +%Y%m%d-%H%M%S)}}"
+
+if [[ -z "$SOURCE_DATABASE_URL" || -z "$TARGET_DATABASE_URL" ]]; then
+  usage
+  exit 1
+fi
+
+export PGSSLMODE="${PGSSLMODE:-require}"
 
 mkdir -p "$OUTPUT_DIR"
 SQL_DUMP_FILE="$OUTPUT_DIR/source.sql"

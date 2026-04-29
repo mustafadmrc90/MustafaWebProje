@@ -2712,10 +2712,15 @@ button.ghost {
   margin-top: 12px;
 }
 
+.journey-update-editor-form {
+  display: grid;
+  gap: 12px;
+}
+
 .journey-update-editor-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .journey-update-editor-field {
@@ -2737,9 +2742,9 @@ button.ghost {
   border-radius: 10px;
   border: 1px solid #c6d2e0;
   background: #fff;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.35;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.3;
   color: #1f2735;
 }
 
@@ -2748,6 +2753,37 @@ button.ghost {
   outline: none;
   border-color: #8ca4c0;
   background: #fdfefe;
+}
+
+.journey-update-editor-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.journey-update-editor-preview-item {
+  min-width: 0;
+}
+
+.journey-update-editor-preview-item .label {
+  margin-bottom: 6px;
+}
+
+.journey-update-editor-preview-item--body {
+  grid-column: 1 / -1;
+}
+
+.journey-update-editor-actions {
+  margin-top: 0;
+}
+
+.journey-update-editor-loading {
+  margin-top: 0;
+}
+
+.journey-update-editor-form.is-loading {
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 .journey-update-filter-clear {
@@ -5723,6 +5759,10 @@ button.ghost {
   }
 
   .journey-update-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .journey-update-editor-preview-grid {
     grid-template-columns: 1fr;
   }
 

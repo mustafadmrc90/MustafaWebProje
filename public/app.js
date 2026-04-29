@@ -1249,6 +1249,146 @@
     applyFilters();
   };
 
+  const initJourneyUpdateEditorForm = () => {
+    const form = document.querySelector("[data-journey-update-editor-form='1']");
+    if (!form) return;
+    if (form.dataset.bound === "1") return;
+    form.dataset.bound = "1";
+
+    const fieldEls = Array.from(form.querySelectorAll("[data-journey-update-editor-key]"));
+    const rowIdsInput = form.querySelector("[data-journey-update-row-ids='1']");
+    const requestUrlEl = form.querySelector("[data-journey-update-request-url]");
+    const requestHeadersEl = form.querySelector("[data-journey-update-request-headers]");
+    const requestBodyEl = form.querySelector("[data-journey-update-request-body]");
+    const countEl = document.querySelector("[data-journey-update-preview-count='1']");
+    const submitButton = form.querySelector("button[type='submit']");
+    const loadingMessage = form.querySelector(".journey-update-editor-loading");
+    const endpointUrl = String(form.dataset.journeyUpdateEndpointUrl || "").trim();
+
+    const parseJourneyId = (value) => {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (/^-?\d+$/.test(text)) {
+        const parsed = Number.parseInt(text, 10);
+        if (Number.isSafeInteger(parsed)) return parsed;
+      }
+      return text;
+    };
+
+    const getJourneyIds = () =>
+      String(rowIdsInput?.value || "")
+        .split(",")
+        .map((item) => String(item || "").trim())
+        .filter(Boolean);
+
+    const buildRequestDate = () => {
+      const fromDataset = String(form.dataset.journeyUpdateRequestDate || "").trim();
+      if (fromDataset) return fromDataset;
+      const now = new Date();
+      const year = String(now.getFullYear()).padStart(4, "0");
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      const hour = String(now.getHours()).padStart(2, "0");
+      const minute = String(now.getMinutes()).padStart(2, "0");
+      const second = String(now.getSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+    };
+
+    const buildParameters = () =>
+      fieldEls
+        .map((fieldEl) => {
+          const rawValue = String(fieldEl.value || "").trim();
+          if (!rawValue) return null;
+          const parameterType = String(fieldEl.getAttribute("data-journey-update-param-type") || "").trim();
+          const valueType = String(fieldEl.getAttribute("data-journey-update-value-type") || "text").trim();
+          if (!parameterType) return null;
+          if (valueType === "boolean") {
+            if (rawValue === "true") {
+              return { type: parameterType, value: true };
+            }
+            if (rawValue === "false") {
+              return { type: parameterType, value: false };
+            }
+            return null;
+          }
+          return {
+            type: parameterType,
+            value: rawValue
+          };
+        })
+        .filter(Boolean);
+
+    const buildRequestBody = (journeyId, parameters, requestDate) => ({
+      data: {
+        id: parseJourneyId(journeyId),
+        parameters
+      },
+      "device-session": {
+        "session-id": "{{sessionId}}",
+        "device-id": "{{deviceId}}"
+      },
+      token: "{{token}}",
+      date: requestDate,
+      language: "tr-TR"
+    });
+
+    const syncPreview = () => {
+      const journeyIds = getJourneyIds();
+      const parameters = buildParameters();
+      const requestDate = buildRequestDate();
+      const sampleBodies = journeyIds.slice(0, 3).map((journeyId) => buildRequestBody(journeyId, parameters, requestDate));
+      const previewPayload = {
+        requestUrl: endpointUrl,
+        requestCount: journeyIds.length,
+        parameterTypes: parameters.map((item) => item.type),
+        requests: sampleBodies
+      };
+      if (journeyIds.length > sampleBodies.length) {
+        previewPayload.moreRequests = journeyIds.length - sampleBodies.length;
+      }
+
+      if (requestUrlEl) {
+        requestUrlEl.textContent = endpointUrl || "-";
+      }
+      if (requestHeadersEl) {
+        requestHeadersEl.textContent = JSON.stringify(
+          {
+            "Content-Type": "application/json",
+            Authorization: "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt"
+          },
+          null,
+          2
+        );
+      }
+      if (requestBodyEl) {
+        requestBodyEl.textContent = JSON.stringify(previewPayload, null, 2);
+      }
+      if (countEl) {
+        countEl.textContent = `${journeyIds.length} istek`;
+      }
+    };
+
+    fieldEls.forEach((fieldEl) => {
+      const eventName = fieldEl.tagName === "SELECT" ? "change" : "input";
+      fieldEl.addEventListener(eventName, syncPreview);
+    });
+
+    form.addEventListener("submit", () => {
+      form.classList.add("is-loading");
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = String(
+          submitButton.dataset.loadingLabel || submitButton.dataset.defaultLabel || "Gönderiliyor..."
+        ).trim();
+      }
+      if (loadingMessage) {
+        loadingMessage.hidden = false;
+      }
+    });
+
+    syncPreview();
+  };
+
   const initJourneyUpdateFloatingScrollbar = () => {
     if (typeof window.__journeyUpdateFloatingScrollbarCleanup === "function") {
       window.__journeyUpdateFloatingScrollbarCleanup();
@@ -5695,6 +5835,7 @@
     initSlackReportLoading();
     initAllowedLinesLoading();
     initJourneyUpdateTableFilters();
+    initJourneyUpdateEditorForm();
     initJourneyUpdateFloatingScrollbar();
     initJourneySearchForm();
     initObusRuleDefineWorkbench();

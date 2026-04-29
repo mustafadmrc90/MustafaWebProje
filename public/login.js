@@ -103,31 +103,57 @@
 
   const applyLockedProfileIfAvailable = async () => {
     const lockedProfile = parseLockedProfile();
-    if (!lockedProfile) return;
+    const rememberedUsername = String(savedUsername || usernameInput.value || "").trim();
+    const rememberedPassword = typeof savedPassword === "string" ? savedPassword : "";
+    const statusUsername = lockedProfile?.username || rememberedUsername;
+    if (!statusUsername) return;
 
     try {
-      const response = await fetch(`/api/login-lock-status?username=${encodeURIComponent(lockedProfile.username)}`, {
+      const response = await fetch(`/api/login-lock-status?username=${encodeURIComponent(statusUsername)}`, {
         headers: {
           Accept: "application/json"
         }
       });
       const data = await parseJsonResponse(response);
       const version = Number(data?.version);
-      const isStillLocked =
-        response.ok &&
-        data?.ok !== false &&
-        data?.enabled === true &&
-        Number.isInteger(version) &&
-        version === lockedProfile.version &&
-        String(data?.username || "").trim() === lockedProfile.username;
+      const normalizedServerUsername = String(data?.username || "").trim();
+      const isEnabled = response.ok && data?.ok !== false && data?.enabled === true && Boolean(normalizedServerUsername);
 
-      if (!isStillLocked) {
+      if (!isEnabled) {
         clearLockedProfile();
         return;
       }
 
-      usernameInput.value = lockedProfile.username;
-      passwordInput.value = lockedProfile.password;
+      const hasValidLockedProfile =
+        Boolean(lockedProfile) &&
+        Number.isInteger(version) &&
+        version === lockedProfile.version &&
+        normalizedServerUsername === lockedProfile.username;
+
+      if (hasValidLockedProfile) {
+        usernameInput.value = lockedProfile.username;
+        passwordInput.value = lockedProfile.password;
+        checkbox.checked = true;
+        setLockedState(true, "Bu kullanıcı için giriş alanları sabitlendi.");
+        return;
+      }
+
+      const canLockFromRememberedCredentials =
+        normalizedServerUsername === rememberedUsername && Boolean(rememberedUsername) && Boolean(rememberedPassword);
+
+      if (!canLockFromRememberedCredentials) {
+        clearLockedProfile();
+        return;
+      }
+
+      usernameInput.value = rememberedUsername;
+      passwordInput.value = rememberedPassword;
+      checkbox.checked = true;
+      storeLockedProfile({
+        username: rememberedUsername,
+        password: rememberedPassword,
+        version: Number.isInteger(version) ? version : 1
+      });
       setLockedState(true, "Bu kullanıcı için giriş alanları sabitlendi.");
     } catch (err) {
       clearLockedProfile();

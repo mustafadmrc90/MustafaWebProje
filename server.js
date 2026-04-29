@@ -3260,6 +3260,19 @@ function buildJourneyUpdateDetailUrl(baseUrl, clusterLabel = "") {
   }
 }
 
+function buildJourneyUpdateUpdateUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/Inventory/UpdateJourney";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function buildObusJobsUrl(baseUrl, clusterLabel = "") {
   const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
   try {
@@ -4191,6 +4204,45 @@ function buildJourneyUpdateDetailRequestBody({
     language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE,
     token: String(token || "").trim(),
     date: normalizedDateValue ? `${normalizedDateValue} 00:00:00` : ""
+  };
+}
+
+function buildJourneyUpdateUpdateRequestBody({
+  journeyId = "",
+  parameters = [],
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  dateValue = "",
+  usePlaceholders = false
+} = {}) {
+  const normalizedParameters = (Array.isArray(parameters) ? parameters : [])
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const type = String(item.type || "").trim();
+      if (!type) return null;
+      const rawValue = item.value;
+      if (typeof rawValue === "boolean") {
+        return { type, value: rawValue };
+      }
+      const textValue = String(rawValue ?? "").trim();
+      if (!textValue) return null;
+      return { type, value: textValue };
+    })
+    .filter(Boolean);
+  const normalizedDateValue = String(dateValue || "").trim() || buildJourneyUpdateUpdateRequestDate();
+  return {
+    data: {
+      id: normalizeStationPassengerJourneyIdForRequest(journeyId),
+      parameters: normalizedParameters
+    },
+    "device-session": {
+      "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
+      "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
+    },
+    token: usePlaceholders ? "{{token}}" : String(token || "").trim(),
+    date: normalizedDateValue,
+    language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE
   };
 }
 
@@ -5778,6 +5830,169 @@ async function fetchJourneyUpdateDetailPayload({
       detail: buildObusServiceTraceText(trace, err?.message || "GetJourneyDetail isteği başarısız.", {
         bodyMaxLen: 140,
         responseMaxLen: 180
+      })
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchJourneyUpdateUpdatePayload({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  token,
+  journeyId = "",
+  parameters = [],
+  authorization = STATION_PASSENGER_INFO_API_AUTH
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+  const normalizedJourneyId = String(journeyId || "").trim();
+  const normalizedParameters = Array.isArray(parameters) ? parameters : [];
+  const requestDate = buildJourneyUpdateUpdateRequestDate();
+  const requestBody = buildJourneyUpdateUpdateRequestBody({
+    journeyId: normalizedJourneyId,
+    parameters: normalizedParameters,
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    token: normalizedToken,
+    dateValue: requestDate
+  });
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      requestUrl: "",
+      requestBody,
+      responsePayload: null,
+      status: null,
+      error: "UpdateJourney URL oluşturulamadı.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId || !normalizedToken) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestBody,
+      responsePayload: null,
+      status: null,
+      error: "UpdateJourney için session/device/token eksik.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedJourneyId) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestBody,
+      responsePayload: null,
+      status: null,
+      error: "UpdateJourney için id zorunludur.",
+      detail: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authorization
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory UpdateJourney",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        requestUrl: normalizedEndpointUrl,
+        requestBody,
+        responsePayload: parsed ?? raw,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 180,
+          responseMaxLen: 240
+        })
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          requestUrl: normalizedEndpointUrl,
+          requestBody,
+          responsePayload: parsed ?? raw,
+          status: response.status,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 180,
+            responseMaxLen: 240
+          })
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      requestBody,
+      responsePayload: parsed ?? raw,
+      status: response.status,
+      error: "",
+      detail: ""
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory UpdateJourney",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "UpdateJourney isteği başarısız."
+    });
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestBody,
+      responsePayload: null,
+      status: null,
+      error: err?.message || "UpdateJourney isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "UpdateJourney isteği başarısız.", {
+        bodyMaxLen: 180,
+        responseMaxLen: 200
       })
     };
   } finally {
@@ -12721,7 +12936,15 @@ function buildJourneyUpdateReportModel() {
     loginUrl: "",
     tableRows: [],
     dayResults: [],
-    tableColumns: []
+    tableColumns: [],
+    updateEndpointUrl: "",
+    updateRequestHeaders: "",
+    updateRequestBodyPreview: "",
+    updateRequestDate: "",
+    updateEditorValues: {},
+    updateJourneyIdsCsv: "",
+    tableRowsState: "",
+    tableColumnsState: ""
   };
 }
 
@@ -12776,6 +12999,305 @@ function getJourneyUpdateParameterDisplayLabel(typeLabel = "") {
   const rawLabel = String(typeLabel || "").trim();
   if (!rawLabel) return "";
   return JOURNEY_UPDATE_PARAMETER_LABEL_MAP[rawLabel] || rawLabel;
+}
+
+const JOURNEY_UPDATE_EDITOR_FIELDS = Object.freeze([
+  {
+    key: "webWarning",
+    parameterType: "WebWarning",
+    label: getJourneyUpdateParameterDisplayLabel("WebWarning"),
+    inputType: "text",
+    valueType: "text"
+  },
+  {
+    key: "routeFilterBeforeXMinutes",
+    parameterType: "RouteFilterBeforeXMinutes",
+    label: getJourneyUpdateParameterDisplayLabel("RouteFilterBeforeXMinutes"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "reservationOption",
+    parameterType: "ReservationOption",
+    label: getJourneyUpdateParameterDisplayLabel("ReservationOption"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "refundOption",
+    parameterType: "RefundOption",
+    label: getJourneyUpdateParameterDisplayLabel("RefundOption"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxTotalDiscountCount",
+    parameterType: "MaxTotalDiscountCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxTotalDiscountCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxSingleSeatCount",
+    parameterType: "MaxSingleSeatCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxSingleSeatCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxSingleFemaleCount",
+    parameterType: "MaxSingleFemaleCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxSingleFemaleCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxReservationCount",
+    parameterType: "MaxReservationCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxReservationCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxPointSalesCount",
+    parameterType: "MaxPointSalesCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxPointSalesCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxInfantCount",
+    parameterType: "MaxInfantCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxInfantCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxGuestCount",
+    parameterType: "MaxGuestCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxGuestCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "maxDisabledCount",
+    parameterType: "MaxDisabledCount",
+    label: getJourneyUpdateParameterDisplayLabel("MaxDisabledCount"),
+    inputType: "number",
+    valueType: "text",
+    step: "1",
+    min: "0"
+  },
+  {
+    key: "canStopAtWayStation",
+    parameterType: "CanStopAtWayStation",
+    label: getJourneyUpdateParameterDisplayLabel("CanStopAtWayStation"),
+    inputType: "select",
+    valueType: "boolean"
+  },
+  {
+    key: "canSellThroughWeb",
+    parameterType: "CanSellThroughWeb",
+    label: getJourneyUpdateParameterDisplayLabel("CanSellThroughWeb"),
+    inputType: "select",
+    valueType: "boolean"
+  },
+  {
+    key: "canApplyDiscount",
+    parameterType: "CanApplyDiscount",
+    label: getJourneyUpdateParameterDisplayLabel("CanApplyDiscount"),
+    inputType: "select",
+    valueType: "boolean"
+  }
+]);
+
+function buildJourneyUpdateParameterColumn(columnType = "") {
+  const key = normalizeJourneyUpdateParameterColumnKey(columnType);
+  if (!key) return null;
+  return {
+    key,
+    label: getJourneyUpdateParameterDisplayLabel(columnType),
+    filterType: "text",
+    sortType: "text"
+  };
+}
+
+function normalizeJourneyUpdateEditorInputState(source = {}) {
+  const rawSource = source && typeof source === "object" ? source : {};
+  return JOURNEY_UPDATE_EDITOR_FIELDS.reduce((acc, field) => {
+    const rawValue = rawSource[`update_${field.key}`];
+    acc[field.key] = String(rawValue ?? "").trim();
+    return acc;
+  }, {});
+}
+
+function buildJourneyUpdateEditorFieldsForView(values = {}) {
+  const inputState = values && typeof values === "object" ? values : {};
+  return JOURNEY_UPDATE_EDITOR_FIELDS.map((field) => ({
+    ...field,
+    value: String(inputState[field.key] ?? "").trim()
+  }));
+}
+
+function parseJourneyUpdateBooleanEditorValue(value) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase("tr");
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return null;
+}
+
+function buildJourneyUpdateParametersFromEditorState(values = {}) {
+  const inputState = values && typeof values === "object" ? values : {};
+  return JOURNEY_UPDATE_EDITOR_FIELDS.map((field) => {
+    const rawValue = String(inputState[field.key] ?? "").trim();
+    if (!rawValue) return null;
+    if (field.valueType === "boolean") {
+      const parsedBoolean = parseJourneyUpdateBooleanEditorValue(rawValue);
+      if (parsedBoolean === null) return null;
+      return {
+        type: field.parameterType,
+        value: parsedBoolean
+      };
+    }
+    return {
+      type: field.parameterType,
+      value: rawValue
+    };
+  }).filter(Boolean);
+}
+
+function buildJourneyUpdateUpdateRequestDate(date = new Date()) {
+  return formatDateTimeToSecondPrecisionInTimeZone(date, STATION_PASSENGER_INFO_TIME_ZONE).replace(" ", "T");
+}
+
+function parseJourneyUpdateRowIdsInput(value) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value ?? "");
+  const seen = new Set();
+  return raw
+    .split(",")
+    .map((item) => String(item || "").trim())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+}
+
+function encodeJsonStateToBase64(value) {
+  try {
+    return Buffer.from(JSON.stringify(value ?? null), "utf8").toString("base64");
+  } catch (err) {
+    return "";
+  }
+}
+
+function parseBase64JsonState(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    return parseJsonSafe(Buffer.from(raw, "base64").toString("utf8"));
+  } catch (err) {
+    return null;
+  }
+}
+
+function parseJourneyUpdateTableRowsState(value) {
+  const parsed = parseBase64JsonState(value);
+  return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function parseJourneyUpdateTableColumnsState(value) {
+  const parsed = parseBase64JsonState(value);
+  return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function buildJourneyUpdateUpdateRequestHeadersText() {
+  return JSON.stringify(
+    {
+      "Content-Type": "application/json",
+      Authorization: STATION_PASSENGER_INFO_API_AUTH
+    },
+    null,
+    2
+  );
+}
+
+function buildJourneyUpdateUpdatePreviewBody({
+  endpointUrl = "",
+  journeyIds = [],
+  editorValues = {},
+  sampleLimit = 3
+} = {}) {
+  const normalizedEndpointUrl = String(endpointUrl || "").trim();
+  const normalizedJourneyIds = parseJourneyUpdateRowIdsInput(journeyIds);
+  const parameters = buildJourneyUpdateParametersFromEditorState(editorValues);
+  const requestDate = buildJourneyUpdateUpdateRequestDate();
+  const sampleBodies = normalizedJourneyIds.slice(0, Math.max(1, sampleLimit)).map((journeyId) =>
+    buildJourneyUpdateUpdateRequestBody({
+      journeyId,
+      parameters,
+      usePlaceholders: true,
+      dateValue: requestDate
+    })
+  );
+  const preview = {
+    requestUrl: normalizedEndpointUrl,
+    requestCount: normalizedJourneyIds.length,
+    parameterTypes: parameters.map((item) => String(item.type || "").trim()).filter(Boolean),
+    requests: sampleBodies
+  };
+  if (normalizedJourneyIds.length > sampleBodies.length) {
+    preview.moreRequests = normalizedJourneyIds.length - sampleBodies.length;
+  }
+  return {
+    requestDate,
+    bodyText: JSON.stringify(preview, null, 2)
+  };
+}
+
+function applyJourneyUpdateEditorStateToReport(report, { endpointUrl = "", editorValues = {}, tableRows = [], tableColumns = [] } = {}) {
+  const nextReport = report && typeof report === "object" ? report : buildJourneyUpdateReportModel();
+  const normalizedRows = Array.isArray(tableRows) ? tableRows : [];
+  const normalizedColumns = Array.isArray(tableColumns) ? tableColumns : [];
+  const normalizedEditorValues = normalizeJourneyUpdateEditorInputState(editorValues);
+  const journeyIds = normalizedRows
+    .map((row) => String(row?.id || "").trim())
+    .filter((idValue) => Boolean(idValue) && idValue !== "-");
+  const preview = buildJourneyUpdateUpdatePreviewBody({
+    endpointUrl,
+    journeyIds,
+    editorValues: normalizedEditorValues
+  });
+
+  nextReport.updateEndpointUrl = String(endpointUrl || "").trim();
+  nextReport.updateRequestHeaders = buildJourneyUpdateUpdateRequestHeadersText();
+  nextReport.updateRequestBodyPreview = preview.bodyText;
+  nextReport.updateRequestDate = preview.requestDate;
+  nextReport.updateEditorValues = normalizedEditorValues;
+  nextReport.updateJourneyIdsCsv = journeyIds.join(",");
+  nextReport.tableRowsState = encodeJsonStateToBase64(normalizedRows);
+  nextReport.tableColumnsState = encodeJsonStateToBase64(normalizedColumns);
+  return nextReport;
 }
 
 function isJourneyUpdateSummaryNode(node) {
@@ -12921,6 +13443,7 @@ function extractJourneyUpdateParameterEntries(parameters) {
         readPartnerRawValueByAliases(item, ["value", "parameter-value", "parameter_value", "parameterValue", "data"]) ??
         "";
       return {
+        type: typeLabel,
         key: columnKey,
         label: getJourneyUpdateParameterDisplayLabel(typeLabel),
         value: formatJourneyUpdateTableCell(value)
@@ -12942,7 +13465,7 @@ function buildJourneyUpdateDetailMap(payload) {
 
     const existing = detailsById.get(idText) || {};
     parameterEntries.forEach((entry) => {
-      detailColumnsByKey.set(entry.key, {
+      detailColumnsByKey.set(entry.key, buildJourneyUpdateParameterColumn(entry.type) || {
         key: entry.key,
         label: entry.label,
         filterType: "text",
@@ -13017,6 +13540,60 @@ function mergeJourneyUpdateRowDetails(rows, detailsById) {
 
 function buildJourneyUpdateTableColumns(detailColumns = []) {
   return buildJourneyUpdateBaseColumns().concat(Array.isArray(detailColumns) ? detailColumns : []);
+}
+
+function mergeJourneyUpdateColumnsWithParameters(existingColumns, parameters) {
+  const baseColumns = buildJourneyUpdateBaseColumns();
+  const baseKeys = new Set(baseColumns.map((column) => String(column.key || "").trim()));
+  const dynamicColumnsByKey = new Map();
+
+  (Array.isArray(existingColumns) ? existingColumns : []).forEach((column) => {
+    const key = String(column?.key || "").trim();
+    if (!key || baseKeys.has(key)) return;
+    dynamicColumnsByKey.set(key, column);
+  });
+
+  (Array.isArray(parameters) ? parameters : []).forEach((parameter) => {
+    const column = buildJourneyUpdateParameterColumn(parameter?.type);
+    if (!column) return;
+    dynamicColumnsByKey.set(column.key, column);
+  });
+
+  return baseColumns.concat(
+    Array.from(dynamicColumnsByKey.values()).sort((a, b) =>
+      String(a?.label || "").localeCompare(String(b?.label || ""), "tr")
+    )
+  );
+}
+
+function applyJourneyUpdateParametersToRows(rows, parameters, successfulIds) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  const normalizedParameters = Array.isArray(parameters) ? parameters : [];
+  const targetIds = new Set(parseJourneyUpdateRowIdsInput(successfulIds));
+  if (!targetIds.size || !normalizedParameters.length) {
+    return normalizedRows.slice();
+  }
+
+  const parameterEntries = normalizedParameters
+    .map((parameter) => {
+      const column = buildJourneyUpdateParameterColumn(parameter?.type);
+      if (!column) return null;
+      return {
+        columnKey: column.key,
+        value: formatJourneyUpdateTableCell(parameter?.value)
+      };
+    })
+    .filter(Boolean);
+
+  return normalizedRows.map((row) => {
+    const rowId = String(row?.id || "").trim();
+    if (!rowId || !targetIds.has(rowId)) return row;
+    const nextRow = { ...row };
+    parameterEntries.forEach((entry) => {
+      nextRow[entry.columnKey] = entry.value;
+    });
+    return nextRow;
+  });
 }
 
 function dedupeJourneyUpdateTableRows(rows) {
@@ -17410,6 +17987,9 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
   const resolvedDetailEndpointUrl = selectedCompanyCluster
     ? buildJourneyUpdateDetailUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
     : "";
+  const resolvedUpdateEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateUpdateUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
     endpointUrl: resolvedEndpointUrl,
@@ -17425,6 +18005,12 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
     report.requested = true;
     report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
   }
+  applyJourneyUpdateEditorStateToReport(report, {
+    endpointUrl: resolvedUpdateEndpointUrl,
+    editorValues: report.updateEditorValues,
+    tableRows: report.tableRows,
+    tableColumns: report.tableColumns
+  });
 
   res.render("general-journey-update", {
     user: req.session.user,
@@ -17432,6 +18018,7 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
     filters,
     companies,
     companySourceBaseUrl: STATION_PASSENGER_INFO_API_URL,
+    journeyUpdateEditorFields: buildJourneyUpdateEditorFieldsForView(report.updateEditorValues),
     report,
     partnerError
   });
@@ -17439,6 +18026,8 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
 
 app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-update"), async (req, res) => {
   const today = getTodayIsoDate();
+  const submitAction = String(req.body.submitAction || "journey-update").trim();
+  const isUpdateAction = submitAction === "journey-update-apply";
   const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
   const startDate = normalizeIsoDateInput(String(req.body.startDate || "").trim());
   const endDate = normalizeIsoDateInput(String(req.body.endDate || "").trim());
@@ -17464,6 +18053,9 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   const resolvedDetailEndpointUrl = selectedCompanyCluster
     ? buildJourneyUpdateDetailUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
     : "";
+  const resolvedUpdateEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateUpdateUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
     endpointUrl: resolvedEndpointUrl,
@@ -17476,7 +18068,140 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   const report = buildJourneyUpdateReportModel();
   report.requested = true;
 
-  if (requestedCompany && !selectedCompanyMeta) {
+  report.updateEditorValues = normalizeJourneyUpdateEditorInputState(req.body);
+
+  if (isUpdateAction) {
+    const submittedTableRows = parseJourneyUpdateTableRowsState(req.body.tableRowsState);
+    const submittedTableColumns = parseJourneyUpdateTableColumnsState(req.body.tableColumnsState);
+    const requestedJourneyIds = parseJourneyUpdateRowIdsInput(req.body.journeyIds);
+    const journeyIds =
+      requestedJourneyIds.length > 0
+        ? requestedJourneyIds
+        : submittedTableRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+    const parameters = buildJourneyUpdateParametersFromEditorState(report.updateEditorValues);
+
+    report.tableRows = submittedTableRows;
+    report.tableColumns = submittedTableColumns.length ? submittedTableColumns : buildJourneyUpdateTableColumns([]);
+    report.requestUrl = resolvedUpdateEndpointUrl;
+
+    if (requestedCompany && !selectedCompanyMeta) {
+      report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+    } else if (!selectedCompanyCluster) {
+      report.error = "Seçilen firma için geçerli cluster bilgisi bulunamadı.";
+    } else if (!resolvedUpdateEndpointUrl) {
+      report.error = "UpdateJourney URL oluşturulamadı.";
+    } else if (!journeyIds.length) {
+      report.error = "Güncellenecek sefer id listesi bulunamadı.";
+    } else if (!parameters.length) {
+      report.error = "En az bir güncelleme alanı doldurmalısınız.";
+    } else {
+      const loginResult = await resolveStationPassengerLoginResult({
+        endpointUrl: resolvedEndpointUrl || resolvedUpdateEndpointUrl,
+        companyUrl: resolvedEndpointUrl || resolvedUpdateEndpointUrl,
+        partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+        partnerId: String(selectedCompanyMeta?.id || "").trim(),
+        username: filters.username,
+        password: filters.password,
+        fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim(),
+        allowEmptyPartnerCode: false,
+        authorization: STATION_PASSENGER_INFO_API_AUTH,
+        timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+      });
+
+      report.sessionId = String(loginResult?.sessionId || "").trim();
+      report.deviceId = String(loginResult?.deviceId || "").trim();
+      report.branchId = String(loginResult?.branchId || "").trim();
+      report.loginToken = String(loginResult?.token || "").trim();
+      report.loginUrl = String(loginResult?.loginUrl || "").trim();
+
+      if (!(loginResult?.ok === true && String(loginResult?.token || "").trim())) {
+        report.error = String(loginResult?.error || "").trim() || "UserLogin başarısız.";
+        report.errorDetail =
+          String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
+          String(partnerError || "").trim();
+      } else {
+        const updateResults = await runWithConcurrency(journeyIds, 4, async (journeyId) => {
+          const result = await fetchJourneyUpdateUpdatePayload({
+            endpointUrl: resolvedUpdateEndpointUrl,
+            sessionId: loginResult.sessionId,
+            deviceId: loginResult.deviceId,
+            token: loginResult.token,
+            journeyId,
+            parameters,
+            authorization: STATION_PASSENGER_INFO_API_AUTH
+          });
+          return {
+            journeyId,
+            ...result
+          };
+        });
+
+        const successItems = updateResults.filter((item) => item?.ok === true);
+        const failureItems = updateResults.filter((item) => item?.ok !== true);
+        const successfulIds = successItems.map((item) => String(item?.journeyId || "").trim()).filter(Boolean);
+        const requestPreview = buildJourneyUpdateUpdatePreviewBody({
+          endpointUrl: resolvedUpdateEndpointUrl,
+          journeyIds,
+          editorValues: report.updateEditorValues,
+          sampleLimit: 5
+        });
+
+        if (successfulIds.length > 0) {
+          report.tableRows = applyJourneyUpdateParametersToRows(report.tableRows, parameters, successfulIds);
+          report.tableColumns = mergeJourneyUpdateColumnsWithParameters(report.tableColumns, parameters);
+        }
+
+        report.requestBody = requestPreview.bodyText;
+        report.responseBody = JSON.stringify(
+          {
+            ok: failureItems.length === 0,
+            company: {
+              code: String(selectedCompanyMeta?.code || "").trim(),
+              id: String(selectedCompanyMeta?.id || "").trim(),
+              cluster: selectedCompanyCluster
+            },
+            requestUrl: resolvedUpdateEndpointUrl,
+            requestCount: journeyIds.length,
+            successCount: successItems.length,
+            failureCount: failureItems.length,
+            updatedIds: successfulIds,
+            parameterTypes: parameters.map((item) => String(item.type || "").trim()).filter(Boolean),
+            failures: failureItems.map((item) => ({
+              id: String(item?.journeyId || "").trim(),
+              status: Number.isFinite(Number(item?.status)) ? Number(item.status) : null,
+              error: String(item?.error || "").trim(),
+              detail: String(item?.detail || "").trim()
+            }))
+          },
+          null,
+          2
+        );
+        report.status =
+          failureItems.length === 0
+            ? 200
+            : successItems.length > 0
+              ? 207
+              : Number(failureItems.find((item) => Number(item?.status) > 0)?.status || 0) || 0;
+
+        if (failureItems.length === 0) {
+          report.userMessage = `${successItems.length} sefer için UpdateJourney isteği başarıyla gönderildi.`;
+        } else if (successItems.length > 0) {
+          report.userMessage =
+            `${successItems.length} sefer güncellendi. ${failureItems.length} sefer için hata alındı.`;
+        } else {
+          report.error = String(failureItems[0]?.error || "").trim() || "UpdateJourney başarısız.";
+          report.errorDetail = failureItems
+            .map((item) =>
+              [String(item?.journeyId || "").trim(), String(item?.error || "").trim(), String(item?.detail || "").trim()]
+                .filter(Boolean)
+                .join(" | ")
+            )
+            .filter(Boolean)
+            .join("\n\n");
+        }
+      }
+    }
+  } else if (requestedCompany && !selectedCompanyMeta) {
     report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
   } else if (!startDate || !endDate) {
     report.error = "Baş Tar ve Bit Tar alanları zorunludur.";
@@ -17721,12 +18446,20 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
     }
   }
 
+  applyJourneyUpdateEditorStateToReport(report, {
+    endpointUrl: resolvedUpdateEndpointUrl,
+    editorValues: report.updateEditorValues,
+    tableRows: report.tableRows,
+    tableColumns: report.tableColumns
+  });
+
   res.render("general-journey-update", {
     user: req.session.user,
     active: "journey-update",
     filters,
     companies,
     companySourceBaseUrl: STATION_PASSENGER_INFO_API_URL,
+    journeyUpdateEditorFields: buildJourneyUpdateEditorFieldsForView(report.updateEditorValues),
     report,
     partnerError
   });
