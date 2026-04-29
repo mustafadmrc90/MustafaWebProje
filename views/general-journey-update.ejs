@@ -158,34 +158,7 @@
 
       <% if (report.requested) { %>
         <%
-          const journeyColumns = [
-            { key: "id", label: "Id", filterType: "text", sortType: "number" },
-            { key: "departureTime", label: "Departure-Time", filterType: "date", sortType: "date" },
-            { key: "origin", label: "Origin", filterType: "text", sortType: "text" },
-            { key: "destination", label: "Destination", filterType: "text", sortType: "text" },
-            {
-              key: "status",
-              label: "Status",
-              filterType: "select",
-              sortType: "text",
-              options: ["true", "false"]
-            },
-            { key: "journeyCode", label: "Journey-Code", filterType: "text", sortType: "text" },
-            { key: "description", label: "Description", filterType: "text", sortType: "text" },
-            { key: "seatModel", label: "Seat-Model", filterType: "text", sortType: "text" },
-            { key: "plate", label: "Plaka", filterType: "text", sortType: "text" },
-            {
-              key: "journeyType",
-              label: "Journey-Type",
-              filterType: "select",
-              sortType: "text",
-              options: ["true", "false"]
-            },
-            { key: "routeInfo", label: "Route-Info", filterType: "text", sortType: "text" },
-            { key: "duration", label: "Duration", filterType: "text", sortType: "duration" },
-            { key: "distance", label: "Distance", filterType: "text", sortType: "number" },
-            { key: "lastExtendTime", label: "Last-Extend-Time", filterType: "date", sortType: "date" }
-          ];
+          const journeyColumns = Array.isArray(report.tableColumns) ? report.tableColumns : [];
         %>
         <section class="table-card panel-card journey-update-table-card">
           <div class="table-head">

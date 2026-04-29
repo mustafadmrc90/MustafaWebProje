@@ -3247,6 +3247,19 @@ function buildJourneyUpdateDailySummariesUrl(baseUrl, clusterLabel = "") {
   }
 }
 
+function buildJourneyUpdateDetailUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/Inventory/GetJourneyDetail";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function buildObusJobsUrl(baseUrl, clusterLabel = "") {
   const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
   try {
@@ -5569,6 +5582,170 @@ async function fetchStationPassengerDailyJourneySummaries({
       responsePayload: null,
       error: err?.message || "GetDailyJourneySummaries isteği başarısız.",
       detail: buildObusServiceTraceText(trace, err?.message || "GetDailyJourneySummaries isteği başarısız.", {
+        bodyMaxLen: 140,
+        responseMaxLen: 180
+      })
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchJourneyUpdateDetailPayload({
+  endpointUrl,
+  sessionId,
+  deviceId,
+  token,
+  dateValue = "",
+  includeDateField = true,
+  authorization = STATION_PASSENGER_INFO_API_AUTH
+}) {
+  const normalizedEndpointUrl = normalizeTargetUrl(endpointUrl);
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedDeviceId = String(deviceId || "").trim();
+  const normalizedToken = String(token || "").trim();
+  const fallbackRequestDateParts = buildStationPassengerRequestDateParts(new Date());
+  const normalizedRequestDate = normalizeIsoDateInput(String(dateValue || "").trim()) || fallbackRequestDateParts.isoDate;
+  const requestBody = buildStationPassengerDailySummariesRequestBody({
+    sessionId: normalizedSessionId,
+    deviceId: normalizedDeviceId,
+    token: normalizedToken,
+    dateValue: normalizedRequestDate,
+    includeDateField
+  });
+  const requestBodyPreview = includeDateField
+    ? {
+        data: normalizedRequestDate,
+        date: normalizedRequestDate ? `${normalizedRequestDate} 00:00:00` : ""
+      }
+    : {
+        data: normalizedRequestDate
+      };
+
+  if (!normalizedEndpointUrl) {
+    return {
+      ok: false,
+      requestUrl: "",
+      requestDate: normalizedRequestDate,
+      requestBodyPreview,
+      responsePayload: null,
+      status: null,
+      error: "GetJourneyDetail URL oluşturulamadı.",
+      detail: ""
+    };
+  }
+
+  if (!normalizedSessionId || !normalizedDeviceId || !normalizedToken) {
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: normalizedRequestDate,
+      requestBodyPreview,
+      responsePayload: null,
+      status: null,
+      error: "GetJourneyDetail için session/device/token eksik.",
+      detail: ""
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(STATION_PASSENGER_INFO_TIMEOUT_MS, 45000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(normalizedEndpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: authorization
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetJourneyDetail",
+      url: normalizedEndpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw
+    });
+
+    if (!response.ok) {
+      const reason =
+        (parsed &&
+          typeof parsed === "object" &&
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "Bilinmeyen hata";
+      return {
+        ok: false,
+        requestUrl: normalizedEndpointUrl,
+        requestDate: normalizedRequestDate,
+        requestBodyPreview,
+        responsePayload: parsed ?? raw,
+        status: response.status,
+        error: `HTTP ${response.status}: ${reason}`,
+        detail: buildObusServiceTraceText(trace, reason, {
+          bodyMaxLen: 140,
+          responseMaxLen: 220
+        })
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const hasExplicitStatusField = "status" in parsed || "success" in parsed || "status-code" in parsed;
+      if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+        const reason =
+          String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
+        return {
+          ok: false,
+          requestUrl: normalizedEndpointUrl,
+          requestDate: normalizedRequestDate,
+          requestBodyPreview,
+          responsePayload: parsed ?? raw,
+          status: response.status,
+          error: reason,
+          detail: buildObusServiceTraceText(trace, reason, {
+            bodyMaxLen: 140,
+            responseMaxLen: 220
+          })
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: normalizedRequestDate,
+      requestBodyPreview,
+      responsePayload: parsed ?? raw,
+      status: response.status,
+      error: "",
+      detail: ""
+    };
+  } catch (err) {
+    const trace = buildObusServiceTraceEntry({
+      service: "Inventory GetJourneyDetail",
+      url: normalizedEndpointUrl,
+      requestBody,
+      responseBody: "",
+      error: err?.message || "GetJourneyDetail isteği başarısız."
+    });
+    return {
+      ok: false,
+      requestUrl: normalizedEndpointUrl,
+      requestDate: normalizedRequestDate,
+      requestBodyPreview,
+      responsePayload: null,
+      status: null,
+      error: err?.message || "GetJourneyDetail isteği başarısız.",
+      detail: buildObusServiceTraceText(trace, err?.message || "GetJourneyDetail isteği başarısız.", {
         bodyMaxLen: 140,
         responseMaxLen: 180
       })
@@ -12513,13 +12690,38 @@ function buildJourneyUpdateReportModel() {
     loginToken: "",
     loginUrl: "",
     tableRows: [],
-    dayResults: []
+    dayResults: [],
+    tableColumns: []
   };
 }
 
 function formatJourneyUpdateTableCell(value, fallback = "-") {
   const text = formatPartnerCellValue(value).trim();
   return text || fallback;
+}
+
+function buildJourneyUpdateBaseColumns() {
+  return [
+    { key: "id", label: "Id", filterType: "text", sortType: "number" },
+    { key: "departureTime", label: "Departure-Time", filterType: "date", sortType: "date" },
+    { key: "origin", label: "Origin", filterType: "text", sortType: "text" },
+    { key: "destination", label: "Destination", filterType: "text", sortType: "text" },
+    { key: "status", label: "Status", filterType: "select", sortType: "text", options: ["true", "false"] },
+    { key: "journeyCode", label: "Journey-Code", filterType: "text", sortType: "text" },
+    { key: "description", label: "Description", filterType: "text", sortType: "text" },
+    { key: "seatModel", label: "Seat-Model", filterType: "text", sortType: "text" },
+    { key: "plate", label: "Plaka", filterType: "text", sortType: "text" },
+    { key: "journeyType", label: "Journey-Type", filterType: "select", sortType: "text", options: ["true", "false"] },
+    { key: "routeInfo", label: "Route-Info", filterType: "text", sortType: "text" },
+    { key: "duration", label: "Duration", filterType: "text", sortType: "duration" },
+    { key: "distance", label: "Distance", filterType: "text", sortType: "number" },
+    { key: "lastExtendTime", label: "Last-Extend-Time", filterType: "date", sortType: "date" }
+  ];
+}
+
+function normalizeJourneyUpdateParameterColumnKey(typeLabel = "") {
+  const normalized = normalizeTokenName(typeLabel);
+  return normalized ? `parameter_${normalized}` : "";
 }
 
 function isJourneyUpdateSummaryNode(node) {
@@ -12582,6 +12784,111 @@ function extractJourneyUpdateSummaryNodes(payload) {
   return collected;
 }
 
+function isJourneyUpdateDetailNode(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+  const idValue = readPartnerRawValueByAliases(node, ["id"]);
+  const parametersValue = readPartnerRawValueByAliases(node, ["parameters", "parameter", "params"]);
+  return idValue !== undefined && Array.isArray(parametersValue);
+}
+
+function extractJourneyUpdateDetailNodes(payload) {
+  const collected = [];
+  const visited = new Set();
+
+  const walk = (node, depth = 0) => {
+    if (depth > 8 || node === null || node === undefined) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (!trimmed) return;
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        const parsed = parseJsonSafe(trimmed);
+        if (parsed !== null) walk(parsed, depth + 1);
+      }
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      node.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+
+    if (isJourneyUpdateDetailNode(node)) {
+      collected.push(node);
+      return;
+    }
+
+    Object.values(node).forEach((value) => walk(value, depth + 1));
+  };
+
+  walk(payload);
+  return collected;
+}
+
+function extractJourneyUpdateParameterEntries(parameters) {
+  if (!Array.isArray(parameters)) return [];
+
+  return parameters
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const typeLabel = String(
+        readPartnerRawValueByAliases(item, ["type", "parameter-type", "parameter_type", "parameterType", "name"]) || ""
+      ).trim();
+      if (!typeLabel) return null;
+      const columnKey = normalizeJourneyUpdateParameterColumnKey(typeLabel);
+      if (!columnKey) return null;
+      const value =
+        readPartnerRawValueByAliases(item, ["value", "parameter-value", "parameter_value", "parameterValue", "data"]) ??
+        "";
+      return {
+        key: columnKey,
+        label: typeLabel,
+        value: formatJourneyUpdateTableCell(value)
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildJourneyUpdateDetailMap(payload) {
+  const detailsById = new Map();
+  const detailColumnsByKey = new Map();
+
+  extractJourneyUpdateDetailNodes(payload).forEach((node) => {
+    const idText = String(readPartnerRawValueByAliases(node, ["id"]) || "").trim();
+    if (!idText) return;
+    const parameterEntries = extractJourneyUpdateParameterEntries(
+      readPartnerRawValueByAliases(node, ["parameters", "parameter", "params"])
+    );
+    if (parameterEntries.length === 0) return;
+
+    const existing = detailsById.get(idText) || {};
+    parameterEntries.forEach((entry) => {
+      detailColumnsByKey.set(entry.key, {
+        key: entry.key,
+        label: entry.label,
+        filterType: "text",
+        sortType: "text"
+      });
+      const previousValue = String(existing[entry.key] || "").trim();
+      if (!previousValue) {
+        existing[entry.key] = entry.value;
+      } else if (!previousValue.split(" | ").includes(entry.value)) {
+        existing[entry.key] = `${previousValue} | ${entry.value}`;
+      }
+    });
+    detailsById.set(idText, existing);
+  });
+
+  return {
+    detailsById,
+    detailColumns: Array.from(detailColumnsByKey.values()).sort((a, b) =>
+      String(a.label || "").localeCompare(String(b.label || ""), "tr")
+    )
+  };
+}
+
 function buildJourneyUpdateTableRows(payload, { requestDate = "", companyCode = "", partnerId = "", cluster = "" } = {}) {
   return extractJourneyUpdateSummaryNodes(payload).map((raw) => {
     return {
@@ -12619,25 +12926,28 @@ function buildJourneyUpdateTableRows(payload, { requestDate = "", companyCode = 
   });
 }
 
+function mergeJourneyUpdateRowDetails(rows, detailsById) {
+  const detailMap = detailsById instanceof Map ? detailsById : new Map();
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const idText = String(row?.id || "").trim();
+    const detailValues = idText ? detailMap.get(idText) || {} : {};
+    return {
+      ...row,
+      ...detailValues
+    };
+  });
+}
+
+function buildJourneyUpdateTableColumns(detailColumns = []) {
+  return buildJourneyUpdateBaseColumns().concat(Array.isArray(detailColumns) ? detailColumns : []);
+}
+
 function dedupeJourneyUpdateTableRows(rows) {
   const uniqueRows = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const key = [
-      formatJourneyUpdateTableCell(row?.id),
-      formatJourneyUpdateTableCell(row?.departureTime),
-      formatJourneyUpdateTableCell(row?.origin),
-      formatJourneyUpdateTableCell(row?.destination),
-      formatJourneyUpdateTableCell(row?.status),
-      formatJourneyUpdateTableCell(row?.journeyCode),
-      formatJourneyUpdateTableCell(row?.description),
-      formatJourneyUpdateTableCell(row?.seatModel),
-      formatJourneyUpdateTableCell(row?.plate),
-      formatJourneyUpdateTableCell(row?.journeyType),
-      formatJourneyUpdateTableCell(row?.routeInfo),
-      formatJourneyUpdateTableCell(row?.duration),
-      formatJourneyUpdateTableCell(row?.distance),
-      formatJourneyUpdateTableCell(row?.lastExtendTime)
-    ]
+    const key = Object.keys(row || {})
+      .sort((a, b) => a.localeCompare(b, "tr"))
+      .map((fieldKey) => `${fieldKey}:${formatJourneyUpdateTableCell(row?.[fieldKey])}`)
       .join("|||")
       .toLocaleLowerCase("tr");
     if (!uniqueRows.has(key)) {
@@ -17020,6 +17330,9 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
   const resolvedEndpointUrl = selectedCompanyCluster
     ? buildJourneyUpdateDailySummariesUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
     : "";
+  const resolvedDetailEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateDetailUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
     endpointUrl: resolvedEndpointUrl,
@@ -17071,6 +17384,9 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   const resolvedEndpointUrl = selectedCompanyCluster
     ? buildJourneyUpdateDailySummariesUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
     : "";
+  const resolvedDetailEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateDetailUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
     endpointUrl: resolvedEndpointUrl,
@@ -17091,6 +17407,8 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
     report.error = "Seçilen firma için geçerli cluster bilgisi bulunamadı.";
   } else if (!resolvedEndpointUrl) {
     report.error = "GetDailyJourneySummaries URL oluşturulamadı.";
+  } else if (!resolvedDetailEndpointUrl) {
+    report.error = "GetJourneyDetail URL oluşturulamadı.";
   } else {
     report.requestUrl = resolvedEndpointUrl;
     const dailyRanges = buildDailyRequestRanges(startDate, endDate);
@@ -17125,6 +17443,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
         const requestBodies = [];
         const dayResults = [];
         const tableRows = [];
+        const detailColumnsByKey = new Map();
 
         for (const range of dailyRanges) {
           const requestDate = String(range.startDate || "").trim();
@@ -17149,25 +17468,67 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             authorization: STATION_PASSENGER_INFO_API_AUTH
           });
 
-          const currentTableRows = buildJourneyUpdateTableRows(fetchResult.responsePayload, {
+          const detailResult = fetchResult.ok
+            ? await fetchJourneyUpdateDetailPayload({
+                endpointUrl: resolvedDetailEndpointUrl,
+                sessionId: loginResult.sessionId,
+                deviceId: loginResult.deviceId,
+                token: loginResult.token,
+                dateValue: requestDate,
+                includeDateField: true,
+                authorization: STATION_PASSENGER_INFO_API_AUTH
+              })
+            : null;
+
+          const { detailsById, detailColumns } = detailResult?.ok
+            ? buildJourneyUpdateDetailMap(detailResult.responsePayload)
+            : { detailsById: new Map(), detailColumns: [] };
+          detailColumns.forEach((column) => {
+            detailColumnsByKey.set(column.key, column);
+          });
+
+          const summaryRows = buildJourneyUpdateTableRows(fetchResult.responsePayload, {
             requestDate,
             companyCode: String(selectedCompanyMeta?.code || "").trim(),
             partnerId: String(selectedCompanyMeta?.id || "").trim(),
             cluster: selectedCompanyCluster
           });
+          const currentTableRows = mergeJourneyUpdateRowDetails(summaryRows, detailsById);
           tableRows.push(...currentTableRows);
+
+          const dayErrorParts = [];
+          if (!fetchResult.ok) {
+            dayErrorParts.push(String(fetchResult.error || "").trim());
+          }
+          if (detailResult && !detailResult.ok) {
+            dayErrorParts.push(String(detailResult.error || "").trim());
+          }
+          const dayDetailParts = [];
+          if (!fetchResult.ok && fetchResult.detail) {
+            dayDetailParts.push(String(fetchResult.detail || "").trim());
+          }
+          if (detailResult && !detailResult.ok && detailResult.detail) {
+            dayDetailParts.push(String(detailResult.detail || "").trim());
+          }
 
           dayResults.push({
             date: requestDate,
-            ok: fetchResult.ok === true,
-            status: Number.isFinite(Number(fetchResult.status)) ? Number(fetchResult.status) : null,
+            ok: fetchResult.ok === true && (!detailResult || detailResult.ok === true),
+            status: Number.isFinite(Number(detailResult?.status || fetchResult.status))
+              ? Number(detailResult?.status || fetchResult.status)
+              : null,
             rowCount: currentTableRows.length,
-            error: fetchResult.ok ? "" : String(fetchResult.error || "").trim(),
-            detail: fetchResult.ok ? "" : String(fetchResult.detail || "").trim()
+            error: dayErrorParts.join(" | "),
+            detail: dayDetailParts.join(" | ")
           });
         }
 
         const uniqueTableRows = sortJourneyUpdateTableRows(dedupeJourneyUpdateTableRows(tableRows));
+        const tableColumns = buildJourneyUpdateTableColumns(
+          Array.from(detailColumnsByKey.values()).sort((a, b) =>
+            String(a.label || "").localeCompare(String(b.label || ""), "tr")
+          )
+        );
 
         const successfulDayCount = dayResults.filter((item) => item.ok).length;
         const dataDayCount = dayResults.filter((item) => item.ok && item.rowCount > 0).length;
@@ -17184,6 +17545,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
               cluster: selectedCompanyCluster
             },
             requestUrl: resolvedEndpointUrl,
+            detailRequestUrl: resolvedDetailEndpointUrl,
             requestedRange: {
               startDate: dailyRanges[0]?.startDate || startDate,
               endDate: dailyRanges[dailyRanges.length - 1]?.endDate || endDate
@@ -17193,6 +17555,9 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
             successfulDays: successfulDayCount,
             failedDays: failedDayCount,
             listedRows: uniqueTableRows.length,
+            detailParameterColumns: tableColumns
+              .filter((column) => String(column.key || "").startsWith("parameter_"))
+              .map((column) => column.label),
             days: visibleDayResults.map((item) => ({
               date: item.date,
               ok: item.ok,
@@ -17205,6 +17570,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
           2
         );
         report.tableRows = uniqueTableRows;
+        report.tableColumns = tableColumns;
         report.dayResults = dayResults;
         report.status =
           failedDayCount === 0
