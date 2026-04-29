@@ -169,27 +169,39 @@
               <table class="partners-raw-table">
                 <thead>
                   <tr>
-                    <th>Tarih</th>
-                    <th>Firma</th>
-                    <th>PartnerId</th>
-                    <th>Cluster</th>
-                    <th>SeferId</th>
-                    <th>Kalkış</th>
-                    <th>Güzergah</th>
+                    <th>Id</th>
+                    <th>Departure-Time</th>
+                    <th>Origin</th>
+                    <th>Destination</th>
+                    <th>Status</th>
+                    <th>Journey-Code</th>
+                    <th>Description</th>
+                    <th>Seat-Model</th>
                     <th>Plaka</th>
+                    <th>Journey-Type</th>
+                    <th>Route-Info</th>
+                    <th>Duration</th>
+                    <th>Distance</th>
+                    <th>Last-Extend-Time</th>
                   </tr>
                 </thead>
                 <tbody>
                   <% report.tableRows.forEach((row) => { %>
                     <tr>
-                      <td><%= row.requestDate || '-' %></td>
-                      <td><%= row.companyCode || '-' %></td>
-                      <td><%= row.partnerId || '-' %></td>
-                      <td><%= row.cluster || '-' %></td>
-                      <td><%= row.journeyId || '-' %></td>
+                      <td><%= row.id || '-' %></td>
                       <td><%= row.departureTime || '-' %></td>
-                      <td><%= row.routeInfo || '-' %></td>
+                      <td><%= row.origin || '-' %></td>
+                      <td><%= row.destination || '-' %></td>
+                      <td><%= row.status || '-' %></td>
+                      <td><%= row.journeyCode || '-' %></td>
+                      <td><%= row.description || '-' %></td>
+                      <td><%= row.seatModel || '-' %></td>
                       <td><%= row.plate || '-' %></td>
+                      <td><%= row.journeyType || '-' %></td>
+                      <td><%= row.routeInfo || '-' %></td>
+                      <td><%= row.duration || '-' %></td>
+                      <td><%= row.distance || '-' %></td>
+                      <td><%= row.lastExtendTime || '-' %></td>
                     </tr>
                   <% }) %>
                 </tbody>

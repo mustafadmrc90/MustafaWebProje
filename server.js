@@ -12517,17 +12517,49 @@ function buildJourneyUpdateReportModel() {
   };
 }
 
+function formatJourneyUpdateTableCell(value, fallback = "-") {
+  const text = formatPartnerCellValue(value).trim();
+  return text || fallback;
+}
+
 function buildJourneyUpdateTableRows(items, { requestDate = "", companyCode = "", partnerId = "", cluster = "" } = {}) {
-  return (Array.isArray(items) ? items : []).map((item) => ({
-    requestDate: String(requestDate || "").trim(),
-    companyCode: String(companyCode || item?.companyCode || "").trim(),
-    partnerId: String(partnerId || "").trim(),
-    cluster: extractClusterLabel(cluster || item?.cluster || ""),
-    journeyId: String(item?.journeyId || item?.tripId || item?.seferId || item?.id || "").trim() || "-",
-    departureTime: String(item?.departureTime || item?.["departure-time"] || "").trim() || "-",
-    routeInfo: String(item?.routeInfo || item?.route || "").trim() || "-",
-    plate: String(item?.plate || "").trim() || "-"
-  }));
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const raw = item?.raw && typeof item.raw === "object" ? item.raw : {};
+    return {
+      requestDate: String(requestDate || "").trim(),
+      companyCode: String(companyCode || item?.companyCode || "").trim(),
+      partnerId: String(partnerId || "").trim(),
+      cluster: extractClusterLabel(cluster || item?.cluster || ""),
+      id: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["id"]) ?? item?.id ?? item?.journeyId ?? item?.tripId ?? item?.seferId
+      ),
+      departureTime: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["departure-time", "departure_time", "departureTime"]) ?? item?.departureTime
+      ),
+      origin: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["origin"])),
+      destination: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["destination"])),
+      status: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["status"])),
+      journeyCode: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["journey-code", "journey_code", "journeyCode"])
+      ),
+      description: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["description"])),
+      seatModel: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["seat-model", "seat_model", "seatModel"])
+      ),
+      plate: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["plate"]) ?? item?.plate),
+      journeyType: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["journey-type", "journey_type", "journeyType"])
+      ),
+      routeInfo: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["route-info", "route_info", "routeInfo"]) ?? item?.routeInfo
+      ),
+      duration: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["duration"])),
+      distance: formatJourneyUpdateTableCell(readPartnerRawValueByAliases(raw, ["distance"])),
+      lastExtendTime: formatJourneyUpdateTableCell(
+        readPartnerRawValueByAliases(raw, ["last-extend-time", "last_extend_time", "lastExtendTime"])
+      )
+    };
+  });
 }
 
 function buildObusJobsReportModel() {
