@@ -3234,6 +3234,19 @@ function buildUetdsPricesUpdateUrl(baseUrl) {
   }
 }
 
+function buildJourneyUpdateDailySummariesUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/Inventory/GetDailyJourneySummaries";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function buildObusJobsUrl(baseUrl, clusterLabel = "") {
   const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
   try {
@@ -4096,18 +4109,27 @@ function formatDateTimeToSecondPrecisionInTimeZone(
   return `${isoDate} ${hour}:${minute}:${second}`;
 }
 
-function buildStationPassengerDailySummariesRequestBody({ sessionId = "", deviceId = "", token = "", dateValue = "" } = {}) {
+function buildStationPassengerDailySummariesRequestBody({
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  dateValue = "",
+  includeDateField = true
+} = {}) {
   const normalizedDateValue = String(dateValue || "").trim();
-  return {
+  const payload = {
     data: normalizedDateValue,
     "device-session": {
       "session-id": String(sessionId || "").trim(),
       "device-id": String(deviceId || "").trim()
     },
-    date: normalizedDateValue ? `${normalizedDateValue} 00:00:00` : "",
     language: STATION_PASSENGER_INFO_REQUEST_LANGUAGE,
     token: String(token || "").trim()
   };
+  if (includeDateField) {
+    payload.date = normalizedDateValue ? `${normalizedDateValue} 00:00:00` : "";
+  }
+  return payload;
 }
 
 function normalizeStationPassengerJourneyIdForRequest(value) {
@@ -5358,6 +5380,8 @@ async function fetchStationPassengerDailyJourneySummaries({
   deviceId,
   token,
   plateQuery = "",
+  dateValue = "",
+  includeDateField = true,
   companyCode = "",
   cluster = "",
   authorization = STATION_PASSENGER_INFO_API_AUTH
@@ -5367,17 +5391,23 @@ async function fetchStationPassengerDailyJourneySummaries({
   const normalizedDeviceId = String(deviceId || "").trim();
   const normalizedToken = String(token || "").trim();
   const normalizedPlateQuery = normalizeStationPassengerPlate(plateQuery);
-  const requestDateParts = buildStationPassengerRequestDateParts(new Date());
+  const fallbackRequestDateParts = buildStationPassengerRequestDateParts(new Date());
+  const normalizedRequestDate = normalizeIsoDateInput(String(dateValue || "").trim()) || fallbackRequestDateParts.isoDate;
   const requestBody = buildStationPassengerDailySummariesRequestBody({
     sessionId: normalizedSessionId,
     deviceId: normalizedDeviceId,
     token: normalizedToken,
-    dateValue: requestDateParts.isoDate
+    dateValue: normalizedRequestDate,
+    includeDateField
   });
-  const requestBodyPreview = {
-    data: requestDateParts.isoDate,
-    date: requestDateParts.obusDate
-  };
+  const requestBodyPreview = includeDateField
+    ? {
+        data: normalizedRequestDate,
+        date: normalizedRequestDate ? `${normalizedRequestDate} 00:00:00` : ""
+      }
+    : {
+        data: normalizedRequestDate
+      };
 
   if (!normalizedEndpointUrl) {
     return {
@@ -5387,8 +5417,9 @@ async function fetchStationPassengerDailyJourneySummaries({
       sampleRawPlates: [],
       sampleActivePlates: [],
       requestUrl: "",
-      requestDate: requestDateParts.isoDate,
+      requestDate: normalizedRequestDate,
       requestBodyPreview,
+      responsePayload: null,
       error: "GetDailyJourneySummaries URL oluşturulamadı.",
       detail: ""
     };
@@ -5402,8 +5433,9 @@ async function fetchStationPassengerDailyJourneySummaries({
       sampleRawPlates: [],
       sampleActivePlates: [],
       requestUrl: normalizedEndpointUrl,
-      requestDate: requestDateParts.isoDate,
+      requestDate: normalizedRequestDate,
       requestBodyPreview,
+      responsePayload: null,
       error: "GetDailyJourneySummaries için session/device/token eksik.",
       detail: ""
     };
@@ -5451,8 +5483,9 @@ async function fetchStationPassengerDailyJourneySummaries({
         sampleRawPlates: [],
         sampleActivePlates: [],
         requestUrl: normalizedEndpointUrl,
-        requestDate: requestDateParts.isoDate,
+        requestDate: normalizedRequestDate,
         requestBodyPreview,
+        responsePayload: parsed ?? raw,
         status: response.status,
         error: `HTTP ${response.status}: ${reason}`,
         detail: buildObusServiceTraceText(trace, reason, {
@@ -5474,8 +5507,9 @@ async function fetchStationPassengerDailyJourneySummaries({
           sampleRawPlates: [],
           sampleActivePlates: [],
           requestUrl: normalizedEndpointUrl,
-          requestDate: requestDateParts.isoDate,
+          requestDate: normalizedRequestDate,
           requestBodyPreview,
+          responsePayload: parsed ?? raw,
           status: response.status,
           error: reason,
           detail: buildObusServiceTraceText(trace, reason, {
@@ -5503,8 +5537,9 @@ async function fetchStationPassengerDailyJourneySummaries({
       sampleRawPlates,
       sampleActivePlates,
       requestUrl: normalizedEndpointUrl,
-      requestDate: requestDateParts.isoDate,
+      requestDate: normalizedRequestDate,
       requestBodyPreview,
+      responsePayload: parsed ?? raw,
       status: response.status,
       error: "",
       detail: allItems.length
@@ -5529,8 +5564,9 @@ async function fetchStationPassengerDailyJourneySummaries({
       sampleRawPlates: [],
       sampleActivePlates: [],
       requestUrl: normalizedEndpointUrl,
-      requestDate: requestDateParts.isoDate,
+      requestDate: normalizedRequestDate,
       requestBodyPreview,
+      responsePayload: null,
       error: err?.message || "GetDailyJourneySummaries isteği başarısız.",
       detail: buildObusServiceTraceText(trace, err?.message || "GetDailyJourneySummaries isteği başarısız.", {
         bodyMaxLen: 140,
@@ -12475,8 +12511,23 @@ function buildJourneyUpdateReportModel() {
     deviceId: "",
     branchId: "",
     loginToken: "",
-    loginUrl: ""
+    loginUrl: "",
+    tableRows: [],
+    dayResults: []
   };
+}
+
+function buildJourneyUpdateTableRows(items, { requestDate = "", companyCode = "", partnerId = "", cluster = "" } = {}) {
+  return (Array.isArray(items) ? items : []).map((item) => ({
+    requestDate: String(requestDate || "").trim(),
+    companyCode: String(companyCode || item?.companyCode || "").trim(),
+    partnerId: String(partnerId || "").trim(),
+    cluster: extractClusterLabel(cluster || item?.cluster || ""),
+    journeyId: String(item?.journeyId || item?.tripId || item?.seferId || item?.id || "").trim() || "-",
+    departureTime: String(item?.departureTime || item?.["departure-time"] || "").trim() || "-",
+    routeInfo: String(item?.routeInfo || item?.route || "").trim() || "-",
+    plate: String(item?.plate || "").trim() || "-"
+  }));
 }
 
 function buildObusJobsReportModel() {
@@ -16809,7 +16860,10 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
 });
 
 app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-update"), async (req, res) => {
+  const today = getTodayIsoDate();
   const requestedCompany = typeof req.query.company === "string" ? req.query.company.trim() : "";
+  const startDate = normalizeIsoDateInput(String(req.query.startDate || "").trim()) || today;
+  const endDate = normalizeIsoDateInput(String(req.query.endDate || "").trim()) || today;
   const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
 
   const selectedCompanyOption = companies.find(
@@ -16825,12 +16879,18 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
         String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
     );
   const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+  const selectedCompanyCluster = normalizeObusClusterLabel(selectedCompanyMeta?.cluster || parsedCompany?.cluster || "");
+  const resolvedEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateDailySummariesUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
-    endpointUrl: String(req.query.endpointUrl || "").trim(),
+    endpointUrl: resolvedEndpointUrl,
     company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
     username: String(req.query.username || "").trim(),
-    password: String(req.query.password || "")
+    password: String(req.query.password || ""),
+    startDate,
+    endDate
   };
   const report = buildJourneyUpdateReportModel();
 
@@ -16844,14 +16904,17 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
     active: "journey-update",
     filters,
     companies,
-    companySourceBaseUrl: "",
+    companySourceBaseUrl: STATION_PASSENGER_INFO_API_URL,
     report,
     partnerError
   });
 });
 
 app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-update"), async (req, res) => {
+  const today = getTodayIsoDate();
   const requestedCompany = typeof req.body.company === "string" ? req.body.company.trim() : "";
+  const startDate = normalizeIsoDateInput(String(req.body.startDate || "").trim());
+  const endDate = normalizeIsoDateInput(String(req.body.endDate || "").trim());
   const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
 
   const selectedCompanyOption = companies.find(
@@ -16867,40 +16930,181 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
         String(item.cluster || "").toLowerCase() === String(parsedCompany.cluster || "").toLowerCase()
     );
   const selectedCompanyMeta = selectedCompanyOption?.meta || matchedParsedCompany || null;
+  const selectedCompanyCluster = normalizeObusClusterLabel(selectedCompanyMeta?.cluster || parsedCompany?.cluster || "");
+  const resolvedEndpointUrl = selectedCompanyCluster
+    ? buildJourneyUpdateDailySummariesUrl(STATION_PASSENGER_INFO_API_URL, selectedCompanyCluster)
+    : "";
 
   const filters = {
-    endpointUrl: String(req.body.endpointUrl || "").trim(),
+    endpointUrl: resolvedEndpointUrl,
     company: selectedCompanyMeta ? buildCompanyOptionValue(selectedCompanyMeta) : requestedCompany,
     username: String(req.body.username || "").trim(),
-    password: String(req.body.password || "")
+    password: String(req.body.password || ""),
+    startDate: startDate || today,
+    endDate: endDate || today
   };
   const report = buildJourneyUpdateReportModel();
+  report.requested = true;
 
   if (requestedCompany && !selectedCompanyMeta) {
-    report.requested = true;
     report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
+  } else if (!startDate || !endDate) {
+    report.error = "Baş Tar ve Bit Tar alanları zorunludur.";
+  } else if (!selectedCompanyCluster) {
+    report.error = "Seçilen firma için geçerli cluster bilgisi bulunamadı.";
+  } else if (!resolvedEndpointUrl) {
+    report.error = "GetDailyJourneySummaries URL oluşturulamadı.";
   } else {
-    report.requested = true;
-    report.userMessage = "Firma, kullanıcı adı ve şifre yapısı hazır. Yeni servis URL ve body bilgisi bekleniyor.";
-    report.requestBody = JSON.stringify(
-      {
-        company: filters.company || "",
-        username: filters.username || "",
-        password: filters.password ? "***" : ""
-      },
-      null,
-      2
-    );
-    report.responseBody = JSON.stringify(
-      {
-        ok: false,
-        message: "Servis URL ve body tanımı henüz eklenmedi."
-      },
-      null,
-      2
-    );
-    if (partnerError) {
-      report.errorDetail = partnerError;
+    report.requestUrl = resolvedEndpointUrl;
+    const dailyRanges = buildDailyRequestRanges(startDate, endDate);
+    if (!dailyRanges.length) {
+      report.error = "Tarih aralığı geçersiz.";
+    } else {
+      const loginResult = await resolveStationPassengerLoginResult({
+        endpointUrl: resolvedEndpointUrl,
+        companyUrl: resolvedEndpointUrl,
+        partnerCode: String(selectedCompanyMeta?.code || "").trim(),
+        partnerId: String(selectedCompanyMeta?.id || "").trim(),
+        username: filters.username,
+        password: filters.password,
+        fallbackBranchId: String(selectedCompanyMeta?.branchId || selectedCompanyMeta?.id || "").trim(),
+        allowEmptyPartnerCode: false,
+        authorization: STATION_PASSENGER_INFO_API_AUTH,
+        timeoutMs: STATION_PASSENGER_INFO_TIMEOUT_MS
+      });
+
+      report.sessionId = String(loginResult?.sessionId || "").trim();
+      report.deviceId = String(loginResult?.deviceId || "").trim();
+      report.branchId = String(loginResult?.branchId || "").trim();
+      report.loginToken = String(loginResult?.token || "").trim();
+      report.loginUrl = String(loginResult?.loginUrl || "").trim();
+
+      if (!(loginResult?.ok === true && String(loginResult?.token || "").trim())) {
+        report.error = String(loginResult?.error || "").trim() || "UserLogin başarısız.";
+        report.errorDetail =
+          String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
+          String(partnerError || "").trim();
+      } else {
+        const requestBodies = [];
+        const dayResults = [];
+        const tableRows = [];
+
+        for (const range of dailyRanges) {
+          const requestDate = String(range.startDate || "").trim();
+          const requestBody = buildStationPassengerDailySummariesRequestBody({
+            sessionId: loginResult.sessionId,
+            deviceId: loginResult.deviceId,
+            token: loginResult.token,
+            dateValue: requestDate,
+            includeDateField: true
+          });
+          requestBodies.push(requestBody);
+
+          const fetchResult = await fetchStationPassengerDailyJourneySummaries({
+            endpointUrl: resolvedEndpointUrl,
+            sessionId: loginResult.sessionId,
+            deviceId: loginResult.deviceId,
+            token: loginResult.token,
+            dateValue: requestDate,
+            includeDateField: true,
+            companyCode: String(selectedCompanyMeta?.code || "").trim(),
+            cluster: selectedCompanyCluster,
+            authorization: STATION_PASSENGER_INFO_API_AUTH
+          });
+
+          const currentTableRows = buildJourneyUpdateTableRows(fetchResult.items, {
+            requestDate,
+            companyCode: String(selectedCompanyMeta?.code || "").trim(),
+            partnerId: String(selectedCompanyMeta?.id || "").trim(),
+            cluster: selectedCompanyCluster
+          });
+          tableRows.push(...currentTableRows);
+
+          dayResults.push({
+            date: requestDate,
+            ok: fetchResult.ok === true,
+            status: Number.isFinite(Number(fetchResult.status)) ? Number(fetchResult.status) : null,
+            rowCount: currentTableRows.length,
+            error: fetchResult.ok ? "" : String(fetchResult.error || "").trim(),
+            detail: fetchResult.ok ? "" : String(fetchResult.detail || "").trim()
+          });
+        }
+
+        tableRows.sort((a, b) => {
+          const byDate = String(a.requestDate || "").localeCompare(String(b.requestDate || ""), "tr");
+          if (byDate !== 0) return byDate;
+          const byTime = getStationPassengerSortMinutes(a.departureTime) - getStationPassengerSortMinutes(b.departureTime);
+          if (byTime !== 0) return byTime;
+          const byRoute = String(a.routeInfo || "").localeCompare(String(b.routeInfo || ""), "tr");
+          if (byRoute !== 0) return byRoute;
+          return String(a.plate || "").localeCompare(String(b.plate || ""), "tr");
+        });
+
+        const successfulDayCount = dayResults.filter((item) => item.ok).length;
+        const dataDayCount = dayResults.filter((item) => item.ok && item.rowCount > 0).length;
+        const failedDayCount = Math.max(0, dayResults.length - successfulDayCount);
+        const visibleDayResults = dayResults.filter((item) => item.rowCount > 0 || String(item.error || "").trim());
+
+        report.requestBody = JSON.stringify(requestBodies, null, 2);
+        report.responseBody = JSON.stringify(
+          {
+            ok: failedDayCount === 0,
+            company: {
+              code: String(selectedCompanyMeta?.code || "").trim(),
+              id: String(selectedCompanyMeta?.id || "").trim(),
+              cluster: selectedCompanyCluster
+            },
+            requestUrl: resolvedEndpointUrl,
+            requestedRange: {
+              startDate: dailyRanges[0]?.startDate || startDate,
+              endDate: dailyRanges[dailyRanges.length - 1]?.endDate || endDate
+            },
+            requestedDays: dailyRanges.length,
+            dataDays: dataDayCount,
+            successfulDays: successfulDayCount,
+            failedDays: failedDayCount,
+            listedRows: tableRows.length,
+            days: visibleDayResults.map((item) => ({
+              date: item.date,
+              ok: item.ok,
+              status: item.status,
+              rowCount: item.rowCount,
+              error: item.error
+            }))
+          },
+          null,
+          2
+        );
+        report.tableRows = tableRows;
+        report.dayResults = dayResults;
+        report.status =
+          failedDayCount === 0
+            ? 200
+            : successfulDayCount > 0
+              ? 207
+              : Number(dayResults.find((item) => Number(item.status) > 0)?.status || 0) || 0;
+
+        if (failedDayCount === 0) {
+          report.userMessage =
+            tableRows.length > 0
+              ? `${dailyRanges.length} gün tarandı. Veri bulunan ${dataDayCount} gün için ${tableRows.length} sefer satırı listelendi.`
+              : "Seçilen tarih aralığında veri bulunamadı.";
+        } else if (successfulDayCount > 0) {
+          report.userMessage =
+            `${dailyRanges.length} günün ${successfulDayCount} tanesi başarılı tamamlandı. ` +
+            `${failedDayCount} gün hata verdi, veri bulunan ${dataDayCount} gün için ${tableRows.length} satır listelendi.`;
+        } else {
+          report.error = String(dayResults[0]?.error || "").trim() || "GetDailyJourneySummaries başarısız.";
+          report.errorDetail = dayResults
+            .map((item) => {
+              const parts = [String(item.date || "").trim(), String(item.error || "").trim(), String(item.detail || "").trim()]
+                .filter(Boolean);
+              return parts.join(" | ");
+            })
+            .filter(Boolean)
+            .join("\n\n");
+        }
+      }
     }
   }
 
@@ -16909,7 +17113,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
     active: "journey-update",
     filters,
     companies,
-    companySourceBaseUrl: "",
+    companySourceBaseUrl: STATION_PASSENGER_INFO_API_URL,
     report,
     partnerError
   });

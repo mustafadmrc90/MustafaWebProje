@@ -983,9 +983,15 @@
     const loadingMessage = form.querySelector(".allowed-lines-loading-message");
     const companySelect = form.querySelector("#allowed-lines-company");
     const endpointInput = form.querySelector("#allowed-lines-endpoint-url");
+    const endpointPreview = form.querySelector("[data-endpoint-preview]");
     const submitActionInput = form.querySelector("#allowed-lines-submit-action");
     const companySourceUrl = String(form.dataset.companySourceUrl || "").trim();
     if (!submitButtons.length) return;
+
+    const syncEndpointPreview = () => {
+      if (!endpointPreview || !endpointInput) return;
+      endpointPreview.value = String(endpointInput.value || "").trim();
+    };
 
     const replaceClusterInUrl = (urlValue, clusterValue) => {
       const url = String(urlValue || "").trim();
@@ -1011,13 +1017,18 @@
       const selectedCluster =
         String(selectedOption?.dataset?.cluster || "").trim().toLowerCase() ||
         extractClusterFromCompanyValue(companySelect.value);
-      if (!selectedCluster) return;
+      if (!selectedCluster) {
+        endpointInput.value = "";
+        syncEndpointPreview();
+        return;
+      }
 
       const baseUrl = companySourceUrl || endpointInput.value || "";
       const nextUrl = replaceClusterInUrl(baseUrl, selectedCluster);
       if (nextUrl) {
         endpointInput.value = nextUrl;
       }
+      syncEndpointPreview();
     };
 
     form.classList.remove("is-loading");
@@ -1033,7 +1044,11 @@
       companySelect.addEventListener("change", applyCompanyClusterToEndpointUrl);
       if (!String(endpointInput.value || "").trim()) {
         applyCompanyClusterToEndpointUrl();
+      } else {
+        syncEndpointPreview();
       }
+    } else {
+      syncEndpointPreview();
     }
 
     submitButtons.forEach((button) => {

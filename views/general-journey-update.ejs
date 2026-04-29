@@ -26,7 +26,7 @@
             </span>
             <span>Sefer Güncelleme</span>
           </h1>
-          <p>Firma, kullanıcı adı ve şifre yapısı hazır. Yeni servis URL ve body bilgisi bu ekrana bağlanacak.</p>
+          <p>Seçilen firmanın cluster bilgisiyle günlük sefer özetlerini getirir ve tarih aralığını gün gün tarar.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -79,15 +79,33 @@
               <span>Şifre</span>
               <input type="password" name="password" value="<%= filters.password || '' %>" required />
             </label>
+            <label class="allowed-lines-field">
+              <span>Baş Tar</span>
+              <input type="date" name="startDate" value="<%= filters.startDate || '' %>" required />
+            </label>
+            <label class="allowed-lines-field">
+              <span>Bit Tar</span>
+              <input type="date" name="endDate" value="<%= filters.endDate || '' %>" required />
+            </label>
+            <label class="allowed-lines-field allowed-lines-field-url">
+              <span>İstek URL</span>
+              <input
+                type="text"
+                value="<%= filters.endpointUrl || '' %>"
+                data-endpoint-preview
+                placeholder="Firma seçildiğinde URL burada oluşur"
+                readonly
+              />
+            </label>
           </div>
           <div class="allowed-lines-actions">
             <button
               type="submit"
               data-submit-action="journey-update"
-              data-default-label="İsteği Gönder"
+              data-default-label="Seferleri Göster"
               data-loading-label="Hazırlanıyor..."
             >
-              İsteği Gönder
+              Seferleri Göster
             </button>
           </div>
           <div class="allowed-lines-loading-message" hidden>İstek hazırlanıyor, lütfen bekleyin...</div>
@@ -137,6 +155,53 @@
           </div>
         <% } %>
       </section>
+
+      <% if (report.requested) { %>
+        <section class="table-card panel-card journey-update-table-card">
+          <div class="table-head">
+            <h2>Sefer Listesi</h2>
+            <div class="table-actions">
+              <span class="pill"><%= Array.isArray(report.tableRows) ? report.tableRows.length : 0 %> satır</span>
+            </div>
+          </div>
+          <% if (Array.isArray(report.tableRows) && report.tableRows.length) { %>
+            <div class="table-scroll">
+              <table class="partners-raw-table">
+                <thead>
+                  <tr>
+                    <th>Tarih</th>
+                    <th>Firma</th>
+                    <th>PartnerId</th>
+                    <th>Cluster</th>
+                    <th>SeferId</th>
+                    <th>Kalkış</th>
+                    <th>Güzergah</th>
+                    <th>Plaka</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% report.tableRows.forEach((row) => { %>
+                    <tr>
+                      <td><%= row.requestDate || '-' %></td>
+                      <td><%= row.companyCode || '-' %></td>
+                      <td><%= row.partnerId || '-' %></td>
+                      <td><%= row.cluster || '-' %></td>
+                      <td><%= row.journeyId || '-' %></td>
+                      <td><%= row.departureTime || '-' %></td>
+                      <td><%= row.routeInfo || '-' %></td>
+                      <td><%= row.plate || '-' %></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          <% } else if (report.error) { %>
+            <div class="pill muted">Satır listesi oluşturulamadı.</div>
+          <% } else { %>
+            <div class="pill muted">Seçilen tarih aralığında listelenecek sefer bulunamadı.</div>
+          <% } %>
+        </section>
+      <% } %>
     </section>
     <script src="/public/app.js" defer></script>
   </body>
