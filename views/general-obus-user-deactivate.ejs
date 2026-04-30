@@ -138,6 +138,111 @@
             <% } %>
           </form>
 
+          <% if (report.searchDebugItems && report.searchDebugItems.length > 0) { %>
+            <section class="table-card panel-card obus-user-deactivate-debug-section">
+              <div class="table-head">
+                <h2>Listeleme Debug</h2>
+                <div class="table-actions">
+                  <span class="pill">Kayıt: <%= report.searchDebugItems.length %></span>
+                </div>
+              </div>
+
+              <div class="obus-user-deactivate-debug-list">
+                <% report.searchDebugItems.forEach((item) => { %>
+                  <details
+                    class="obus-user-deactivate-debug-item"
+                    <% if (item.error || (item.parser && (item.parser.acceptedCount > 0 || (item.parser.samples && item.parser.samples.length > 0)))) { %>open<% } %>
+                  >
+                    <summary class="obus-user-deactivate-debug-summary">
+                      <span><strong><%= item.cluster || '-' %></strong> | <%= item.partnerCode || '-' %> | partner-id: <%= item.partnerId || '-' %></span>
+                      <span class="obus-user-deactivate-debug-summary-meta">
+                        <% if (item.parser) { %>
+                          aday: <%= item.parser.candidateCount || 0 %> | kabul: <%= item.parser.acceptedCount || 0 %> | pasif-elenen: <%= item.parser.skippedInactiveCount || 0 %>
+                        <% } else { %>
+                          parser yok
+                        <% } %>
+                        <% if (item.error) { %> | hata: <%= item.error %><% } %>
+                      </span>
+                    </summary>
+
+                    <div class="obus-user-deactivate-debug-body">
+                      <div class="obus-user-deactivate-debug-meta-grid">
+                        <div class="obus-user-deactivate-debug-meta-card">
+                          <span class="obus-user-deactivate-debug-label">Firma</span>
+                          <pre class="obus-user-deactivate-debug-pre"><%= item.companyRef || '-' %></pre>
+                        </div>
+                        <div class="obus-user-deactivate-debug-meta-card">
+                          <span class="obus-user-deactivate-debug-label">Login URL</span>
+                          <pre class="obus-user-deactivate-debug-pre"><%= item.loginUrl || '-' %></pre>
+                        </div>
+                        <div class="obus-user-deactivate-debug-meta-card">
+                          <span class="obus-user-deactivate-debug-label">Listeleme URL</span>
+                          <pre class="obus-user-deactivate-debug-pre"><%= item.endpointUrl || '-' %></pre>
+                        </div>
+                      </div>
+
+                      <% if (item.parser) { %>
+                        <div class="obus-user-deactivate-debug-meta-grid">
+                          <div class="obus-user-deactivate-debug-meta-card">
+                            <span class="obus-user-deactivate-debug-label">Parser Özet</span>
+                            <pre class="obus-user-deactivate-debug-pre">candidateCount: <%= item.parser.candidateCount || 0 %>
+acceptedCount: <%= item.parser.acceptedCount || 0 %>
+skippedMissingFieldCount: <%= item.parser.skippedMissingFieldCount || 0 %>
+skippedInactiveCount: <%= item.parser.skippedInactiveCount || 0 %>
+skippedUnknownStateCount: <%= item.parser.skippedUnknownStateCount || 0 %>
+skippedUsernameMismatchCount: <%= item.parser.skippedUsernameMismatchCount || 0 %></pre>
+                          </div>
+                          <div class="obus-user-deactivate-debug-meta-card">
+                            <span class="obus-user-deactivate-debug-label">Parser Samples</span>
+                            <pre class="obus-user-deactivate-debug-pre"><%= JSON.stringify(item.parser.samples || [], null, 2) %></pre>
+                          </div>
+                        </div>
+                      <% } %>
+
+                      <% if (item.loginServiceLogs && item.loginServiceLogs.length > 0) { %>
+                        <h3 class="obus-user-deactivate-debug-subtitle">1. UserLogin / Session</h3>
+                        <div class="obus-user-deactivate-debug-trace-grid">
+                          <% item.loginServiceLogs.forEach((trace) => { %>
+                            <article class="obus-user-deactivate-debug-trace-card">
+                              <strong><%= trace.service || '-' %></strong>
+                              <span class="obus-user-deactivate-debug-trace-meta">status: <%= trace.status ?? '-' %></span>
+                              <span class="obus-user-deactivate-debug-trace-meta">url: <%= trace.url || '-' %></span>
+                              <% if (trace.note) { %><span class="obus-user-deactivate-debug-trace-meta">note: <%= trace.note %></span><% } %>
+                              <% if (trace.error) { %><span class="obus-user-deactivate-debug-trace-meta error">error: <%= trace.error %></span><% } %>
+                              <span class="obus-user-deactivate-debug-label">Request Body</span>
+                              <pre class="obus-user-deactivate-debug-pre"><%= trace.requestBody || '-' %></pre>
+                              <span class="obus-user-deactivate-debug-label">Response Body</span>
+                              <pre class="obus-user-deactivate-debug-pre"><%= trace.responseBody || '-' %></pre>
+                            </article>
+                          <% }) %>
+                        </div>
+                      <% } %>
+
+                      <% if (item.requestTraces && item.requestTraces.length > 0) { %>
+                        <h3 class="obus-user-deactivate-debug-subtitle">2. GetUsersWithoutPermissions</h3>
+                        <div class="obus-user-deactivate-debug-trace-grid">
+                          <% item.requestTraces.forEach((trace) => { %>
+                            <article class="obus-user-deactivate-debug-trace-card">
+                              <strong><%= trace.service || '-' %></strong>
+                              <span class="obus-user-deactivate-debug-trace-meta">status: <%= trace.status ?? '-' %></span>
+                              <span class="obus-user-deactivate-debug-trace-meta">url: <%= trace.url || '-' %></span>
+                              <% if (trace.note) { %><span class="obus-user-deactivate-debug-trace-meta">note: <%= trace.note %></span><% } %>
+                              <% if (trace.error) { %><span class="obus-user-deactivate-debug-trace-meta error">error: <%= trace.error %></span><% } %>
+                              <span class="obus-user-deactivate-debug-label">Request Body</span>
+                              <pre class="obus-user-deactivate-debug-pre"><%= trace.requestBody || '-' %></pre>
+                              <span class="obus-user-deactivate-debug-label">Response Body</span>
+                              <pre class="obus-user-deactivate-debug-pre"><%= trace.responseBody || '-' %></pre>
+                            </article>
+                          <% }) %>
+                        </div>
+                      <% } %>
+                    </div>
+                  </details>
+                <% }) %>
+              </div>
+            </section>
+          <% } %>
+
           <% if (report.deleteRequested) { %>
             <section class="table-card panel-card obus-user-create-results">
               <div class="table-head">

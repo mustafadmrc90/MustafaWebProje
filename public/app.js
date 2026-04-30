@@ -5422,7 +5422,8 @@
       const rowKey = getRowStatusKey(row);
       const state = rowStatusStateByKey.get(rowKey) || { lines: [], detailBlocks: [] };
       const visibleLines = state.lines.length > 0 ? state.lines : ["Bekliyor"];
-      cell.textContent = visibleLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
+      cell.textContent =
+        visibleLines.length <= 1 ? String(visibleLines[0] || "").trim() : visibleLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
       cell.className = `obus-live-status ${kind || "pending"}`;
       const tooltip = state.detailBlocks.join("\n\n").trim();
       if (tooltip) {
@@ -5465,6 +5466,27 @@
       });
       renderDeactivateRowStatus(row, kind);
     };
+    const replaceDeactivateRowStatus = (row, { kind = "pending", lines = [], detailBlocks = [] } = {}) => {
+      const rowKey = getRowStatusKey(row);
+      if (!rowKey) return;
+      const nextLines = [];
+      const nextDetails = [];
+
+      (Array.isArray(lines) ? lines : [lines]).forEach((line) => {
+        const normalizedLine = normalizeStatusLine(line);
+        if (normalizedLine) nextLines.push(normalizedLine);
+      });
+      (Array.isArray(detailBlocks) ? detailBlocks : [detailBlocks]).forEach((detail) => {
+        const normalizedDetail = String(detail || "").trim();
+        if (normalizedDetail) nextDetails.push(normalizedDetail);
+      });
+
+      rowStatusStateByKey.set(rowKey, {
+        lines: nextLines,
+        detailBlocks: nextDetails
+      });
+      renderDeactivateRowStatus(row, kind);
+    };
     const applyDeactivateEventToRow = (eventItem) => {
       const key = String(eventItem?.key || "").trim();
       const row = rowByKey.get(key);
@@ -5489,6 +5511,42 @@
       const detailText = String(eventItem?.detailText || "").trim();
       if (errorDetail) detailBlocks.push(errorDetail);
       if (detailText) detailBlocks.push(detailText);
+
+      if (statusKind === "success") {
+        replaceDeactivateRowStatus(row, {
+          kind: statusKind,
+          lines: ["OK"],
+          detailBlocks
+        });
+        return;
+      }
+
+      if (statusKind === "failure") {
+        const failureLines = [];
+        (Array.isArray(eventItem?.logLines) ? eventItem.logLines : []).forEach((line) => {
+          const normalizedLine = normalizeStatusLine(line);
+          if (normalizedLine) failureLines.push(normalizedLine);
+        });
+        if (failureLines.length === 0 && detailText) {
+          detailText
+            .split(/\r?\n/)
+            .map((line) => normalizeStatusLine(line))
+            .filter(Boolean)
+            .forEach((line) => failureLines.push(line));
+        }
+        if (failureLines.length === 0 && errorDetail) {
+          failureLines.push(errorDetail);
+        }
+        if (failureLines.length === 0 && primaryText) {
+          failureLines.push(primaryText);
+        }
+        replaceDeactivateRowStatus(row, {
+          kind: statusKind,
+          lines: failureLines,
+          detailBlocks
+        });
+        return;
+      }
 
       appendDeactivateRowStatus(row, {
         kind: statusKind,

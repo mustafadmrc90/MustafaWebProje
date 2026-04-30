@@ -15601,6 +15601,7 @@ function buildObusUserDeactivateReportModel() {
     totalCount: 0,
     clusterCount: 0,
     items: [],
+    searchDebugItems: [],
     deleteRequested: false,
     deleteTotalCount: 0,
     deleteSuccessCount: 0,
@@ -15734,6 +15735,52 @@ function extractObusUsersWithoutPermissionsRows(
 ) {
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
   const collected = [];
+  const debug = {
+    candidateCount: 0,
+    acceptedCount: 0,
+    skippedMissingFieldCount: 0,
+    skippedInactiveCount: 0,
+    skippedUnknownStateCount: 0,
+    skippedUsernameMismatchCount: 0,
+    samples: []
+  };
+  const passiveAliases = [
+    "is-passive",
+    "is_passive",
+    "ispassive",
+    "passive",
+    "inactive",
+    "is-disabled",
+    "is_disabled",
+    "isdisabled",
+    "disabled"
+  ];
+  const activeAliases = [
+    "is-active",
+    "is_active",
+    "isactive",
+    "isActive",
+    "active",
+    "is-enabled",
+    "is_enabled",
+    "isenabled",
+    "enabled"
+  ];
+  const statusKeywordAliases = [
+    "user-status",
+    "user_status",
+    "userstatus",
+    "status-name",
+    "status_name",
+    "statusname",
+    "status-text",
+    "status_text",
+    "statustext",
+    "state",
+    "user-state",
+    "user_state",
+    "userstate"
+  ];
   const parseActiveFlagValue = (value) => {
     if (value === true) return true;
     if (value === false) return false;
@@ -15769,39 +15816,48 @@ function extractObusUsersWithoutPermissionsRows(
     if (/^(inactive|pasif|disabled|disable)$/.test(normalized)) return false;
     return null;
   };
+  const buildDebugSample = ({
+    normalizedId = "",
+    normalizedPartnerId = "",
+    normalizedUsername = "",
+    isActive = null,
+    decision = "",
+    passiveRaw,
+    activeRaw,
+    statusKeywordRaw,
+    statusRaw
+  } = {}) => {
+    const usernameText = String(normalizedUsername || "").trim();
+    const normalizedSampleUsername = usernameText.toLocaleLowerCase("tr");
+    const shouldInclude =
+      (normalizedFilter && normalizedSampleUsername === normalizedFilter) ||
+      (!normalizedFilter && debug.samples.length < 6);
+    if (!shouldInclude) return;
+    if (debug.samples.length >= 12) return;
+
+    debug.samples.push({
+      id: String(normalizedId || "").trim() || "-",
+      partnerId: String(normalizedPartnerId || "").trim() || "-",
+      username: usernameText || "-",
+      inferredIsActive: isActive === null ? "unknown" : String(isActive),
+      decision: String(decision || "").trim() || "-",
+      passiveRaw: normalizeObusDebugPayload(passiveRaw),
+      activeRaw: normalizeObusDebugPayload(activeRaw),
+      statusKeywordRaw: normalizeObusDebugPayload(statusKeywordRaw),
+      statusRaw: normalizeObusDebugPayload(statusRaw)
+    });
+  };
   const inferRowIsActive = (row) => {
-    const explicitPassiveRaw = readPartnerRawValueByAliases(row, [
-      "is-passive",
-      "is_passive",
-      "ispassive",
-      "passive",
-      "inactive",
-      "is-disabled",
-      "is_disabled",
-      "isdisabled",
-      "disabled"
-    ]);
+    const explicitPassiveRaw = readPartnerRawValueByAliases(row, passiveAliases);
     const explicitPassive = parsePassiveFlagValue(explicitPassiveRaw);
     if (explicitPassive === true) return false;
     if (explicitPassive === false) return true;
 
-    const statusKeywordRaw = readPartnerRawValueByAliases(row, [
-      "user-status",
-      "user_status",
-      "userstatus",
-      "status-name",
-      "status_name",
-      "statusname",
-      "status-text",
-      "status_text",
-      "statustext",
-      "state",
-      "user-state",
-      "user_state",
-      "userstate"
-    ]);
-    const statusActiveFlag = parseActiveFlagValue(statusKeywordRaw);
-    if (statusActiveFlag !== null) return statusActiveFlag;
+    const explicitActiveRaw = readPartnerRawValueByAliases(row, activeAliases);
+    const explicitActive = parseActiveFlagValue(explicitActiveRaw);
+    if (explicitActive !== null) return explicitActive;
+
+    const statusKeywordRaw = readPartnerRawValueByAliases(row, statusKeywordAliases);
     const statusKeyword = parseStatusKeywordValue(statusKeywordRaw);
     if (statusKeyword !== null) return statusKeyword;
 
@@ -15809,31 +15865,22 @@ function extractObusUsersWithoutPermissionsRows(
     const genericStatus = parseStatusKeywordValue(genericStatusRaw);
     if (genericStatus !== null) return genericStatus;
 
-    const explicitActiveRaw = readPartnerRawValueByAliases(row, [
-      "is-active",
-      "is_active",
-      "isactive",
-      "isActive",
-      "active",
-      "is-enabled",
-      "is_enabled",
-      "isenabled",
-      "enabled"
-    ]);
-    const explicitActive = parseActiveFlagValue(explicitActiveRaw);
-    if (explicitActive !== null) return explicitActive;
-
     return null;
   };
 
   const pushCandidateRow = (row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
+    debug.candidateCount += 1;
 
     const id = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["id", "user-id", "user_id", "userid"]));
     const partnerIdRaw = formatPartnerCellValue(
       readPartnerRawValueByAliases(row, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
     );
     const partnerId = String(partnerIdRaw || "").trim() || String(fallbackPartnerId || "").trim();
+    const passiveRaw = readPartnerRawValueByAliases(row, passiveAliases);
+    const activeRaw = readPartnerRawValueByAliases(row, activeAliases);
+    const statusKeywordRaw = readPartnerRawValueByAliases(row, statusKeywordAliases);
+    const statusRaw = readPartnerRawValueByAliases(row, ["status"]);
     const username =
       formatPartnerCellValue(
         readPartnerRawValueByAliases(row, ["username", "user-name", "user_name", "login-name", "login_name"])
@@ -15844,9 +15891,67 @@ function extractObusUsersWithoutPermissionsRows(
     const normalizedId = String(id || "").trim();
     const normalizedPartnerId = String(partnerId || "").trim();
     const normalizedUsername = String(username || "").trim();
-    if (!normalizedId || !normalizedPartnerId || !normalizedUsername) return;
-    if (isActive !== true) return;
-    if (normalizedFilter && normalizedUsername.toLocaleLowerCase("tr") !== normalizedFilter) return;
+    if (!normalizedId || !normalizedPartnerId || !normalizedUsername) {
+      debug.skippedMissingFieldCount += 1;
+      buildDebugSample({
+        normalizedId,
+        normalizedPartnerId,
+        normalizedUsername,
+        isActive,
+        decision: "missing-fields",
+        passiveRaw,
+        activeRaw,
+        statusKeywordRaw,
+        statusRaw
+      });
+      return;
+    }
+    if (isActive !== true) {
+      if (isActive === false) {
+        debug.skippedInactiveCount += 1;
+      } else {
+        debug.skippedUnknownStateCount += 1;
+      }
+      buildDebugSample({
+        normalizedId,
+        normalizedPartnerId,
+        normalizedUsername,
+        isActive,
+        decision: isActive === false ? "inactive" : "unknown-active-state",
+        passiveRaw,
+        activeRaw,
+        statusKeywordRaw,
+        statusRaw
+      });
+      return;
+    }
+    if (normalizedFilter && normalizedUsername.toLocaleLowerCase("tr") !== normalizedFilter) {
+      debug.skippedUsernameMismatchCount += 1;
+      buildDebugSample({
+        normalizedId,
+        normalizedPartnerId,
+        normalizedUsername,
+        isActive,
+        decision: "username-mismatch",
+        passiveRaw,
+        activeRaw,
+        statusKeywordRaw,
+        statusRaw
+      });
+      return;
+    }
+    debug.acceptedCount += 1;
+    buildDebugSample({
+      normalizedId,
+      normalizedPartnerId,
+      normalizedUsername,
+      isActive,
+      decision: "accepted",
+      passiveRaw,
+      activeRaw,
+      statusKeywordRaw,
+      statusRaw
+    });
 
     collected.push({
       source: extractClusterLabel(clusterLabel),
@@ -15917,7 +16022,10 @@ function extractObusUsersWithoutPermissionsRows(
       deduped.set(key, item);
     }
   });
-  return Array.from(deduped.values());
+  return {
+    rows: Array.from(deduped.values()),
+    debug
+  };
 }
 
 async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter }) {
@@ -15927,19 +16035,35 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
   const partnerId = String(target?.partnerId || "").trim();
   const loginBranchId = String(target?.obusMerkezSubeId || "").trim();
   const companyRef = `${partnerCode || "code?"}${partnerId ? ` - ${partnerId}` : ""}`;
+  const debugItem = {
+    cluster,
+    partnerCode,
+    partnerId,
+    companyRef,
+    endpointUrl,
+    loginUrl: "",
+    loginServiceLogs: [],
+    requestTraces: [],
+    parser: null,
+    error: ""
+  };
   if (!endpointUrl) {
+    debugItem.error = `${cluster}: GetUsersWithoutPermissions URL oluşturulamadı. (${companyRef})`;
     return {
       cluster,
       rows: [],
-      error: `${cluster}: GetUsersWithoutPermissions URL oluşturulamadı. (${companyRef})`
+      error: debugItem.error,
+      debugItem
     };
   }
 
   if (!partnerCode) {
+    debugItem.error = `${cluster}: partner-code boş olduğu için istek atlanıyor. (${companyRef})`;
     return {
       cluster,
       rows: [],
-      error: `${cluster}: partner-code boş olduğu için istek atlanıyor. (${companyRef})`
+      error: debugItem.error,
+      debugItem
     };
   }
 
@@ -15956,11 +16080,15 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     authorization: OBUS_USER_CREATE_API_AUTH,
     allowEmptyPartnerCode: false
   });
+  debugItem.loginUrl = String(loginResult?.loginUrl || "").trim();
+  debugItem.loginServiceLogs = Array.isArray(loginResult?.serviceLogs) ? loginResult.serviceLogs : [];
   if (!loginResult.ok) {
+    debugItem.error = `${cluster}: ${loginResult.error || "UserLogin başarısız."} (${companyRef})`;
     return {
       cluster,
       rows: [],
-      error: `${cluster}: ${loginResult.error || "UserLogin başarısız."} (${companyRef})`
+      error: debugItem.error,
+      debugItem
     };
   }
 
@@ -15968,10 +16096,12 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
   const deviceId = String(loginResult.deviceId || "").trim();
   const token = String(loginResult.token || "").trim();
   if (!sessionId || !deviceId || !token) {
+    debugItem.error = `${cluster}: UserLogin sonrası session/device/token eksik.`;
     return {
       cluster,
       rows: [],
-      error: `${cluster}: UserLogin sonrası session/device/token eksik.`
+      error: debugItem.error,
+      debugItem
     };
   }
 
@@ -15992,9 +16122,15 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
   const requestTimeoutMs = toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000);
 
   let lastError = `${cluster}: GetUsersWithoutPermissions çağrısı başarısız. (${companyRef})`;
-  for (const requestBody of requestCandidates) {
+  for (const [requestIndex, requestBody] of requestCandidates.entries()) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const requestNote =
+      requestIndex === 0
+        ? "attempt-1:data.username"
+        : requestIndex === 1
+          ? "attempt-2:data=string"
+          : "attempt-3:data=null";
     try {
       const response = await fetch(endpointUrl, {
         method: "POST",
@@ -16014,8 +16150,18 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
           String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
         response.statusText ||
         "Bilinmeyen hata";
+      const requestTrace = buildObusServiceTraceEntry({
+        service: "GetUsersWithoutPermissions",
+        url: endpointUrl,
+        status: response.status,
+        requestBody,
+        responseBody: parsed ?? raw,
+        note: requestNote
+      });
 
       if (!response.ok) {
+        requestTrace.error = truncateObusDebugText(apiError, 260);
+        debugItem.requestTraces.push(requestTrace);
         lastError = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
         continue;
       }
@@ -16025,30 +16171,48 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         typeof parsed === "object" &&
         ("status" in parsed || "success" in parsed || "status-code" in parsed);
       if (hasStatusField && !isSuccessStatusPayload(parsed)) {
+        requestTrace.error = truncateObusDebugText(apiError, 260);
+        debugItem.requestTraces.push(requestTrace);
         lastError = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
         continue;
       }
+      debugItem.requestTraces.push(requestTrace);
+      const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
+        usernameFilter,
+        clusterLabel: cluster,
+        fallbackPartnerId: partnerId
+      });
+      debugItem.parser = extractedResult?.debug || null;
 
       return {
         cluster,
-        rows: extractObusUsersWithoutPermissionsRows(parsed, {
-          usernameFilter,
-          clusterLabel: cluster,
-          fallbackPartnerId: partnerId
-        }),
-        error: null
+        rows: Array.isArray(extractedResult?.rows) ? extractedResult.rows : [],
+        error: null,
+        debugItem
       };
     } catch (err) {
+      debugItem.requestTraces.push(
+        buildObusServiceTraceEntry({
+          service: "GetUsersWithoutPermissions",
+          url: endpointUrl,
+          requestBody,
+          responseBody: "",
+          error: err?.message || "GetUsersWithoutPermissions isteği gönderilemedi.",
+          note: requestNote
+        })
+      );
       lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."} (${companyRef})`;
     } finally {
       clearTimeout(timeout);
     }
   }
 
+  debugItem.error = lastError;
   return {
     cluster,
     rows: [],
-    error: lastError
+    error: lastError,
+    debugItem
   };
 }
 
@@ -16086,9 +16250,13 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
 
   const mergedRows = [];
   const errors = [];
+  const debugItems = [];
   let skippedMissingCodeCount = 0;
   results.forEach((result) => {
     if (result?.error) errors.push(String(result.error).trim());
+    if (result?.debugItem && typeof result.debugItem === "object") {
+      debugItems.push(result.debugItem);
+    }
     (result?.rows || []).forEach((row) => mergedRows.push(row));
   });
 
@@ -16168,7 +16336,8 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   return {
     items,
     error: errorParts.length > 0 ? errorParts.join(" ") : null,
-    clusterCount
+    clusterCount,
+    debugItems
   };
 }
 
@@ -19335,6 +19504,7 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
       report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
         ? Number(searchResult.clusterCount)
         : 0;
+      report.searchDebugItems = Array.isArray(searchResult?.debugItems) ? searchResult.debugItems : [];
       report.error = searchResult?.error || null;
     }
   }
@@ -19365,6 +19535,7 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
     report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
       ? Number(searchResult.clusterCount)
       : 0;
+    report.searchDebugItems = Array.isArray(searchResult?.debugItems) ? searchResult.debugItems : [];
     report.error = searchResult?.error || null;
 
     const selectedValues = parseSelectedObusUserDeactivateValues(req.body.selectedUsers);

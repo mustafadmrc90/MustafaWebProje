@@ -5223,6 +5223,99 @@ button.ghost {
   word-break: break-word;
 }
 
+.obus-user-deactivate-debug-section {
+  margin-top: 12px;
+}
+
+.obus-user-deactivate-debug-list {
+  display: grid;
+  gap: 12px;
+}
+
+.obus-user-deactivate-debug-item {
+  border: 1px solid #d7e0ec;
+  border-radius: 14px;
+  background: #f7f9fc;
+  overflow: hidden;
+}
+
+.obus-user-deactivate-debug-summary {
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #1f2735;
+}
+
+.obus-user-deactivate-debug-summary-meta {
+  font-size: 12px;
+  color: #5f6b7a;
+  overflow-wrap: anywhere;
+}
+
+.obus-user-deactivate-debug-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.obus-user-deactivate-debug-meta-grid,
+.obus-user-deactivate-debug-trace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.obus-user-deactivate-debug-meta-card,
+.obus-user-deactivate-debug-trace-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7e0ec;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  min-width: 0;
+}
+
+.obus-user-deactivate-debug-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: #1f2735;
+}
+
+.obus-user-deactivate-debug-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #5f6b7a;
+}
+
+.obus-user-deactivate-debug-trace-meta {
+  font-size: 12px;
+  color: #4f6176;
+  overflow-wrap: anywhere;
+}
+
+.obus-user-deactivate-debug-trace-meta.error {
+  color: #ad2d2d;
+}
+
+.obus-user-deactivate-debug-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #1f2735;
+  background: #f7f9fc;
+  border: 1px solid #e2e8f2;
+  border-radius: 10px;
+  padding: 10px;
+}
+
 .slack-analysis-summary-table {
   min-width: 620px;
 }
