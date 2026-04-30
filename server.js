@@ -15734,7 +15734,7 @@ function extractObusUsersWithoutPermissionsRows(
 ) {
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
   const collected = [];
-  const parseIsActiveValue = (value) => {
+  const parseActiveFlagValue = (value) => {
     if (value === true) return true;
     if (value === false) return false;
     if (Number.isFinite(Number(value))) {
@@ -15746,6 +15746,20 @@ function extractObusUsersWithoutPermissionsRows(
     if (!normalized) return null;
     if (["true", "1", "yes", "evet", "aktif", "active"].includes(normalized)) return true;
     if (["false", "0", "no", "hayir", "pasif", "inactive"].includes(normalized)) return false;
+    return null;
+  };
+  const parsePassiveFlagValue = (value) => {
+    if (value === true) return true;
+    if (value === false) return false;
+    if (Number.isFinite(Number(value))) {
+      const parsedNumber = Number(value);
+      if (parsedNumber === 1) return true;
+      if (parsedNumber === 0) return false;
+    }
+    const normalized = String(value || "").trim().toLocaleLowerCase("tr");
+    if (!normalized) return null;
+    if (["true", "1", "yes", "evet", "pasif", "inactive", "disabled", "disable"].includes(normalized)) return true;
+    if (["false", "0", "no", "hayir", "aktif", "active", "enabled", "enable"].includes(normalized)) return false;
     return null;
   };
   const parseStatusKeywordValue = (value) => {
@@ -15767,23 +15781,9 @@ function extractObusUsersWithoutPermissionsRows(
       "isdisabled",
       "disabled"
     ]);
-    const explicitPassive = parseIsActiveValue(explicitPassiveRaw);
+    const explicitPassive = parsePassiveFlagValue(explicitPassiveRaw);
     if (explicitPassive === true) return false;
     if (explicitPassive === false) return true;
-
-    const explicitActiveRaw = readPartnerRawValueByAliases(row, [
-      "is-active",
-      "is_active",
-      "isactive",
-      "isActive",
-      "active",
-      "is-enabled",
-      "is_enabled",
-      "isenabled",
-      "enabled"
-    ]);
-    const explicitActive = parseIsActiveValue(explicitActiveRaw);
-    if (explicitActive !== null) return explicitActive;
 
     const statusKeywordRaw = readPartnerRawValueByAliases(row, [
       "user-status",
@@ -15800,12 +15800,28 @@ function extractObusUsersWithoutPermissionsRows(
       "user_state",
       "userstate"
     ]);
+    const statusActiveFlag = parseActiveFlagValue(statusKeywordRaw);
+    if (statusActiveFlag !== null) return statusActiveFlag;
     const statusKeyword = parseStatusKeywordValue(statusKeywordRaw);
     if (statusKeyword !== null) return statusKeyword;
 
     const genericStatusRaw = readPartnerRawValueByAliases(row, ["status"]);
     const genericStatus = parseStatusKeywordValue(genericStatusRaw);
     if (genericStatus !== null) return genericStatus;
+
+    const explicitActiveRaw = readPartnerRawValueByAliases(row, [
+      "is-active",
+      "is_active",
+      "isactive",
+      "isActive",
+      "active",
+      "is-enabled",
+      "is_enabled",
+      "isenabled",
+      "enabled"
+    ]);
+    const explicitActive = parseActiveFlagValue(explicitActiveRaw);
+    if (explicitActive !== null) return explicitActive;
 
     return null;
   };
@@ -15818,17 +15834,11 @@ function extractObusUsersWithoutPermissionsRows(
       readPartnerRawValueByAliases(row, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
     );
     const partnerId = String(partnerIdRaw || "").trim() || String(fallbackPartnerId || "").trim();
-    const username = formatPartnerCellValue(
-      readPartnerRawValueByAliases(row, [
-        "username",
-        "user-name",
-        "user_name",
-        "user",
-        "name",
-        "login-name",
-        "login_name"
-      ])
-    );
+    const username =
+      formatPartnerCellValue(
+        readPartnerRawValueByAliases(row, ["username", "user-name", "user_name", "login-name", "login_name"])
+      ) ||
+      formatPartnerCellValue(readPartnerRawValueByAliases(row, ["user", "name"]));
     const isActive = inferRowIsActive(row);
 
     const normalizedId = String(id || "").trim();
