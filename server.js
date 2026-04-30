@@ -15749,6 +15749,67 @@ function extractObusUsersWithoutPermissionsRows(
     if (["false", "0", "no", "hayir", "pasif", "inactive"].includes(normalized)) return false;
     return null;
   };
+  const parseStatusKeywordValue = (value) => {
+    const normalized = String(value || "").trim().toLocaleLowerCase("tr");
+    if (!normalized) return null;
+    if (/^(active|aktif|enabled|enable)$/.test(normalized)) return true;
+    if (/^(inactive|pasif|disabled|disable)$/.test(normalized)) return false;
+    return null;
+  };
+  const inferRowIsActive = (row) => {
+    const explicitPassiveRaw = readPartnerRawValueByAliases(row, [
+      "is-passive",
+      "is_passive",
+      "ispassive",
+      "passive",
+      "inactive",
+      "is-disabled",
+      "is_disabled",
+      "isdisabled",
+      "disabled"
+    ]);
+    const explicitPassive = parseIsActiveValue(explicitPassiveRaw);
+    if (explicitPassive === true) return false;
+    if (explicitPassive === false) return true;
+
+    const explicitActiveRaw = readPartnerRawValueByAliases(row, [
+      "is-active",
+      "is_active",
+      "isactive",
+      "isActive",
+      "active",
+      "is-enabled",
+      "is_enabled",
+      "isenabled",
+      "enabled"
+    ]);
+    const explicitActive = parseIsActiveValue(explicitActiveRaw);
+    if (explicitActive !== null) return explicitActive;
+
+    const statusKeywordRaw = readPartnerRawValueByAliases(row, [
+      "user-status",
+      "user_status",
+      "userstatus",
+      "status-name",
+      "status_name",
+      "statusname",
+      "status-text",
+      "status_text",
+      "statustext",
+      "state",
+      "user-state",
+      "user_state",
+      "userstate"
+    ]);
+    const statusKeyword = parseStatusKeywordValue(statusKeywordRaw);
+    if (statusKeyword !== null) return statusKeyword;
+
+    const genericStatusRaw = readPartnerRawValueByAliases(row, ["status"]);
+    const genericStatus = parseStatusKeywordValue(genericStatusRaw);
+    if (genericStatus !== null) return genericStatus;
+
+    return null;
+  };
 
   const pushCandidateRow = (row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
@@ -15769,17 +15830,7 @@ function extractObusUsersWithoutPermissionsRows(
         "login_name"
       ])
     );
-    const isActiveRaw = readPartnerRawValueByAliases(row, [
-      "is-active",
-      "is_active",
-      "isactive",
-      "isActive",
-      "active",
-      "is-enabled",
-      "is_enabled",
-      "isenabled"
-    ]);
-    const isActive = parseIsActiveValue(isActiveRaw);
+    const isActive = inferRowIsActive(row);
 
     const normalizedId = String(id || "").trim();
     const normalizedPartnerId = String(partnerId || "").trim();
