@@ -5180,7 +5180,7 @@ button.ghost {
 }
 
 .obus-user-deactivate-table-scroll .partners-raw-table {
-  min-width: 1320px;
+  min-width: 1620px;
 }
 
 .obus-user-deactivate-table-scroll .partners-raw-table thead th {
@@ -5195,6 +5195,32 @@ button.ghost {
   min-width: 520px;
   width: 520px;
   vertical-align: top;
+}
+
+.obus-user-deactivate-target-cell {
+  min-width: 360px;
+  vertical-align: top;
+}
+
+.obus-user-deactivate-target-cluster,
+.obus-user-deactivate-target-url {
+  display: block;
+}
+
+.obus-user-deactivate-target-cluster {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f6176;
+  text-transform: lowercase;
+}
+
+.obus-user-deactivate-target-url {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #1f2735;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .slack-analysis-summary-table {

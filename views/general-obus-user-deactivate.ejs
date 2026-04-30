@@ -92,8 +92,9 @@
                       <th>Seç</th>
                       <th>id</th>
                       <th>partner-id</th>
-                      <th>username</th>
                       <th>code</th>
+                      <th>username</th>
+                      <th>Cluster / Delete URL</th>
                       <th>Durum / İşlem Adımları</th>
                     </tr>
                   </thead>
@@ -106,14 +107,19 @@
                         data-obus-user-row-partner-id="<%= item['partner-id'] || '' %>"
                         data-obus-user-row-username="<%= item.username || '' %>"
                         data-obus-user-row-code="<%= item.code || '' %>"
+                        data-obus-user-row-delete-url="<%= item.deleteEndpointUrl || '' %>"
                       >
                         <td class="obus-user-deactivate-checkbox-cell">
                           <input type="checkbox" data-obus-user-item="1" name="selectedUsers" value="<%= item.value %>" checked />
                         </td>
                         <td><%= item.id %></td>
                         <td><%= item["partner-id"] %></td>
-                        <td><%= item.username %></td>
                         <td><%= item.code %></td>
+                        <td><%= item.username %></td>
+                        <td class="obus-user-deactivate-target-cell">
+                          <span class="obus-user-deactivate-target-cluster"><%= item.source || '-' %></span>
+                          <span class="obus-user-deactivate-target-url"><%= item.deleteEndpointUrl || '-' %></span>
+                        </td>
                         <td class="obus-live-status pending" data-obus-user-status-cell="1">Bekliyor</td>
                       </tr>
                     <% }) %>

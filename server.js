@@ -15977,6 +15977,7 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   const companyRowsResult = await loadObusUserDeactivateCompanyRows();
   const companyRows = Array.isArray(companyRowsResult?.rows) ? companyRowsResult.rows : [];
   const codeLookup = buildPartnerCodeLookupFromAllCompaniesRows(companyRows);
+  const clusterContextMap = buildObusUserDeactivateClusterContextMap(companyRows);
   const scanTargets = buildObusUserDeactivateScanTargets(companyRows);
 
   if (scanTargets.length === 0) {
@@ -15997,6 +15998,7 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
 
   const mergedRows = [];
   const errors = [];
+  let skippedMissingCodeCount = 0;
   results.forEach((result) => {
     if (result?.error) errors.push(String(result.error).trim());
     (result?.rows || []).forEach((row) => mergedRows.push(row));
@@ -16014,6 +16016,22 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
       String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
       String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
       "-";
+    if (!code || code === "-") {
+      skippedMissingCodeCount += 1;
+      return;
+    }
+    const contextKey = buildObusUserDeactivateClusterContextKey(source, code);
+    const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(source);
+    const deleteEndpointUrl = String(
+      clusterContextMap.get(contextKey)?.deleteEndpointUrl ||
+        normalizeTargetUrl(
+          buildMembershipDeleteUserUrl(
+            fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
+            source
+          )
+        ) ||
+        ""
+    ).trim();
     const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
     dedupedItems.set(key, {
       value: `${source}|||${partnerId}|||${id}|||${username}`,
@@ -16021,7 +16039,8 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
       id,
       "partner-id": partnerId,
       username,
-      code
+      code,
+      deleteEndpointUrl
     });
   });
 
@@ -16044,6 +16063,9 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
     errorParts.push(
       `${errors.length}/${scanTargets.length} firma alınamadı.${sample ? ` Örnek: ${sample}` : ""}`
     );
+  }
+  if (skippedMissingCodeCount > 0) {
+    errorParts.push(`${skippedMissingCodeCount} kayıt code bilgisi bulunamadığı için listelenmedi.`);
   }
   if (errorParts.length === 0 && items.length === 0) {
     errorParts.push("Eşleşen kullanıcı bulunamadı.");
