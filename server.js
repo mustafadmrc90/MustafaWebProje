@@ -15734,7 +15734,6 @@ function extractObusUsersWithoutPermissionsRows(
 ) {
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
   const collected = [];
-  const visited = new Set();
   const parseIsActiveValue = (value) => {
     if (value === true) return true;
     if (value === false) return false;
@@ -15846,32 +15845,60 @@ function extractObusUsersWithoutPermissionsRows(
       username: normalizedUsername
     });
   };
-
-  const walk = (node) => {
-    if (node === null || node === undefined) return;
+  const unwrapCandidateListItem = (node) => {
+    if (node === null || node === undefined) return [];
     if (typeof node === "string") {
       const trimmed = node.trim();
-      if (!trimmed) return;
+      if (!trimmed) return [];
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         const parsed = parseJsonSafe(trimmed);
-        if (parsed !== null) walk(parsed);
+        return unwrapCandidateListItem(parsed);
       }
-      return;
+      return [];
     }
-    if (typeof node !== "object") return;
-    if (visited.has(node)) return;
-    visited.add(node);
-
     if (Array.isArray(node)) {
-      node.forEach((item) => walk(item));
-      return;
+      return node.flatMap((item) => unwrapCandidateListItem(item));
     }
+    if (typeof node !== "object") return [];
 
-    pushCandidateRow(node);
-    Object.values(node).forEach((value) => walk(value));
+    const nestedLists = [];
+    if (Array.isArray(node.data)) nestedLists.push(node.data);
+    if (Array.isArray(node.items)) nestedLists.push(node.items);
+    if (Array.isArray(node.result)) nestedLists.push(node.result);
+    if (Array.isArray(node.users)) nestedLists.push(node.users);
+    if (Array.isArray(node.rows)) nestedLists.push(node.rows);
+    if (Array.isArray(node.list)) nestedLists.push(node.list);
+    if (nestedLists.length > 0) {
+      return nestedLists.flatMap((list) => unwrapCandidateListItem(list));
+    }
+    return [node];
   };
+  const candidateLists = [];
 
-  walk(payload);
+  if (Array.isArray(payload)) {
+    candidateLists.push(payload);
+  }
+
+  if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.data)) candidateLists.push(payload.data);
+    if (Array.isArray(payload.items)) candidateLists.push(payload.items);
+    if (Array.isArray(payload.result)) candidateLists.push(payload.result);
+    if (Array.isArray(payload.users)) candidateLists.push(payload.users);
+    if (Array.isArray(payload.rows)) candidateLists.push(payload.rows);
+    if (Array.isArray(payload.list)) candidateLists.push(payload.list);
+
+    if (payload.data && typeof payload.data === "object") {
+      if (Array.isArray(payload.data.items)) candidateLists.push(payload.data.items);
+      if (Array.isArray(payload.data.result)) candidateLists.push(payload.data.result);
+      if (Array.isArray(payload.data.users)) candidateLists.push(payload.data.users);
+      if (Array.isArray(payload.data.rows)) candidateLists.push(payload.data.rows);
+      if (Array.isArray(payload.data.list)) candidateLists.push(payload.data.list);
+    }
+  }
+
+  candidateLists
+    .flatMap((list) => unwrapCandidateListItem(list))
+    .forEach((row) => pushCandidateRow(row));
 
   const deduped = new Map();
   collected.forEach((item) => {
