@@ -16443,24 +16443,14 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
     };
   }
 
-  const results = await runWithConcurrency(
-    scanTargets,
-    Math.max(1, OBUS_USER_DEACTIVATE_SEARCH_CONCURRENCY),
-    async (target) =>
-      fetchObusUsersWithoutPermissionsForTarget({
-        target,
-        usernameFilter: normalizedUsername,
-        includeVerboseDebug: false,
-        sessionCache
-      })
-  );
-
-  const mergedRows = [];
+  const dedupedItems = new Map();
   const errors = [];
   const debugItems = [];
   const maxDebugItems = 60;
   let skippedMissingCodeCount = 0;
-  results.forEach((result) => {
+
+  const processResult = (result) => {
+    if (!result || typeof result !== "object") return;
     if (result?.error) errors.push(String(result.error).trim());
     if (result?.debugItem && typeof result.debugItem === "object") {
       const parser = result.debugItem?.parser && typeof result.debugItem.parser === "object" ? result.debugItem.parser : null;
@@ -16471,48 +16461,60 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
         debugItems.push(result.debugItem);
       }
     }
-    (result?.rows || []).forEach((row) => mergedRows.push(row));
-  });
+    (result?.rows || []).forEach((row) => {
+      const source = extractClusterLabel(String(row?.source || "").trim());
+      const id = String(row?.id || "").trim();
+      const partnerId = String(row?.["partner-id"] || row?.partnerId || "").trim();
+      const username = String(row?.username || "").trim();
+      if (!id || !partnerId || !username) return;
 
-  const dedupedItems = new Map();
-  mergedRows.forEach((row) => {
-    const source = extractClusterLabel(String(row?.source || "").trim());
-    const id = String(row?.id || "").trim();
-    const partnerId = String(row?.["partner-id"] || row?.partnerId || "").trim();
-    const username = String(row?.username || "").trim();
-    if (!id || !partnerId || !username) return;
-
-    const code =
-      String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
-      String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
-      "-";
-    if (!code || code === "-") {
-      skippedMissingCodeCount += 1;
-      return;
-    }
-    const contextKey = buildObusUserDeactivateClusterContextKey(source, code);
-    const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(source);
-    const deleteEndpointUrl = String(
-      clusterContextMap.get(contextKey)?.deleteEndpointUrl ||
-        normalizeTargetUrl(
-          buildMembershipDeleteUserUrl(
-            fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
-            source
-          )
-        ) ||
-        ""
-    ).trim();
-    const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
-    dedupedItems.set(key, {
-      value: `${source}|||${partnerId}|||${id}|||${username}`,
-      source,
-      id,
-      "partner-id": partnerId,
-      username,
-      code,
-      deleteEndpointUrl
+      const code =
+        String(codeLookup.byClusterAndPartnerId.get(`${source}|||${partnerId}`) || "").trim() ||
+        String(codeLookup.byPartnerId.get(partnerId) || "").trim() ||
+        "-";
+      if (!code || code === "-") {
+        skippedMissingCodeCount += 1;
+        return;
+      }
+      const contextKey = buildObusUserDeactivateClusterContextKey(source, code);
+      const fallbackPartnerSourceUrl = resolvePartnerFetchUrlByCluster(source);
+      const deleteEndpointUrl = String(
+        clusterContextMap.get(contextKey)?.deleteEndpointUrl ||
+          normalizeTargetUrl(
+            buildMembershipDeleteUserUrl(
+              fallbackPartnerSourceUrl || OBUS_USER_DEACTIVATE_DELETE_API_URL,
+              source
+            )
+          ) ||
+          ""
+      ).trim();
+      const key = `${source}|||${partnerId}|||${id}|||${username}`.toLocaleLowerCase("tr");
+      dedupedItems.set(key, {
+        value: `${source}|||${partnerId}|||${id}|||${username}`,
+        source,
+        id,
+        "partner-id": partnerId,
+        username,
+        code,
+        deleteEndpointUrl
+      });
     });
-  });
+  };
+
+  await runWithConcurrency(
+    scanTargets,
+    Math.max(1, OBUS_USER_DEACTIVATE_SEARCH_CONCURRENCY),
+    async (target) => {
+      const result = await fetchObusUsersWithoutPermissionsForTarget({
+        target,
+        usernameFilter: normalizedUsername,
+        includeVerboseDebug: false,
+        sessionCache
+      });
+      processResult(result);
+      return null;
+    }
+  );
 
   const items = Array.from(dedupedItems.values()).sort((a, b) => {
     const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
