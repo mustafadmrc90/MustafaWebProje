@@ -15931,6 +15931,13 @@ function extractObusUsersWithoutPermissionsRows(
     return null;
   };
   const parseStatusKeywordValue = (value) => {
+    if (value === true) return true;
+    if (value === false) return false;
+    if (Number.isFinite(Number(value))) {
+      const parsedNumber = Number(value);
+      if (parsedNumber === 1) return true;
+      if (parsedNumber === 0) return false;
+    }
     const normalized = String(value || "").trim().toLocaleLowerCase("tr");
     if (!normalized) return null;
     if (/^(active|aktif|enabled|enable)$/.test(normalized)) return true;
@@ -15971,20 +15978,26 @@ function extractObusUsersWithoutPermissionsRows(
   const inferRowIsActive = (row) => {
     const explicitPassiveRaw = readPartnerRawValueByAliases(row, passiveAliases);
     const explicitPassive = parsePassiveFlagValue(explicitPassiveRaw);
-    if (explicitPassive === true) return false;
-    if (explicitPassive === false) return true;
-
     const explicitActiveRaw = readPartnerRawValueByAliases(row, activeAliases);
     const explicitActive = parseActiveFlagValue(explicitActiveRaw);
-    if (explicitActive !== null) return explicitActive;
-
     const statusKeywordRaw = readPartnerRawValueByAliases(row, statusKeywordAliases);
     const statusKeyword = parseStatusKeywordValue(statusKeywordRaw);
-    if (statusKeyword !== null) return statusKeyword;
-
     const genericStatusRaw = readPartnerRawValueByAliases(row, ["status"]);
-    const genericStatus = parseStatusKeywordValue(genericStatusRaw);
-    if (genericStatus !== null) return genericStatus;
+    const genericStatus =
+      parseStatusKeywordValue(genericStatusRaw) ??
+      parseActiveFlagValue(genericStatusRaw);
+
+    // Negative signals always win so `isactive=false` can never slip through
+    // just because another field such as `inactive=false` is also present.
+    if (explicitActive === false) return false;
+    if (explicitPassive === true) return false;
+    if (statusKeyword === false) return false;
+    if (genericStatus === false) return false;
+
+    if (explicitActive === true) return true;
+    if (explicitPassive === false) return true;
+    if (statusKeyword === true) return true;
+    if (genericStatus === true) return true;
 
     return null;
   };
