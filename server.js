@@ -163,6 +163,8 @@ const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
 const OBUS_USER_DEACTIVATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_CONCURRENCY || String(OBUS_USER_CREATE_CONCURRENCY || 8), 10) ||
   Math.max(1, Number(OBUS_USER_CREATE_CONCURRENCY || 8));
+const OBUS_USER_DEACTIVATE_SEARCH_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SEARCH_CONCURRENCY || "2", 10) || 2;
 const OBUS_USER_DEACTIVATE_GROUP_CONCURRENCY =
   Number.parseInt(
     process.env.OBUS_USER_DEACTIVATE_GROUP_CONCURRENCY || String(OBUS_USER_DEACTIVATE_CONCURRENCY || 8),
@@ -16147,7 +16149,11 @@ function extractObusUsersWithoutPermissionsRows(
   };
 }
 
-async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter }) {
+async function fetchObusUsersWithoutPermissionsForTarget({
+  target,
+  usernameFilter,
+  includeVerboseDebug = false
+}) {
   const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
   const endpointUrl = normalizeTargetUrl(target?.endpointUrl || "");
   const partnerCode = String(target?.partnerCode || "").trim();
@@ -16200,7 +16206,9 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
     allowEmptyPartnerCode: false
   });
   debugItem.loginUrl = String(loginResult?.loginUrl || "").trim();
-  debugItem.loginServiceLogs = Array.isArray(loginResult?.serviceLogs) ? loginResult.serviceLogs : [];
+  if (includeVerboseDebug) {
+    debugItem.loginServiceLogs = Array.isArray(loginResult?.serviceLogs) ? loginResult.serviceLogs : [];
+  }
   if (!loginResult.ok) {
     debugItem.error = `${cluster}: ${loginResult.error || "UserLogin başarısız."} (${companyRef})`;
     return {
@@ -16279,8 +16287,10 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
       });
 
       if (!response.ok) {
-        requestTrace.error = truncateObusDebugText(apiError, 260);
-        debugItem.requestTraces.push(requestTrace);
+        if (includeVerboseDebug) {
+          requestTrace.error = truncateObusDebugText(apiError, 260);
+          debugItem.requestTraces.push(requestTrace);
+        }
         lastError = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
         continue;
       }
@@ -16290,12 +16300,16 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         typeof parsed === "object" &&
         ("status" in parsed || "success" in parsed || "status-code" in parsed);
       if (hasStatusField && !isSuccessStatusPayload(parsed)) {
-        requestTrace.error = truncateObusDebugText(apiError, 260);
-        debugItem.requestTraces.push(requestTrace);
+        if (includeVerboseDebug) {
+          requestTrace.error = truncateObusDebugText(apiError, 260);
+          debugItem.requestTraces.push(requestTrace);
+        }
         lastError = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
         continue;
       }
-      debugItem.requestTraces.push(requestTrace);
+      if (includeVerboseDebug) {
+        debugItem.requestTraces.push(requestTrace);
+      }
       const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
         usernameFilter,
         clusterLabel: cluster,
@@ -16310,16 +16324,18 @@ async function fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilte
         debugItem
       };
     } catch (err) {
-      debugItem.requestTraces.push(
-        buildObusServiceTraceEntry({
-          service: "GetUsersWithoutPermissions",
-          url: endpointUrl,
-          requestBody,
-          responseBody: "",
-          error: err?.message || "GetUsersWithoutPermissions isteği gönderilemedi.",
-          note: requestNote
-        })
-      );
+      if (includeVerboseDebug) {
+        debugItem.requestTraces.push(
+          buildObusServiceTraceEntry({
+            service: "GetUsersWithoutPermissions",
+            url: endpointUrl,
+            requestBody,
+            responseBody: "",
+            error: err?.message || "GetUsersWithoutPermissions isteği gönderilemedi.",
+            note: requestNote
+          })
+        );
+      }
       lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."} (${companyRef})`;
     } finally {
       clearTimeout(timeout);
@@ -16363,18 +16379,30 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
 
   const results = await runWithConcurrency(
     scanTargets,
-    Math.max(1, OBUS_USER_DEACTIVATE_CONCURRENCY),
-    async (target) => fetchObusUsersWithoutPermissionsForTarget({ target, usernameFilter: normalizedUsername })
+    Math.max(1, OBUS_USER_DEACTIVATE_SEARCH_CONCURRENCY),
+    async (target) =>
+      fetchObusUsersWithoutPermissionsForTarget({
+        target,
+        usernameFilter: normalizedUsername,
+        includeVerboseDebug: false
+      })
   );
 
   const mergedRows = [];
   const errors = [];
   const debugItems = [];
+  const maxDebugItems = 60;
   let skippedMissingCodeCount = 0;
   results.forEach((result) => {
     if (result?.error) errors.push(String(result.error).trim());
     if (result?.debugItem && typeof result.debugItem === "object") {
-      debugItems.push(result.debugItem);
+      const parser = result.debugItem?.parser && typeof result.debugItem.parser === "object" ? result.debugItem.parser : null;
+      const acceptedCount = Number(parser?.acceptedCount || 0);
+      const sampleCount = Array.isArray(parser?.samples) ? parser.samples.length : 0;
+      const hasInterestingDebug = Boolean(String(result.debugItem?.error || "").trim()) || acceptedCount > 0 || sampleCount > 0;
+      if (hasInterestingDebug && debugItems.length < maxDebugItems) {
+        debugItems.push(result.debugItem);
+      }
     }
     (result?.rows || []).forEach((row) => mergedRows.push(row));
   });
