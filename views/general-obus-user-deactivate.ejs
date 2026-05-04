@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <% if (report?.searchJob && report.searchJob.done === false && report.searchJob.refreshUrl) { %>
+      <meta http-equiv="refresh" content="3;url=<%= report.searchJob.refreshUrl %>" />
+    <% } %>
     <title>Bus Product</title>
     <link rel="icon" href="/public/favicon.png" />
     <link rel="stylesheet" href="/public/styles.css" />
@@ -58,7 +61,20 @@
         </form>
       </section>
 
-      <% if (report && report.requested) { %>
+      <% if (report?.searchJob && report.searchJob.done === false) { %>
+        <section class="table-card panel-card obus-user-deactivate-section">
+          <div class="table-head">
+            <h2>Arama Sürüyor</h2>
+          </div>
+          <p class="muted">Kullanıcılar clusterlarda taranıyor. Sayfa otomatik yenilenecek.</p>
+        </section>
+      <% } %>
+
+      <% if (report?.searchDebugNotice) { %>
+        <div class="inline-alert"><%= report.searchDebugNotice %></div>
+      <% } %>
+
+      <% if (report && report.requested && !(report.searchJob && report.searchJob.done === false)) { %>
         <section class="table-card panel-card obus-user-deactivate-results">
           <form class="obus-user-deactivate-form obus-user-deactivate-delete-form" method="post" action="/general/obus-user-deactivate">
             <input type="hidden" name="username" value="<%= filters?.username || '' %>" />

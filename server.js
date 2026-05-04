@@ -10175,6 +10175,21 @@ function finishObusLiveJob(job, errorMessage = null) {
   job.expiresAt = now + Math.max(60000, OBUS_LIVE_JOB_TTL_MS);
 }
 
+function setObusLiveJobSummary(job, summary = {}) {
+  if (!job || typeof job !== "object") return;
+  job.summary = summary && typeof summary === "object" ? summary : {};
+  job.updatedAt = Date.now();
+}
+
+function finalizeObusLiveJobSingleResult(job, ok = true) {
+  if (!job || typeof job !== "object") return;
+  job.totalCount = Math.max(1, Number(job.totalCount || 0));
+  job.processedCount = 1;
+  job.successCount = ok ? 1 : 0;
+  job.failureCount = ok ? 0 : 1;
+  job.updatedAt = Date.now();
+}
+
 function readObusLiveJob(jobId, ownerUserId) {
   cleanupObusLiveJobs();
   const job = obusLiveJobs.get(String(jobId || "").trim());
@@ -10199,6 +10214,7 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
     processedCount: Number.isFinite(Number(job?.processedCount)) ? Number(job.processedCount) : 0,
     successCount: Number.isFinite(Number(job?.successCount)) ? Number(job.successCount) : 0,
     failureCount: Number.isFinite(Number(job?.failureCount)) ? Number(job.failureCount) : 0,
+    summary: job?.summary && typeof job.summary === "object" ? job.summary : null,
     events,
     cursor: lastSeq
   };
@@ -15602,6 +15618,8 @@ function buildObusUserDeactivateReportModel() {
     clusterCount: 0,
     items: [],
     searchDebugItems: [],
+    searchDebugNotice: "",
+    searchJob: null,
     deleteRequested: false,
     deleteTotalCount: 0,
     deleteSuccessCount: 0,
@@ -15609,6 +15627,48 @@ function buildObusUserDeactivateReportModel() {
     deleteSuccessItems: [],
     deleteFailureItems: []
   };
+}
+
+function buildObusUserDeactivateSearchSummary(searchResult = {}) {
+  const items = Array.isArray(searchResult?.items) ? searchResult.items : [];
+  const rawDebugItems = Array.isArray(searchResult?.debugItems) ? searchResult.debugItems : [];
+  const filteredDebugItems = rawDebugItems.filter((item) => {
+    const parser = item?.parser && typeof item.parser === "object" ? item.parser : null;
+    const acceptedCount = Number(parser?.acceptedCount || 0);
+    const sampleCount = Array.isArray(parser?.samples) ? parser.samples.length : 0;
+    return Boolean(String(item?.error || "").trim()) || acceptedCount > 0 || sampleCount > 0;
+  });
+  const maxDebugItems = 80;
+  const searchDebugItems = filteredDebugItems.slice(0, maxDebugItems);
+  const hiddenDebugItemCount = Math.max(0, filteredDebugItems.length - searchDebugItems.length);
+
+  return {
+    items,
+    totalCount: items.length,
+    clusterCount: Number.isFinite(Number(searchResult?.clusterCount)) ? Number(searchResult.clusterCount) : 0,
+    searchDebugItems,
+    searchDebugNotice:
+      hiddenDebugItemCount > 0
+        ? `${hiddenDebugItemCount} debug kaydı performans için gizlendi.`
+        : "",
+    error: String(searchResult?.error || "").trim() || null
+  };
+}
+
+function applyObusUserDeactivateSearchSummaryToReport(report, searchSummary = {}) {
+  const targetReport =
+    report && typeof report === "object" ? report : buildObusUserDeactivateReportModel();
+  targetReport.items = Array.isArray(searchSummary?.items) ? searchSummary.items : [];
+  targetReport.totalCount = Number.isFinite(Number(searchSummary?.totalCount))
+    ? Number(searchSummary.totalCount)
+    : targetReport.items.length;
+  targetReport.clusterCount = Number.isFinite(Number(searchSummary?.clusterCount))
+    ? Number(searchSummary.clusterCount)
+    : 0;
+  targetReport.searchDebugItems = Array.isArray(searchSummary?.searchDebugItems) ? searchSummary.searchDebugItems : [];
+  targetReport.searchDebugNotice = String(searchSummary?.searchDebugNotice || "").trim();
+  targetReport.error = String(searchSummary?.error || "").trim() || null;
+  return targetReport;
 }
 
 function buildPartnerCodeLookupFromAllCompaniesRows(rows) {
@@ -15694,15 +15754,34 @@ function buildObusUserDeactivateScanTargets(cacheRows) {
 }
 
 async function loadObusUserDeactivateCompanyRows() {
+  const cacheResult = await fetchAllCompaniesRowsFromCache();
+  const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+  const cacheError = String(cacheResult?.error || "").trim();
+
+  if (cacheRows.length > 0) {
+    return {
+      rows: cacheRows,
+      clusterCount: Number.isFinite(Number(cacheResult?.clusterCount)) ? Number(cacheResult.clusterCount) : 0,
+      error: cacheError || null
+    };
+  }
+
   const liveResult = await fetchAllPartnerRows({ includeObusMerkezSubeId: false });
   const liveRows = Array.isArray(liveResult?.rows) ? liveResult.rows : [];
   const sourceError = String(liveResult?.error || "").trim();
 
   if (liveRows.length === 0) {
+    const errorParts = [];
+    if (cacheError) {
+      errorParts.push(`SQL önbelleği uyarısı: ${cacheError}`);
+    }
+    if (sourceError) {
+      errorParts.push(sourceError);
+    }
     return {
       rows: [],
       clusterCount: Number.isFinite(Number(liveResult?.clusterCount)) ? Number(liveResult.clusterCount) : 0,
-      error: sourceError || "Aktif firma listesi alınamadı."
+      error: errorParts.length > 0 ? errorParts.join(" ") : "Aktif firma listesi alınamadı."
     };
   }
 
@@ -15714,6 +15793,9 @@ async function loadObusUserDeactivateCompanyRows() {
   });
   const mergedRows = Array.isArray(mergedReport?.rows) ? mergedReport.rows : liveRows;
   const errorParts = [];
+  if (cacheError) {
+    errorParts.push(`SQL önbelleği uyarısı: ${cacheError}`);
+  }
 
   if (sourceError) {
     errorParts.push(`Canlı firma listesi uyarısı: ${sourceError}`);
@@ -15727,6 +15809,43 @@ async function loadObusUserDeactivateCompanyRows() {
     clusterCount: Number.isFinite(Number(liveResult?.clusterCount)) ? Number(liveResult.clusterCount) : 0,
     error: errorParts.length > 0 ? errorParts.join(" ") : null
   };
+}
+
+function buildObusUserDeactivateSearchJobViewModel(job, username = "") {
+  if (!job || typeof job !== "object") return null;
+  const normalizedUsername = String(username || "").trim();
+  const encodedUsername = encodeURIComponent(normalizedUsername);
+  const encodedJobId = encodeURIComponent(String(job.id || "").trim());
+  return {
+    id: String(job.id || "").trim(),
+    done: Boolean(job.done),
+    createdAt: Number(job.createdAt || 0),
+    totalCount: Number.isFinite(Number(job.totalCount)) ? Number(job.totalCount) : 0,
+    processedCount: Number.isFinite(Number(job.processedCount)) ? Number(job.processedCount) : 0,
+    successCount: Number.isFinite(Number(job.successCount)) ? Number(job.successCount) : 0,
+    failureCount: Number.isFinite(Number(job.failureCount)) ? Number(job.failureCount) : 0,
+    refreshUrl: `/general/obus-user-deactivate?run=1&username=${encodedUsername}&jobId=${encodedJobId}`
+  };
+}
+
+async function runObusUserDeactivateSearchJob(job, usernameFilter) {
+  const normalizedUsername = String(usernameFilter || "").trim();
+  setObusLiveJobSummary(job, {
+    username: normalizedUsername
+  });
+
+  try {
+    const searchResult = await searchObusUsersWithoutPermissions(normalizedUsername);
+    setObusLiveJobSummary(job, {
+      username: normalizedUsername,
+      searchResult: buildObusUserDeactivateSearchSummary(searchResult)
+    });
+    finalizeObusLiveJobSingleResult(job, true);
+    finishObusLiveJob(job, null);
+  } catch (err) {
+    finalizeObusLiveJobSingleResult(job, false);
+    finishObusLiveJob(job, `Kullanıcı arama işlemi tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
+  }
 }
 
 function extractObusUsersWithoutPermissionsRows(
@@ -19489,91 +19608,143 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
     username: String(req.query.username || "").trim()
   };
   const shouldRun = String(req.query.run || "").trim() === "1";
-  const report = buildObusUserDeactivateReportModel();
+  const searchJobId = String(req.query.jobId || "").trim();
+  const currentUserId = Number(req.session?.user?.id || 0);
 
-  if (shouldRun) {
-    report.requested = true;
-    if (!filters.username) {
-      report.error = "Kullanıcı adı zorunludur.";
-    } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
-      report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
-    } else {
-      const searchResult = await searchObusUsersWithoutPermissions(filters.username);
-      report.items = Array.isArray(searchResult?.items) ? searchResult.items : [];
-      report.totalCount = report.items.length;
-      report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
-        ? Number(searchResult.clusterCount)
-        : 0;
-      report.searchDebugItems = Array.isArray(searchResult?.debugItems) ? searchResult.debugItems : [];
-      report.error = searchResult?.error || null;
+  try {
+    const report = buildObusUserDeactivateReportModel();
+
+    if (shouldRun) {
+      report.requested = true;
+      if (!filters.username) {
+        report.error = "Kullanıcı adı zorunludur.";
+      } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+        report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
+      } else if (!searchJobId) {
+        const searchJob = createObusLiveJob({
+          type: "obus-user-deactivate-search",
+          ownerUserId: currentUserId,
+          totalCount: 1
+        });
+        setImmediate(() => {
+          runObusUserDeactivateSearchJob(searchJob, filters.username);
+        });
+        return res.redirect(
+          `/general/obus-user-deactivate?run=1&username=${encodeURIComponent(filters.username)}&jobId=${encodeURIComponent(
+            searchJob.id
+          )}`
+        );
+      } else {
+        const searchJob = readObusLiveJob(searchJobId, currentUserId);
+        report.searchJob = searchJob
+          ? buildObusUserDeactivateSearchJobViewModel(searchJob, filters.username)
+          : {
+              id: searchJobId,
+              done: true,
+              refreshUrl: ""
+            };
+
+        if (!searchJob) {
+          report.error = "Kullanıcı arama işi bulunamadı veya süresi doldu.";
+        } else if (searchJob.done) {
+          if (searchJob.error) {
+            report.error = searchJob.error;
+          } else {
+            const searchSummary = searchJob.summary?.searchResult;
+            if (searchSummary && typeof searchSummary === "object") {
+              applyObusUserDeactivateSearchSummaryToReport(report, searchSummary);
+            } else {
+              report.error = "Kullanıcı arama sonucu bulunamadı.";
+            }
+          }
+        }
+      }
     }
-  }
 
-  res.render("general-obus-user-deactivate", {
-    user: req.session.user,
-    active: "obus-user-deactivate",
-    filters,
-    report
-  });
+    return res.render("general-obus-user-deactivate", {
+      user: req.session.user,
+      active: "obus-user-deactivate",
+      filters,
+      report
+    });
+  } catch (err) {
+    console.error("Obus user deactivate GET error:", err);
+    const report = buildObusUserDeactivateReportModel();
+    report.requested = shouldRun;
+    report.error = `Ekran yüklenemedi: ${err?.message || "Bilinmeyen hata"}`;
+    return res.status(500).render("general-obus-user-deactivate", {
+      user: req.session.user,
+      active: "obus-user-deactivate",
+      filters,
+      report
+    });
+  }
 });
 
 app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   const filters = {
     username: String(req.body.username || "").trim()
   };
-  const report = buildObusUserDeactivateReportModel();
-  report.requested = true;
+  try {
+    const report = buildObusUserDeactivateReportModel();
+    report.requested = true;
 
-  if (!filters.username) {
-    report.error = "Kullanıcı adı zorunludur.";
-  } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
-    report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
-  } else {
-    const searchResult = await searchObusUsersWithoutPermissions(filters.username);
-    report.items = Array.isArray(searchResult?.items) ? searchResult.items : [];
-    report.totalCount = report.items.length;
-    report.clusterCount = Number.isFinite(Number(searchResult?.clusterCount))
-      ? Number(searchResult.clusterCount)
-      : 0;
-    report.searchDebugItems = Array.isArray(searchResult?.debugItems) ? searchResult.debugItems : [];
-    report.error = searchResult?.error || null;
-
-    const selectedValues = parseSelectedObusUserDeactivateValues(req.body.selectedUsers);
-    const selectedValueSet = new Set(selectedValues);
-    const selectedItems = report.items.filter((item) => selectedValueSet.has(String(item?.value || "").trim()));
-
-    report.deleteRequested = true;
-    report.deleteTotalCount = selectedItems.length;
-
-    if (selectedItems.length === 0) {
-      report.error = report.error
-        ? `${report.error} | En az bir kullanıcı seçmelisiniz.`
-        : "En az bir kullanıcı seçmelisiniz.";
+    if (!filters.username) {
+      report.error = "Kullanıcı adı zorunludur.";
+    } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+      report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
     } else {
-      const cacheResult = await fetchAllCompaniesRowsFromCache();
-      const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
-      const deleteResult = await deactivateObusUsersBySelection({
-        selectedItems,
-        cacheRows
-      });
+      const searchResult = await searchObusUsersWithoutPermissions(filters.username);
+      applyObusUserDeactivateSearchSummaryToReport(report, buildObusUserDeactivateSearchSummary(searchResult));
 
-      report.deleteSuccessItems = Array.isArray(deleteResult?.successItems) ? deleteResult.successItems : [];
-      report.deleteFailureItems = Array.isArray(deleteResult?.failureItems) ? deleteResult.failureItems : [];
-      report.deleteSuccessCount = report.deleteSuccessItems.length;
-      report.deleteFailureCount = report.deleteFailureItems.length;
+      const selectedValues = parseSelectedObusUserDeactivateValues(req.body.selectedUsers);
+      const selectedValueSet = new Set(selectedValues);
+      const selectedItems = report.items.filter((item) => selectedValueSet.has(String(item?.value || "").trim()));
 
-      if (report.deleteSuccessCount === 0 && report.deleteFailureCount > 0 && !report.error) {
-        report.error = "Seçili kullanıcılar pasife alınamadı.";
+      report.deleteRequested = true;
+      report.deleteTotalCount = selectedItems.length;
+
+      if (selectedItems.length === 0) {
+        report.error = report.error
+          ? `${report.error} | En az bir kullanıcı seçmelisiniz.`
+          : "En az bir kullanıcı seçmelisiniz.";
+      } else {
+        const cacheResult = await fetchAllCompaniesRowsFromCache();
+        const cacheRows = Array.isArray(cacheResult?.rows) ? cacheResult.rows : [];
+        const deleteResult = await deactivateObusUsersBySelection({
+          selectedItems,
+          cacheRows
+        });
+
+        report.deleteSuccessItems = Array.isArray(deleteResult?.successItems) ? deleteResult.successItems : [];
+        report.deleteFailureItems = Array.isArray(deleteResult?.failureItems) ? deleteResult.failureItems : [];
+        report.deleteSuccessCount = report.deleteSuccessItems.length;
+        report.deleteFailureCount = report.deleteFailureItems.length;
+
+        if (report.deleteSuccessCount === 0 && report.deleteFailureCount > 0 && !report.error) {
+          report.error = "Seçili kullanıcılar pasife alınamadı.";
+        }
       }
     }
-  }
 
-  res.render("general-obus-user-deactivate", {
-    user: req.session.user,
-    active: "obus-user-deactivate",
-    filters,
-    report
-  });
+    return res.render("general-obus-user-deactivate", {
+      user: req.session.user,
+      active: "obus-user-deactivate",
+      filters,
+      report
+    });
+  } catch (err) {
+    console.error("Obus user deactivate POST error:", err);
+    const report = buildObusUserDeactivateReportModel();
+    report.requested = true;
+    report.error = `Pasife alma ekranı işlenemedi: ${err?.message || "Bilinmeyen hata"}`;
+    return res.status(500).render("general-obus-user-deactivate", {
+      user: req.session.user,
+      active: "obus-user-deactivate",
+      filters,
+      report
+    });
+  }
 });
 
 app.post(
