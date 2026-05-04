@@ -78,6 +78,7 @@
         <section class="table-card panel-card obus-user-deactivate-results">
           <form class="obus-user-deactivate-form obus-user-deactivate-delete-form" method="post" action="/general/obus-user-deactivate">
             <input type="hidden" name="username" value="<%= filters?.username || '' %>" />
+            <input type="hidden" name="searchJobId" value="<%= report?.searchJob?.id || '' %>" />
 
               <div class="table-head">
                 <h2>Kullanıcı Listesi</h2>
@@ -211,6 +212,18 @@ skippedUsernameMismatchCount: <%= item.parser.skippedUsernameMismatchCount || 0 
                           <div class="obus-user-deactivate-debug-meta-card">
                             <span class="obus-user-deactivate-debug-label">Parser Samples</span>
                             <pre class="obus-user-deactivate-debug-pre"><%= JSON.stringify(item.parser.samples || [], null, 2) %></pre>
+                          </div>
+                        </div>
+                      <% } %>
+
+                      <% if (item.requestPreview || item.responsePreview || item.responseStatus !== null) { %>
+                        <div class="obus-user-deactivate-debug-meta-grid">
+                          <div class="obus-user-deactivate-debug-meta-card">
+                            <span class="obus-user-deactivate-debug-label">GetUsersWithoutPermissions Preview</span>
+                            <pre class="obus-user-deactivate-debug-pre">status: <%= item.responseStatus ?? '-' %>
+note: <%= item.responseNote || '-' %>
+request: <%= item.requestPreview || '-' %>
+response: <%= item.responsePreview || '-' %></pre>
                           </div>
                         </div>
                       <% } %>

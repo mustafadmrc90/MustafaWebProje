@@ -14686,7 +14686,8 @@ async function fetchAuthorizedLinesLoginInfo({
   timeoutMs = 90000,
   authorization = PARTNERS_API_AUTH,
   allowEmptyPartnerCode = false,
-  loginBranchId = ""
+  loginBranchId = "",
+  sessionCache = null
 }) {
   const loginBaseUrls = buildUserLoginBaseUrlsWithOverrides({
     companyUrl,
@@ -14758,7 +14759,15 @@ async function fetchAuthorizedLinesLoginInfo({
       }
       lastLoginUrl = loginUrl;
 
-      const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
+      const sessionCacheKey = `${String(sessionUrl || "").trim()}|||${String(authorization || "").trim()}`;
+      let sessionResult =
+        sessionCache instanceof Map && sessionCache.has(sessionCacheKey) ? sessionCache.get(sessionCacheKey) : null;
+      if (!sessionResult) {
+        sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
+        if (sessionCache instanceof Map) {
+          sessionCache.set(sessionCacheKey, sessionResult);
+        }
+      }
       if (sessionResult?.debug) {
         allServiceLogs.push(sessionResult.debug);
       }
@@ -16198,7 +16207,8 @@ function extractObusUsersWithoutPermissionsRows(
 async function fetchObusUsersWithoutPermissionsForTarget({
   target,
   usernameFilter,
-  includeVerboseDebug = false
+  includeVerboseDebug = false,
+  sessionCache = null
 }) {
   const cluster = extractClusterLabel(target?.cluster || target?.endpointUrl || "");
   const endpointUrl = normalizeTargetUrl(target?.endpointUrl || "");
@@ -16215,6 +16225,10 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     loginUrl: "",
     loginServiceLogs: [],
     requestTraces: [],
+    requestPreview: "",
+    responsePreview: "",
+    responseStatus: null,
+    responseNote: "",
     parser: null,
     error: ""
   };
@@ -16249,7 +16263,8 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     loginBranchId,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
     authorization: OBUS_USER_CREATE_API_AUTH,
-    allowEmptyPartnerCode: false
+    allowEmptyPartnerCode: false,
+    sessionCache
   });
   debugItem.loginUrl = String(loginResult?.loginUrl || "").trim();
   if (includeVerboseDebug) {
@@ -16317,6 +16332,10 @@ async function fetchObusUsersWithoutPermissionsForTarget({
       });
       const raw = await response.text();
       const parsed = parseJsonSafe(raw);
+      debugItem.requestPreview = stringifyObusUserDeactivateTraceValue(requestBody, 3200);
+      debugItem.responsePreview = stringifyObusUserDeactivateTraceValue(parsed ?? raw, 4200);
+      debugItem.responseStatus = response.status;
+      debugItem.responseNote = requestNote;
       const apiError =
         (parsed &&
           typeof parsed === "object" &&
@@ -16412,6 +16431,7 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
   const codeLookup = buildPartnerCodeLookupFromAllCompaniesRows(companyRows);
   const clusterContextMap = buildObusUserDeactivateClusterContextMap(companyRows);
   const scanTargets = buildObusUserDeactivateScanTargets(companyRows);
+  const sessionCache = new Map();
 
   if (scanTargets.length === 0) {
     return {
@@ -16430,7 +16450,8 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
       fetchObusUsersWithoutPermissionsForTarget({
         target,
         usernameFilter: normalizedUsername,
-        includeVerboseDebug: false
+        includeVerboseDebug: false,
+        sessionCache
       })
   );
 
@@ -19759,6 +19780,8 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
   const filters = {
     username: String(req.body.username || "").trim()
   };
+  const searchJobId = String(req.body.searchJobId || "").trim();
+  const currentUserId = Number(req.session?.user?.id || 0);
   try {
     const report = buildObusUserDeactivateReportModel();
     report.requested = true;
@@ -19768,8 +19791,19 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
     } else if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
       report.error = "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur.";
     } else {
-      const searchResult = await searchObusUsersWithoutPermissions(filters.username);
-      applyObusUserDeactivateSearchSummaryToReport(report, buildObusUserDeactivateSearchSummary(searchResult));
+      let appliedFromJob = false;
+      if (searchJobId) {
+        const searchJob = readObusLiveJob(searchJobId, currentUserId);
+        const searchSummary = searchJob?.summary?.searchResult;
+        if (searchSummary && typeof searchSummary === "object") {
+          applyObusUserDeactivateSearchSummaryToReport(report, searchSummary);
+          appliedFromJob = true;
+        }
+      }
+      if (!appliedFromJob) {
+        const searchResult = await searchObusUsersWithoutPermissions(filters.username);
+        applyObusUserDeactivateSearchSummaryToReport(report, buildObusUserDeactivateSearchSummary(searchResult));
+      }
 
       const selectedValues = parseSelectedObusUserDeactivateValues(req.body.selectedUsers);
       const selectedValueSet = new Set(selectedValues);
