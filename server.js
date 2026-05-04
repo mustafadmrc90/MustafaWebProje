@@ -16025,6 +16025,8 @@ function extractObusUsersWithoutPermissionsRows(
     const partnerId = String(partnerIdRaw || "").trim() || String(fallbackPartnerId || "").trim();
     const passiveRaw = readPartnerRawValueByAliases(row, passiveAliases);
     const activeRaw = readPartnerRawValueByAliases(row, activeAliases);
+    const strictIsActiveRaw = readPartnerRawValueByAliases(row, strictIsActiveAliases);
+    const strictIsActive = parseActiveFlagValue(strictIsActiveRaw);
     const statusKeywordRaw = readPartnerRawValueByAliases(row, statusKeywordAliases);
     const statusRaw = readPartnerRawValueByAliases(row, ["status"]);
     const username =
@@ -16047,6 +16049,25 @@ function extractObusUsersWithoutPermissionsRows(
         decision: "missing-fields",
         passiveRaw,
         activeRaw,
+        statusKeywordRaw,
+        statusRaw
+      });
+      return;
+    }
+    if (strictIsActive !== true) {
+      if (strictIsActive === false) {
+        debug.skippedInactiveCount += 1;
+      } else {
+        debug.skippedUnknownStateCount += 1;
+      }
+      buildDebugSample({
+        normalizedId,
+        normalizedPartnerId,
+        normalizedUsername,
+        isActive: strictIsActive,
+        decision: strictIsActive === false ? "strict-is-active-false" : "strict-is-active-missing",
+        passiveRaw,
+        activeRaw: strictIsActiveRaw,
         statusKeywordRaw,
         statusRaw
       });
