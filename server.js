@@ -15881,11 +15881,19 @@ function extractObusUsersWithoutPermissionsRows(
     "is_active",
     "isactive",
     "isActive",
+    "IsActive",
     "active",
     "is-enabled",
     "is_enabled",
     "isenabled",
     "enabled"
+  ];
+  const strictIsActiveAliases = [
+    "is-active",
+    "is_active",
+    "isactive",
+    "isActive",
+    "IsActive"
   ];
   const statusKeywordAliases = [
     "user-status",
@@ -15976,6 +15984,10 @@ function extractObusUsersWithoutPermissionsRows(
     });
   };
   const inferRowIsActive = (row) => {
+    const strictIsActiveRaw = readPartnerRawValueByAliases(row, strictIsActiveAliases);
+    const strictIsActive = parseActiveFlagValue(strictIsActiveRaw);
+    if (strictIsActive !== null) return strictIsActive;
+
     const explicitPassiveRaw = readPartnerRawValueByAliases(row, passiveAliases);
     const explicitPassive = parsePassiveFlagValue(explicitPassiveRaw);
     const explicitActiveRaw = readPartnerRawValueByAliases(row, activeAliases);
