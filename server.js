@@ -3184,7 +3184,7 @@ function buildMembershipGetUsersWithoutPermissionsUrl(baseUrl, clusterLabel = ""
   const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
   try {
     const parsed = new URL(String(clusteredUrl || ""));
-    parsed.pathname = "/api/membership/GetUsersWithoutPermissions";
+    parsed.pathname = "/api/Membership/GetUsersWithoutPermissions";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
@@ -16387,127 +16387,118 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     };
   }
 
-  const basePayload = {
-    date: formatObusRequestDate(new Date()),
-    "device-session": {
-      "session-id": sessionId,
-      "device-id": deviceId
-    },
-    language: "tr-TR",
+  const requestBody = buildObusUserDeactivateListRequestBody({
+    sessionId,
+    deviceId,
     token
-  };
-  const requestCandidates = [
-    { ...basePayload, data: { username: String(usernameFilter || "").trim() } },
-    { ...basePayload, data: String(usernameFilter || "").trim() },
-    { ...basePayload, data: null }
-  ];
+  });
   const requestTimeoutMs = toBoundedInt(OBUS_USER_DEACTIVATE_TIMEOUT_MS, 90000, 5000, 180000);
-
-  let lastError = `${cluster}: GetUsersWithoutPermissions çağrısı başarısız. (${companyRef})`;
-  for (const [requestIndex, requestBody] of requestCandidates.entries()) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-    const requestNote =
-      requestIndex === 0
-        ? "attempt-1:data.username"
-        : requestIndex === 1
-          ? "attempt-2:data=string"
-          : "attempt-3:data=null";
-    try {
-      const response = await fetch(endpointUrl, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: OBUS_USER_CREATE_API_AUTH
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
-      });
-      const raw = await response.text();
-      const parsed = parseJsonSafe(raw);
-      debugItem.requestPreview = stringifyObusUserDeactivateTraceValue(requestBody, 3200);
-      debugItem.responsePreview = stringifyObusUserDeactivateTraceValue(parsed ?? raw, 4200);
-      debugItem.responseStatus = response.status;
-      debugItem.responseNote = requestNote;
-      const apiError =
-        (parsed &&
-          typeof parsed === "object" &&
-          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
-        response.statusText ||
-        "Bilinmeyen hata";
-      const requestTrace = buildObusServiceTraceEntry({
-        service: "GetUsersWithoutPermissions",
-        url: endpointUrl,
-        status: response.status,
-        requestBody,
-        responseBody: parsed ?? raw,
-        note: requestNote
-      });
-
-      if (!response.ok) {
-        if (includeVerboseDebug) {
-          requestTrace.error = truncateObusDebugText(apiError, 260);
-          debugItem.requestTraces.push(requestTrace);
-        }
-        lastError = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
-        continue;
-      }
-
-      const hasStatusField =
-        parsed &&
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(endpointUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_USER_CREATE_API_AUTH
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const requestNote = "body-without-data";
+    debugItem.requestPreview = stringifyObusUserDeactivateTraceValue(requestBody, 3200);
+    debugItem.responsePreview = stringifyObusUserDeactivateTraceValue(parsed ?? raw, 4200);
+    debugItem.responseStatus = response.status;
+    debugItem.responseNote = requestNote;
+    const apiError =
+      (parsed &&
         typeof parsed === "object" &&
-        ("status" in parsed || "success" in parsed || "status-code" in parsed);
-      if (hasStatusField && !isSuccessStatusPayload(parsed)) {
-        if (includeVerboseDebug) {
-          requestTrace.error = truncateObusDebugText(apiError, 260);
-          debugItem.requestTraces.push(requestTrace);
-        }
-        lastError = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
-        continue;
-      }
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
+    const requestTrace = buildObusServiceTraceEntry({
+      service: "GetUsersWithoutPermissions",
+      url: endpointUrl,
+      status: response.status,
+      requestBody,
+      responseBody: parsed ?? raw,
+      note: requestNote
+    });
+
+    if (!response.ok) {
       if (includeVerboseDebug) {
+        requestTrace.error = truncateObusDebugText(apiError, 260);
         debugItem.requestTraces.push(requestTrace);
       }
-      const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
-        usernameFilter,
-        clusterLabel: cluster,
-        fallbackPartnerId: partnerId
-      });
-      debugItem.parser = extractedResult?.debug || null;
-
+      debugItem.error = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
       return {
         cluster,
-        rows: Array.isArray(extractedResult?.rows) ? extractedResult.rows : [],
-        error: null,
+        rows: [],
+        error: debugItem.error,
         debugItem
       };
-    } catch (err) {
-      if (includeVerboseDebug) {
-        debugItem.requestTraces.push(
-          buildObusServiceTraceEntry({
-            service: "GetUsersWithoutPermissions",
-            url: endpointUrl,
-            requestBody,
-            responseBody: "",
-            error: err?.message || "GetUsersWithoutPermissions isteği gönderilemedi.",
-            note: requestNote
-          })
-        );
-      }
-      lastError = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."} (${companyRef})`;
-    } finally {
-      clearTimeout(timeout);
     }
-  }
 
-  debugItem.error = lastError;
-  return {
-    cluster,
-    rows: [],
-    error: lastError,
-    debugItem
-  };
+    const hasStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+    if (hasStatusField && !isSuccessStatusPayload(parsed)) {
+      if (includeVerboseDebug) {
+        requestTrace.error = truncateObusDebugText(apiError, 260);
+        debugItem.requestTraces.push(requestTrace);
+      }
+      debugItem.error = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
+      return {
+        cluster,
+        rows: [],
+        error: debugItem.error,
+        debugItem
+      };
+    }
+
+    if (includeVerboseDebug) {
+      debugItem.requestTraces.push(requestTrace);
+    }
+    const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
+      usernameFilter,
+      clusterLabel: cluster,
+      fallbackPartnerId: partnerId
+    });
+    debugItem.parser = extractedResult?.debug || null;
+
+    return {
+      cluster,
+      rows: Array.isArray(extractedResult?.rows) ? extractedResult.rows : [],
+      error: null,
+      debugItem
+    };
+  } catch (err) {
+    if (includeVerboseDebug) {
+      debugItem.requestTraces.push(
+        buildObusServiceTraceEntry({
+          service: "GetUsersWithoutPermissions",
+          url: endpointUrl,
+          requestBody,
+          responseBody: "",
+          error: err?.message || "GetUsersWithoutPermissions isteği gönderilemedi.",
+          note: "body-without-data"
+        })
+      );
+    }
+    debugItem.error = `${cluster}: ${err?.message || "GetUsersWithoutPermissions isteği gönderilemedi."} (${companyRef})`;
+    return {
+      cluster,
+      rows: [],
+      error: debugItem.error,
+      debugItem
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function searchObusUsersWithoutPermissions(usernameFilter) {
@@ -16634,7 +16625,7 @@ async function searchObusUsersWithoutPermissions(usernameFilter) {
     errorParts.push(`${skippedMissingCodeCount} kayıt code bilgisi bulunamadığı için listelenmedi.`);
   }
   if (errorParts.length === 0 && items.length === 0) {
-    errorParts.push("Eşleşen kullanıcı bulunamadı.");
+    errorParts.push("Eşleşen aktif kullanıcı bulunamadı.");
   }
 
   const clusterCount = new Set(
@@ -17296,6 +17287,22 @@ function formatObusRequestDate(date = new Date()) {
   const min = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+}
+
+function formatObusIsoRequestDate(date = new Date()) {
+  return formatObusRequestDate(date).replace(" ", "T");
+}
+
+function buildObusUserDeactivateListRequestBody({ sessionId = "", deviceId = "", token = "" } = {}) {
+  return {
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    date: formatObusIsoRequestDate(new Date()),
+    language: "tr-TR",
+    token: String(token || "").trim()
+  };
 }
 
 function buildObusRuleDefineCompanyOptions(partnerItems = []) {
