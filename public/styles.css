@@ -2134,6 +2134,15 @@ button.ghost {
   white-space: nowrap;
 }
 
+.partners-raw-table td.all-companies-obus-debug-cell {
+  white-space: normal;
+  min-width: 360px;
+  max-width: 720px;
+  vertical-align: top;
+  line-height: 1.4;
+  font-size: 13px;
+}
+
 .all-companies-loading-form {
   display: inline-flex;
   align-items: center;

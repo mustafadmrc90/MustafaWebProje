@@ -7614,7 +7614,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       .map((value) => String(value || "").trim())
       .filter(Boolean)
       .join(" || fallback=");
-    const debugText = `LOG: ${compactErrorText(
+    const debugText = `Detay: ${compactErrorText(
       debugSource || item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata",
       760
     )}`;
@@ -8175,6 +8175,53 @@ function buildAllCompaniesObusUpdateRowLabel(row) {
   return `${clusterLabel || "cluster?"} / ${code || "code?"} / ${partnerId || "id?"}`;
 }
 
+function buildAllCompaniesObusUpdateMissingBranchDetails(rows) {
+  const itemsByKey = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const branchId = String(row?.ObusMerkezSubeID || "").trim();
+    const detailText = String(row?.ObusMerkezSubeIDDebug || "").trim();
+    if (branchId || !detailText) return;
+    const key = buildAllCompaniesCacheRowKey(row);
+    if (!key || itemsByKey.has(key)) return;
+    itemsByKey.set(key, {
+      key,
+      detailText
+    });
+  });
+  return Array.from(itemsByKey.values());
+}
+
+function attachAllCompaniesObusUpdateMissingBranchDetails(rows, detailItems) {
+  if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(detailItems) || detailItems.length === 0) {
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  const detailMap = new Map();
+  detailItems.forEach((item) => {
+    const key = String(item?.key || "").trim();
+    const detailText = String(item?.detailText || "").trim();
+    if (!key || !detailText || detailMap.has(key)) return;
+    detailMap.set(key, detailText);
+  });
+
+  if (detailMap.size === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const branchId = String(row?.ObusMerkezSubeID || "").trim();
+    if (branchId) return row;
+
+    const detailText = String(detailMap.get(buildAllCompaniesCacheRowKey(row)) || "").trim();
+    if (!detailText) return row;
+
+    return {
+      ...row,
+      ObusMerkezSubeIDDebug: detailText
+    };
+  });
+}
+
 function buildAllCompaniesObusUpdateJobSummary(job) {
   const summary = job && typeof job?.summary === "object" ? job.summary : {};
   const scanned = Number.isFinite(Number(summary?.scanned))
@@ -8186,12 +8233,21 @@ function buildAllCompaniesObusUpdateJobSummary(job) {
   const remaining = Number.isFinite(Number(summary?.remaining))
     ? Math.max(0, Number(summary.remaining))
     : Math.max(0, Number(job?.failureCount || 0));
+  const missingBranchDetails = Array.isArray(summary?.missingBranchDetails)
+    ? summary.missingBranchDetails
+        .map((item) => ({
+          key: String(item?.key || "").trim(),
+          detailText: String(item?.detailText || "").trim()
+        }))
+        .filter((item) => item.key && item.detailText)
+    : [];
   return {
     scanned,
     filled,
     remaining,
     partial: summary?.partial === true || remaining > 0,
-    notice: String(summary?.notice || "").trim()
+    notice: String(summary?.notice || "").trim(),
+    missingBranchDetails
   };
 }
 
@@ -8256,6 +8312,7 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
         ? await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedTargetRows)
         : { rows: normalizedTargetRows, notice: null };
 
+    const missingBranchDetails = buildAllCompaniesObusUpdateMissingBranchDetails(enriched.rows || normalizedTargetRows);
     const finalRows = normalizeAllCompaniesCacheRows(enriched.rows || normalizedTargetRows);
     const saveResult = await upsertAllCompaniesCacheRows(finalRows);
     if (saveResult.error) {
@@ -8275,7 +8332,8 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
       filled: filledCount,
       remaining: remainingCount,
       partial: Boolean(enriched.notice) || remainingCount > 0,
-      notice: String(enriched.notice || "").trim()
+      notice: String(enriched.notice || "").trim(),
+      missingBranchDetails
     };
     finishObusLiveJob(job, null);
   } catch (err) {
@@ -21288,6 +21346,15 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
       rows: Array.isArray(previewSnapshot?.rows) ? previewSnapshot.rows : [],
       error: null,
       clusterCount: Number(previewSnapshot?.clusterCount || 0)
+    };
+  }
+  if (obusJob?.done && !obusJob?.error && Array.isArray(obusJobSummary?.missingBranchDetails)) {
+    result = {
+      ...result,
+      rows: attachAllCompaniesObusUpdateMissingBranchDetails(
+        Array.isArray(result?.rows) ? result.rows : [],
+        obusJobSummary.missingBranchDetails
+      )
     };
   }
 

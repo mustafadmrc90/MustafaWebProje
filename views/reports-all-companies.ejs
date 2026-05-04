@@ -176,7 +176,8 @@
                       <% const debugValue = isObusDebugColumn ? String(row.ObusMerkezSubeIDDebug || "").trim() : ""; %>
                       <% const normalizedValue = rawValue === undefined || rawValue === null ? "" : String(rawValue).trim(); %>
                       <% const displayValue = normalizedValue || debugValue || "-"; %>
-                      <td title="<%= displayValue %>"><%= displayValue %></td>
+                      <% const cellClass = isObusDebugColumn && !normalizedValue && debugValue ? "all-companies-obus-debug-cell" : ""; %>
+                      <td class="<%= cellClass %>" title="<%= displayValue %>"><%= displayValue %></td>
                     <% }) %>
                   </tr>
                 <% }) %>
