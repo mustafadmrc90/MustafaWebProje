@@ -108,6 +108,9 @@
                       <th>partner-id</th>
                       <th>user-id</th>
                       <th>username</th>
+                      <th>response username</th>
+                      <th>response is-active</th>
+                      <th>active state</th>
                       <th>Durum</th>
                     </tr>
                   </thead>
@@ -130,6 +133,9 @@
                         <td><%= item["partner-id"] %></td>
                         <td><%= item.id %></td>
                         <td><%= item.username %></td>
+                        <td><%= item.responseUsername || '-' %></td>
+                        <td><%= item.responseIsActive || '-' %></td>
+                        <td><%= item.responseActiveState || '-' %></td>
                         <td class="obus-live-status pending" data-obus-user-status-cell="1">Bekliyor</td>
                       </tr>
                     <% }) %>
