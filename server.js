@@ -15812,6 +15812,7 @@ function parseAllCompaniesPartnerStatus(row) {
 function buildObusUserDeactivateScanTargets(cacheRows) {
   const rows = Array.isArray(cacheRows) ? cacheRows : [];
   const byKey = new Map();
+  const temporarilyExcludedPartnerCodes = new Set(["kapadokyavip"]);
 
   rows.forEach((row) => {
     const status = parseAllCompaniesPartnerStatus(row);
@@ -15819,6 +15820,7 @@ function buildObusUserDeactivateScanTargets(cacheRows) {
 
     const cluster = extractClusterLabel(String(row?.source || "").trim());
     const partnerCode = String(row?.code || "").trim();
+    if (temporarilyExcludedPartnerCodes.has(partnerCode.toLocaleLowerCase("tr"))) return;
     const partnerId = String(row?.id || "").trim();
     const obusMerkezSubeId = String(
       row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id ?? row?.branchId ?? ""
