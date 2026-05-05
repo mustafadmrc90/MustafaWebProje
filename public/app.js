@@ -5361,17 +5361,109 @@
       searchForm.dataset.deactivateSearchBound = "1";
       const submitBtn = searchForm.querySelector("button[type='submit']");
       const loadingMessage = searchForm.querySelector(".obus-user-deactivate-search-loading-message");
+      const usernameInput = searchForm.querySelector("input[name='username']");
+      const liveMessage = searchForm.querySelector("[data-obus-user-deactivate-search-live-message='1']");
+      const startApiPath =
+        String(searchForm.getAttribute("data-search-start-api-path") || "").trim() ||
+        "/api/obus-user-deactivate/search/start";
+      const initialJobId = String(searchForm.getAttribute("data-search-job-id") || "").trim();
+      const initialJobDone = String(searchForm.getAttribute("data-search-job-done") || "").trim() === "1";
+      const wait = (ms) =>
+        new Promise((resolve) => {
+          window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+        });
+      const setSearchLiveMessage = (text = "", kind = "") => {
+        if (!liveMessage) return;
+        liveMessage.textContent = String(text || "").trim();
+        liveMessage.hidden = !liveMessage.textContent;
+        liveMessage.className = `obus-live-message ${kind === "success" ? "inline-success" : "inline-alert"}`.trim();
+      };
+      const buildSearchResultUrl = (username, jobId, fallbackUrl = "") => {
+        const fallbackText = String(fallbackUrl || "").trim();
+        if (fallbackText) return fallbackText;
+        const url = new URL(searchForm.action || "/general/obus-user-deactivate", window.location.origin);
+        url.searchParams.set("username", String(username || "").trim());
+        url.searchParams.set("jobId", String(jobId || "").trim());
+        return `${url.pathname}${url.search}`;
+      };
+      const pollSearchJob = async (jobId, username, fallbackUrl = "") => {
+        let cursor = 0;
+        while (true) {
+          if (!document.body.contains(searchForm)) {
+            throw new Error("Sayfa değiştiği için arama takibi durduruldu.");
+          }
+          const response = await fetch(`/api/obus-live/${encodeURIComponent(jobId)}?cursor=${cursor}`, {
+            headers: { Accept: "application/json" }
+          });
+          const data = await parseJsonResponse(response);
+          if (!response.ok || !data?.ok) {
+            throw new Error(getApiErrorMessage(response, data, "Kullanıcı arama durumu okunamadı"));
+          }
+          cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
+          if (data.done) {
+            window.location.assign(buildSearchResultUrl(username, jobId, fallbackUrl));
+            return;
+          }
+          await wait(450);
+        }
+      };
       if (submitBtn) {
-        const defaultLabel = String(submitBtn.textContent || "").trim() || "Kullanıcıları Listele";
+        const defaultLabel = String(submitBtn.textContent || "").trim() || "Ara";
         searchForm.classList.remove("is-loading");
         submitBtn.disabled = false;
         submitBtn.textContent = defaultLabel;
         if (loadingMessage) loadingMessage.hidden = true;
-        searchForm.addEventListener("submit", () => {
-          submitBtn.disabled = true;
-          submitBtn.textContent = "Listeleniyor...";
-          searchForm.classList.add("is-loading");
-          if (loadingMessage) loadingMessage.hidden = false;
+        const setSearchBusyState = (busy, loadingLabel = "Aranıyor...") => {
+          submitBtn.disabled = busy;
+          submitBtn.textContent = busy ? loadingLabel : defaultLabel;
+          searchForm.classList.toggle("is-loading", busy);
+          if (loadingMessage) loadingMessage.hidden = !busy;
+        };
+        const startExistingPollingIfNeeded = async () => {
+          if (!initialJobId || initialJobDone) return;
+          const username = String(usernameInput?.value || "").trim();
+          setSearchBusyState(true, "Aranıyor...");
+          setSearchLiveMessage("Arama sürüyor. Sonuçlar hazır olunca sayfa bir kez açılacak.", "");
+          try {
+            await pollSearchJob(initialJobId, username);
+          } catch (err) {
+            setSearchLiveMessage(err?.message || "Kullanıcı arama durumu okunamadı.", "error");
+            setSearchBusyState(false);
+          }
+        };
+        startExistingPollingIfNeeded();
+        searchForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (searchForm.dataset.searchSubmitting === "1") return;
+          const username = String(usernameInput?.value || "").trim();
+          if (!username) {
+            setSearchLiveMessage("Kullanıcı adı zorunludur.", "error");
+            return;
+          }
+          searchForm.dataset.searchSubmitting = "1";
+          setSearchLiveMessage("Arama başlatılıyor...", "");
+          setSearchBusyState(true, "Aranıyor...");
+          try {
+            const response = await fetch(startApiPath, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json"
+              },
+              body: JSON.stringify({ username })
+            });
+            const data = await parseJsonResponse(response);
+            if (!response.ok || !data?.ok) {
+              throw new Error(getApiErrorMessage(response, data, "Kullanıcı arama işlemi başlatılamadı"));
+            }
+            setSearchLiveMessage("Arama sürüyor. Sonuçlar hazır olunca sayfa bir kez açılacak.", "");
+            await pollSearchJob(String(data.jobId || "").trim(), username, String(data.resultUrl || "").trim());
+          } catch (err) {
+            setSearchLiveMessage(err?.message || "Kullanıcı arama işlemi başlatılamadı.", "error");
+            setSearchBusyState(false);
+          } finally {
+            searchForm.dataset.searchSubmitting = "0";
+          }
         });
       }
     }

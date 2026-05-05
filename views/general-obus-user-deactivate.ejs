@@ -3,9 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <% if (report?.searchJob && report.searchJob.done === false && report.searchJob.refreshUrl) { %>
-      <meta http-equiv="refresh" content="3;url=<%= report.searchJob.refreshUrl %>" />
-    <% } %>
     <title>Bus Product</title>
     <link rel="icon" href="/public/favicon.png" />
     <link rel="stylesheet" href="/public/styles.css" />
@@ -41,12 +38,24 @@
           <h2>Kullanıcı Adı</h2>
         </div>
 
-        <form class="obus-user-deactivate-form obus-user-deactivate-search-form" method="get" action="/general/obus-user-deactivate">
+        <form
+          class="obus-user-deactivate-form obus-user-deactivate-search-form"
+          method="get"
+          action="/general/obus-user-deactivate"
+          data-search-start-api-path="/api/obus-user-deactivate/search/start"
+          data-search-job-id="<%= report?.searchJob?.id || '' %>"
+          data-search-job-done="<%= report?.searchJob?.done === false ? '0' : '1' %>"
+        >
           <input type="hidden" name="run" value="1" />
 
           <div class="obus-user-deactivate-grid">
             <label class="obus-user-create-field">
-              <span>Kullanıcı Adı</span>
+              <span>
+                Kullanıcı Adı
+                <% if (report && report.requested && !(report.searchJob && report.searchJob.done === false) && (!report.items || report.items.length === 0) && !report.error && (filters?.username || '')) { %>
+                  - <%= filters.username %> adından aktif kullanıcı bulunamadı.
+                <% } %>
+              </span>
               <input type="text" name="username" value="<%= filters?.username || '' %>" required />
             </label>
           </div>
@@ -58,6 +67,7 @@
           <div class="obus-user-deactivate-loading-message obus-user-deactivate-search-loading-message" hidden>
             Kullanıcı tüm firmalarda aranıyor...
           </div>
+          <div class="inline-alert obus-live-message" data-obus-user-deactivate-search-live-message="1" hidden></div>
         </form>
       </section>
 
@@ -66,7 +76,7 @@
           <div class="table-head">
             <h2>Arama Sürüyor</h2>
           </div>
-          <p class="muted">Username birebir eşleşmesi ve `is-active=true` filtresi için tüm firmalar taranıyor. Sayfa otomatik yenilenecek.</p>
+          <p class="muted">Username birebir eşleşmesi ve `is-active=true` filtresi için tüm firmalar taranıyor. Sonuç hazır olduğunda sayfa bir kez açılacak.</p>
         </section>
       <% } %>
 
@@ -92,10 +102,6 @@
                 <% } %>
               </div>
             </div>
-
-            <% if ((!report.items || report.items.length === 0) && !report.error) { %>
-              <p class="muted">Birebir eşleşen aktif kullanıcı bulunamadı.</p>
-            <% } %>
 
             <% if (report.items && report.items.length > 0) { %>
               <div class="table-scroll obus-user-deactivate-table-scroll">

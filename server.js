@@ -19903,8 +19903,8 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
   const filters = {
     username: String(req.query.username || "").trim()
   };
-  const shouldRun = String(req.query.run || "").trim() === "1";
   const searchJobId = String(req.query.jobId || "").trim();
+  const shouldRun = String(req.query.run || "").trim() === "1" || Boolean(searchJobId);
   const currentUserId = Number(req.session?.user?.id || 0);
 
   try {
@@ -19976,6 +19976,49 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
     });
   }
 });
+
+app.post(
+  "/api/obus-user-deactivate/search/start",
+  requireAuth,
+  requireMenuAccess("obus-user-deactivate"),
+  async (req, res) => {
+    try {
+      const username = String(req.body?.username || "").trim();
+      const currentUserId = Number(req.session?.user?.id || 0);
+      if (!username) {
+        return res.status(400).json({ ok: false, error: "Kullanıcı adı zorunludur." });
+      }
+      if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "OBUS_USER_CREATE_LOGIN_USERNAME ve OBUS_USER_CREATE_LOGIN_PASSWORD zorunludur." });
+      }
+
+      const searchJob = createObusLiveJob({
+        type: "obus-user-deactivate-search",
+        ownerUserId: currentUserId,
+        totalCount: 1
+      });
+      setImmediate(() => {
+        runObusUserDeactivateSearchJob(searchJob, username);
+      });
+
+      return res.json({
+        ok: true,
+        jobId: searchJob.id,
+        username,
+        resultUrl: `/general/obus-user-deactivate?username=${encodeURIComponent(username)}&jobId=${encodeURIComponent(
+          searchJob.id
+        )}`
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: `Kullanıcı arama işlemi başlatılamadı: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
 
 app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   const filters = {
