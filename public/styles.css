@@ -244,6 +244,109 @@ body {
   margin-top: auto;
 }
 
+.screen-log-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.screen-log-toggle {
+  width: 100%;
+  color: #e6edf7;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.screen-log-drawer {
+  background: rgba(9, 14, 22, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  max-height: 52vh;
+  overflow: hidden;
+}
+
+.screen-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #f4f7fb;
+}
+
+.screen-log-head .ghost {
+  color: #e6edf7;
+  border-color: rgba(255, 255, 255, 0.18);
+  padding: 8px 10px;
+}
+
+.screen-log-state {
+  font-size: 12px;
+  color: rgba(230, 237, 247, 0.72);
+}
+
+.screen-log-list {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.screen-log-item,
+.screen-log-empty {
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #eff4fb;
+}
+
+.screen-log-item-warning {
+  border: 1px solid rgba(244, 180, 0, 0.28);
+}
+
+.screen-log-item-error {
+  border: 1px solid rgba(255, 107, 107, 0.32);
+}
+
+.screen-log-item-head,
+.screen-log-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.screen-log-item-head {
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(230, 237, 247, 0.76);
+}
+
+.screen-log-item-level {
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.screen-log-item-message {
+  display: block;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.screen-log-item-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(230, 237, 247, 0.72);
+}
+
+.screen-log-item-detail {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 11px;
+  color: rgba(230, 237, 247, 0.84);
+}
+
 .sidebar-logout .ghost {
   color: #e6edf7;
   border-color: rgba(255, 255, 255, 0.2);
@@ -321,6 +424,17 @@ body.sidebar-collapsed .sidebar-logout .ghost::before {
   content: "OUT";
   font-size: 9px;
   font-weight: 700;
+}
+
+body.sidebar-collapsed .screen-log-head strong,
+body.sidebar-collapsed .screen-log-state,
+body.sidebar-collapsed .screen-log-list,
+body.sidebar-collapsed .screen-log-head .ghost {
+  display: none;
+}
+
+body.sidebar-collapsed .screen-log-drawer {
+  padding: 8px;
 }
 
 .no-menu-home .content {
@@ -5551,7 +5665,7 @@ button.ghost {
 }
 
 .permissions-bulk-row {
-  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.8fr) minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.8fr) minmax(180px, 1fr) auto auto;
 }
 
 .permissions-section-row {

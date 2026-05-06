@@ -49,6 +49,7 @@
               <span>Üst Menü</span>
               <span>Yol</span>
               <span>Görüntüleme</span>
+              <span>Logları Gör</span>
             </div>
             <% menuSections.forEach((section) => { %>
               <div class="row permissions-bulk-row permissions-section-row">
@@ -71,6 +72,7 @@
                     <span class="slider"></span>
                   </label>
                 </span>
+                <span class="muted">-</span>
               </div>
 
               <% section.items.forEach((item) => { %>
@@ -90,6 +92,19 @@
                         data-item-checkbox="1"
                         data-parent-section="<%= section.key %>"
                         <%= item.canView ? "checked" : "" %>
+                        <%= isTargetAdmin ? "disabled" : "" %>
+                      />
+                      <span class="slider"></span>
+                    </label>
+                  </span>
+                  <span>
+                    <label class="switch">
+                      <input
+                        type="checkbox"
+                        name="menuLogKeys"
+                        value="<%= item.key %>"
+                        <%= item.canViewLogs ? "checked" : "" %>
+                        <%= !item.canView ? "disabled" : "" %>
                         <%= isTargetAdmin ? "disabled" : "" %>
                       />
                       <span class="slider"></span>

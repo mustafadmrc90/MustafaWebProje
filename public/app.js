@@ -6259,6 +6259,20 @@
 
     const touchedInput = form.querySelector("input[name='sectionTouchedJson']");
     const touchedSections = new Set();
+    const syncLogCheckboxState = (itemCheckbox) => {
+      if (!(itemCheckbox instanceof HTMLInputElement)) return;
+      const row = itemCheckbox.closest(".permission-check-row");
+      const logCheckbox = row?.querySelector("input[name='menuLogKeys']");
+      if (!(logCheckbox instanceof HTMLInputElement)) return;
+      if (itemCheckbox.disabled) {
+        logCheckbox.disabled = true;
+        return;
+      }
+      logCheckbox.disabled = !itemCheckbox.checked;
+      if (!itemCheckbox.checked) {
+        logCheckbox.checked = false;
+      }
+    };
     const syncTouchedInput = () => {
       if (!touchedInput) return;
       touchedInput.value = JSON.stringify(Array.from(touchedSections));
@@ -6276,20 +6290,132 @@
           .forEach((checkbox) => {
             if (checkbox.disabled) return;
             checkbox.checked = toggle.checked;
+            syncLogCheckboxState(checkbox);
           });
       });
     });
 
     const itemCheckboxes = Array.from(form.querySelectorAll("[data-item-checkbox='1']"));
     itemCheckboxes.forEach((checkbox) => {
+      syncLogCheckboxState(checkbox);
       checkbox.addEventListener("change", () => {
-        if (!checkbox.checked) return;
         const sectionKey = String(checkbox.getAttribute("data-parent-section") || "").trim();
+        syncLogCheckboxState(checkbox);
         if (!sectionKey) return;
         const sectionToggle = form.querySelector(`[data-section-toggle="${sectionKey}"]`);
         if (!sectionToggle || sectionToggle.disabled) return;
-        sectionToggle.checked = true;
+        if (checkbox.checked) {
+          sectionToggle.checked = true;
+          return;
+        }
+        const sectionItems = Array.from(
+          form.querySelectorAll(`[data-parent-section="${sectionKey}"] [data-item-checkbox="1"]`)
+        );
+        sectionToggle.checked = sectionItems.some((item) => item.checked);
       });
+    });
+  };
+
+  const initScreenLogPanel = () => {
+    const panel = document.querySelector("[data-screen-log-panel='1']");
+    if (!panel) return;
+    if (panel.dataset.screenLogBound === "1") return;
+    panel.dataset.screenLogBound = "1";
+
+    const toggleBtn = panel.querySelector("[data-screen-log-toggle='1']");
+    const refreshBtn = panel.querySelector("[data-screen-log-refresh='1']");
+    const drawer = panel.querySelector("[data-screen-log-drawer='1']");
+    const stateEl = panel.querySelector("[data-screen-log-state='1']");
+    const listEl = panel.querySelector("[data-screen-log-list='1']");
+    const apiPath = String(panel.getAttribute("data-screen-log-api-path") || "").trim();
+
+    if (!toggleBtn || !drawer || !listEl || !apiPath) return;
+
+    const escapeHtml = (value) =>
+      String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const setOpen = (open) => {
+      drawer.hidden = !open;
+      toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+
+    const setState = (text = "", kind = "") => {
+      if (!stateEl) return;
+      stateEl.textContent = String(text || "").trim();
+      stateEl.className = `screen-log-state ${kind === "error" ? "inline-alert" : "muted"}`.trim();
+    };
+
+    const renderItems = (items) => {
+      const rows = Array.isArray(items) ? items : [];
+      if (rows.length === 0) {
+        listEl.innerHTML = '<div class="screen-log-empty">Henüz ekran logu yok.</div>';
+        return;
+      }
+
+      listEl.innerHTML = rows
+        .map((item) => {
+          const level = escapeHtml(String(item?.level || "info").trim() || "info");
+          const createdAt = escapeHtml(String(item?.createdAt || "").trim());
+          const message = escapeHtml(String(item?.message || "").trim());
+          const method = escapeHtml(String(item?.requestMethod || "").trim());
+          const path = escapeHtml(String(item?.requestPath || "").trim());
+          const createdByName = escapeHtml(String(item?.createdByName || "-").trim() || "-");
+          const detailText = escapeHtml(String(item?.detailText || "").trim());
+          return `
+            <article class="screen-log-item screen-log-item-${level}">
+              <div class="screen-log-item-head">
+                <span class="screen-log-item-level">${level.toUpperCase()}</span>
+                <time datetime="${createdAt}">${createdAt || "-"}</time>
+              </div>
+              <strong class="screen-log-item-message">${message || "-"}</strong>
+              <div class="screen-log-item-meta">
+                <span>${method || "-"}</span>
+                <span>${path || "-"}</span>
+                <span>${createdByName}</span>
+              </div>
+              ${detailText ? `<pre class="screen-log-item-detail">${detailText}</pre>` : ""}
+            </article>
+          `;
+        })
+        .join("");
+    };
+
+    const refreshLogs = async () => {
+      if (panel.dataset.screenLogLoading === "1") return;
+      panel.dataset.screenLogLoading = "1";
+      setState("Loglar yükleniyor...");
+      try {
+        const response = await fetch(apiPath, {
+          headers: { Accept: "application/json" }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Ekran logları okunamadı"));
+        }
+        renderItems(data.items || []);
+        setState("Son 20 kayıt gösteriliyor.");
+      } catch (err) {
+        setState(err?.message || "Ekran logları okunamadı.", "error");
+      } finally {
+        panel.dataset.screenLogLoading = "0";
+      }
+    };
+
+    toggleBtn.addEventListener("click", () => {
+      const nextOpen = drawer.hidden;
+      setOpen(nextOpen);
+      if (nextOpen) {
+        void refreshLogs();
+      }
+    });
+
+    refreshBtn?.addEventListener("click", () => {
+      void refreshLogs();
     });
   };
 
@@ -6310,6 +6436,7 @@
     initAllCompaniesObusJobMonitor();
     initMentiHelper();
     initPermissionsBulkForm();
+    initScreenLogPanel();
 
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;

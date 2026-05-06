@@ -354,10 +354,10 @@ const SIDEBAR_MENU_REGISTRY = [
     key: "station-passenger-info",
     type: "item",
     label: "Durak Yolcu Bilgisi",
-    parentKey: "general",
-    route: "/general/station-passenger-info",
+    parentKey: "obus",
+    route: "/obus/station-passenger-info",
     routeKey: "station-passenger-info",
-    sortOrder: 18,
+    sortOrder: 27,
     iconKey: "station-passenger-info"
   },
   {
@@ -471,16 +471,6 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "folder"
   },
   {
-    key: "journey-passengers",
-    type: "item",
-    label: "Sefer Yolcuları",
-    parentKey: "obus",
-    route: "/obus/journey-passengers",
-    routeKey: "journey-passengers",
-    sortOrder: 27,
-    iconKey: "journey-passengers"
-  },
-  {
     key: "management",
     type: "section",
     label: "Yönetim",
@@ -520,6 +510,11 @@ const SIDEBAR_MENU_REGISTRY = [
     sortOrder: 33,
     iconKey: "menti"
   }
+];
+
+const SCREEN_ACTION_LOG_SKIP_PATTERNS = [
+  /^\/api\/obus-live\/[^/]+/i,
+  /^\/api\/screen-logs\/[^/]+/i
 ];
 const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "admin").trim();
 const OBUS_JOB_FIXED_PASSWORD = String(
@@ -886,6 +881,7 @@ async function initDb() {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       menu_key TEXT NOT NULL REFERENCES sidebar_menu_items(key) ON DELETE CASCADE,
       can_view BOOLEAN NOT NULL DEFAULT true,
+      can_view_logs BOOLEAN NOT NULL DEFAULT false,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id, menu_key)
     )
@@ -902,7 +898,45 @@ async function initDb() {
 
   await pool.query(`
     ALTER TABLE user_sidebar_permissions
+      ADD COLUMN IF NOT EXISTS can_view_logs BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS screen_action_logs (
+      id SERIAL PRIMARY KEY,
+      menu_key TEXT NOT NULL,
+      action_key TEXT NOT NULL,
+      request_method TEXT NOT NULL,
+      request_path TEXT NOT NULL,
+      status_code INTEGER,
+      level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL,
+      detail_text TEXT,
+      meta_json TEXT,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE screen_action_logs
+      ADD COLUMN IF NOT EXISTS menu_key TEXT,
+      ADD COLUMN IF NOT EXISTS action_key TEXT,
+      ADD COLUMN IF NOT EXISTS request_method TEXT,
+      ADD COLUMN IF NOT EXISTS request_path TEXT,
+      ADD COLUMN IF NOT EXISTS status_code INTEGER,
+      ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT 'info',
+      ADD COLUMN IF NOT EXISTS message TEXT,
+      ADD COLUMN IF NOT EXISTS detail_text TEXT,
+      ADD COLUMN IF NOT EXISTS meta_json TEXT,
+      ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_screen_action_logs_menu_key_created_at
+    ON screen_action_logs (menu_key, created_at DESC)
   `);
 
   await pool.query(`
@@ -1201,6 +1235,8 @@ function normalizeSidebarRows(rows) {
       const iconKey = iconKeyRaw ? String(iconKeyRaw).trim() : "folder";
       const canViewRaw = row.can_view ?? row.canView ?? false;
       const canView = toSidebarBool(canViewRaw, false);
+      const canViewLogsRaw = row.can_view_logs ?? row.canViewLogs ?? false;
+      const canViewLogs = toSidebarBool(canViewLogsRaw, false);
 
       return {
         key,
@@ -1211,7 +1247,8 @@ function normalizeSidebarRows(rows) {
         routeKey,
         sortOrder,
         iconKey,
-        canView
+        canView,
+        canViewLogs
       };
     })
     .filter((row) => row.key && row.label)
@@ -1279,7 +1316,8 @@ function buildSidebarFallbackModel() {
     route_key: item.routeKey,
     sort_order: item.sortOrder,
     icon_key: item.iconKey,
-    can_view: true
+    can_view: true,
+    can_view_logs: true
   }));
   return buildSidebarModelFromRows(rows);
 }
@@ -1307,7 +1345,8 @@ function ensureCriticalSidebarRows(rows) {
         route_key: registryItem.routeKey || null,
         sort_order: Number.isFinite(Number(registryItem.sortOrder)) ? Number(registryItem.sortOrder) : 0,
         icon_key: registryItem.iconKey || "folder",
-        can_view: forceCanView ? true : registryItem.type === "section"
+        can_view: forceCanView ? true : registryItem.type === "section",
+        can_view_logs: false
       };
       normalizedRows.push(injected);
       rowByKey.set(key, injected);
@@ -1426,16 +1465,17 @@ async function syncSidebarMenusAndPermissions() {
     }
 
     await client.query(`
-      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
+      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view, can_view_logs)
       SELECT
         u.id,
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key = 'obus-user-deactivate' THEN true
-          WHEN m.key = 'obus-rule-define' THEN true
-          WHEN m.key = 'journey-search' THEN true
-          WHEN m.key = 'journey-update' THEN true
+          WHEN m.key IN ('obus-user-deactivate', 'obus-rule-define', 'journey-search', 'journey-update') THEN true
+          WHEN lower(u.username) = 'admin' THEN true
+          ELSE false
+        END,
+        CASE
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1464,16 +1504,17 @@ async function ensureSidebarPermissionsForUser(userId) {
   if (!Number.isInteger(userIdNum)) return;
   await pool.query(
     `
-      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view)
+      INSERT INTO user_sidebar_permissions (user_id, menu_key, can_view, can_view_logs)
       SELECT
         u.id,
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key = 'obus-user-deactivate' THEN true
-          WHEN m.key = 'obus-rule-define' THEN true
-          WHEN m.key = 'journey-search' THEN true
-          WHEN m.key = 'journey-update' THEN true
+          WHEN m.key IN ('obus-user-deactivate', 'obus-rule-define', 'journey-search', 'journey-update') THEN true
+          WHEN lower(u.username) = 'admin' THEN true
+          ELSE false
+        END,
+        CASE
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END
@@ -1515,7 +1556,8 @@ async function loadSidebarForUser(userId, options = {}) {
         m.route_key,
         m.sort_order,
         m.icon_key,
-        COALESCE(usp.can_view, false) AS can_view
+        COALESCE(usp.can_view, false) AS can_view,
+        COALESCE(usp.can_view_logs, false) AS can_view_logs
       FROM sidebar_menu_items m
       LEFT JOIN user_sidebar_permissions usp
         ON usp.menu_key = m.key
@@ -1595,7 +1637,8 @@ function buildPermissionSections(rows) {
       routeKey: item.routeKey || item.key,
       iconKey: item.iconKey || "folder",
       sortOrder: item.sortOrder,
-      canView: item.canView
+      canView: item.canView,
+      canViewLogs: item.canViewLogs
     });
   });
 
@@ -1627,7 +1670,8 @@ async function loadSidebarPermissionSectionsForUser(userId) {
         m.route_key,
         m.sort_order,
         m.icon_key,
-        COALESCE(usp.can_view, false) AS can_view
+        COALESCE(usp.can_view, false) AS can_view,
+        COALESCE(usp.can_view_logs, false) AS can_view_logs
       FROM sidebar_menu_items m
       LEFT JOIN user_sidebar_permissions usp
         ON usp.menu_key = m.key
@@ -1640,8 +1684,266 @@ async function loadSidebarPermissionSectionsForUser(userId) {
   return buildPermissionSections(ensureCriticalSidebarRows(result.rows));
 }
 
+function truncateScreenLogText(value, maxLength = 800) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const limit = Number.isFinite(Number(maxLength)) ? Math.max(16, Number(maxLength)) : 800;
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
+function sanitizeScreenLogMeta(value, depth = 0) {
+  if (depth > 4) return "[depth-limit]";
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return truncateScreenLogText(value, 240);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => sanitizeScreenLogMeta(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .slice(0, 25)
+      .reduce((acc, [key, entryValue]) => {
+        acc[key] = sanitizeScreenLogMeta(entryValue, depth + 1);
+        return acc;
+      }, {});
+  }
+  return truncateScreenLogText(String(value), 240);
+}
+
+function stringifyScreenLogMeta(value) {
+  if (!value || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(sanitizeScreenLogMeta(value));
+  } catch (err) {
+    return "";
+  }
+}
+
+function getScreenActionRegistryItem(menuKey) {
+  const normalizedMenuKey = String(menuKey || "").trim();
+  if (!normalizedMenuKey) return null;
+  return (
+    SIDEBAR_MENU_REGISTRY.find((item) => item.type === "item" && String(item.key || "").trim() === normalizedMenuKey) ||
+    null
+  );
+}
+
+function shouldSkipScreenActionLog(req) {
+  const pathname = String(req.path || req.originalUrl || "").trim();
+  if (!pathname) return true;
+  return SCREEN_ACTION_LOG_SKIP_PATTERNS.some((pattern) => pattern.test(pathname));
+}
+
+function extractScreenActionRequestMeta(req) {
+  const queryEntries = Object.entries(req.query || {});
+  const hasQuery = queryEntries.some(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const hasBody =
+    req.body &&
+    typeof req.body === "object" &&
+    Object.keys(req.body).some((key) => req.body[key] !== undefined && req.body[key] !== null && String(req.body[key]).trim() !== "");
+
+  return {
+    query: hasQuery ? req.query : undefined,
+    body: hasBody ? req.body : undefined
+  };
+}
+
+function determineScreenActionLogLevel(statusCode) {
+  const code = Number(statusCode);
+  if (code >= 500) return "error";
+  if (code >= 400) return "warning";
+  return "info";
+}
+
+function buildScreenActionLogMessage(req, capturedPayload) {
+  const payload = capturedPayload && typeof capturedPayload === "object" ? capturedPayload : null;
+  const explicitMessage = String(
+    payload?.message || payload?.error || payload?.notice || payload?.details || ""
+  ).trim();
+  if (explicitMessage) {
+    return truncateScreenLogText(explicitMessage, 180);
+  }
+
+  const pathname = String(req.path || req.originalUrl || "").trim() || "/";
+  if (req.method === "GET") {
+    return `Ekran açıldı: ${pathname}`;
+  }
+  return `${String(req.method || "GET").toUpperCase()} ${pathname}`;
+}
+
+function buildScreenActionLogDetailText(req, capturedPayload) {
+  const detailParts = [];
+  const payload = capturedPayload && typeof capturedPayload === "object" ? capturedPayload : null;
+  const payloadDetail = String(payload?.details || payload?.errorDetail || payload?.detail || "").trim();
+  if (payloadDetail) {
+    detailParts.push(payloadDetail);
+  }
+
+  const requestMeta = extractScreenActionRequestMeta(req);
+  if (requestMeta.query) {
+    detailParts.push(`Query: ${truncateScreenLogText(JSON.stringify(sanitizeScreenLogMeta(requestMeta.query)), 320)}`);
+  }
+  if (requestMeta.body) {
+    detailParts.push(`Body: ${truncateScreenLogText(JSON.stringify(sanitizeScreenLogMeta(requestMeta.body)), 320)}`);
+  }
+
+  return truncateScreenLogText(detailParts.join("\n"), 1200);
+}
+
+async function insertScreenActionLogEntry({
+  menuKey,
+  actionKey,
+  requestMethod,
+  requestPath,
+  statusCode,
+  level,
+  message,
+  detailText,
+  metaJson,
+  userId
+}) {
+  const normalizedMenuKey = String(menuKey || "").trim();
+  const normalizedActionKey = String(actionKey || "").trim() || "screen-action";
+  const normalizedMethod = String(requestMethod || "GET").trim().toUpperCase();
+  const normalizedPath = String(requestPath || "").trim() || "/";
+  const normalizedLevel = String(level || "info").trim() || "info";
+  const normalizedMessage = truncateScreenLogText(message, 180) || `${normalizedMethod} ${normalizedPath}`;
+  const normalizedDetailText = truncateScreenLogText(detailText, 1200) || null;
+  const normalizedMetaJson = truncateScreenLogText(metaJson, 2000) || null;
+  const normalizedUserId = Number.isInteger(Number(userId)) ? Number(userId) : null;
+  if (!normalizedMenuKey) return;
+
+  try {
+    await pool.query(
+      `
+        INSERT INTO screen_action_logs (
+          menu_key,
+          action_key,
+          request_method,
+          request_path,
+          status_code,
+          level,
+          message,
+          detail_text,
+          meta_json,
+          created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `,
+      [
+        normalizedMenuKey,
+        normalizedActionKey,
+        normalizedMethod,
+        normalizedPath,
+        Number.isFinite(Number(statusCode)) ? Number(statusCode) : null,
+        normalizedLevel,
+        normalizedMessage,
+        normalizedDetailText,
+        normalizedMetaJson,
+        normalizedUserId
+      ]
+    );
+  } catch (err) {
+    console.error("Screen action log insert error:", err);
+  }
+}
+
+async function canUserViewScreenLogs(user, menuKey) {
+  const normalizedMenuKey = String(menuKey || "").trim();
+  if (!normalizedMenuKey) return false;
+  if (String(user?.username || "").toLowerCase() === "admin") return true;
+  const userIdNum = Number(user?.id);
+  if (!Number.isInteger(userIdNum)) return false;
+
+  try {
+    const result = await pool.query(
+      `
+        SELECT COALESCE(can_view_logs, false) AS can_view_logs
+        FROM user_sidebar_permissions
+        WHERE user_id = $1
+          AND menu_key = $2
+      `,
+      [userIdNum, normalizedMenuKey]
+    );
+    return toSidebarBool(result.rows?.[0]?.can_view_logs, false);
+  } catch (err) {
+    console.error("Screen log permission read error:", err);
+    return false;
+  }
+}
+
+function buildEmptyScreenLogPanelModel() {
+  return {
+    visible: false,
+    menuKey: "",
+    title: "",
+    apiPath: "",
+    items: []
+  };
+}
+
+function mapScreenActionLogRow(row) {
+  const createdAt = row?.created_at instanceof Date ? row.created_at.toISOString() : String(row?.created_at || "").trim();
+  return {
+    id: Number(row?.id || 0),
+    menuKey: String(row?.menu_key || "").trim(),
+    actionKey: String(row?.action_key || "").trim(),
+    requestMethod: String(row?.request_method || "").trim(),
+    requestPath: String(row?.request_path || "").trim(),
+    statusCode: Number.isFinite(Number(row?.status_code)) ? Number(row.status_code) : null,
+    level: String(row?.level || "info").trim() || "info",
+    message: String(row?.message || "").trim(),
+    detailText: String(row?.detail_text || "").trim(),
+    metaJson: String(row?.meta_json || "").trim(),
+    createdByName: String(row?.created_by_name || "-").trim() || "-",
+    createdAt
+  };
+}
+
+async function loadScreenLogPanelForUser(user, menuKey, limit = 20) {
+  const registryItem = getScreenActionRegistryItem(menuKey);
+  if (!registryItem) return buildEmptyScreenLogPanelModel();
+
+  const allowed = await canUserViewScreenLogs(user, registryItem.key);
+  if (!allowed) return buildEmptyScreenLogPanelModel();
+
+  try {
+    const result = await pool.query(
+      `
+        SELECT
+          l.*,
+          COALESCE(u.display_name, u.username, '-') AS created_by_name
+        FROM screen_action_logs l
+        LEFT JOIN users u ON u.id = l.created_by
+        WHERE l.menu_key = $1
+        ORDER BY l.created_at DESC, l.id DESC
+        LIMIT $2
+      `,
+      [registryItem.key, Math.max(1, Math.min(50, Number(limit) || 20))]
+    );
+
+    return {
+      visible: true,
+      menuKey: registryItem.key,
+      title: `${registryItem.label} Logları`,
+      apiPath: `/api/screen-logs/${encodeURIComponent(registryItem.key)}`,
+      items: result.rows.map(mapScreenActionLogRow)
+    };
+  } catch (err) {
+    console.error("Screen log panel load error:", err);
+    return {
+      visible: true,
+      menuKey: registryItem.key,
+      title: `${registryItem.label} Logları`,
+      apiPath: `/api/screen-logs/${encodeURIComponent(registryItem.key)}`,
+      items: []
+    };
+  }
+}
+
 function requireMenuAccess(menuKey) {
   return async (req, res, next) => {
+    req.screenMenuKey = String(menuKey || "").trim();
     if (!req.session?.user) {
       if (req.path.startsWith("/api/")) {
         return res.status(401).json({ ok: false, error: "Oturum süresi doldu." });
@@ -1687,6 +1989,75 @@ function requireMenuAccess(menuKey) {
     }
   };
 }
+
+app.use((req, res, next) => {
+  const originalRender = res.render.bind(res);
+  res.render = function patchedRender(view, locals, callback) {
+    let renderLocals = locals;
+    let renderCallback = callback;
+
+    if (typeof renderLocals === "function") {
+      renderCallback = renderLocals;
+      renderLocals = {};
+    }
+
+    const safeLocals =
+      renderLocals && typeof renderLocals === "object" ? { ...renderLocals } : {};
+    const activeMenuKey = String(safeLocals.active || req.screenMenuKey || "").trim();
+
+    void loadScreenLogPanelForUser(req.session?.user, activeMenuKey)
+      .then((screenLogPanel) => {
+        safeLocals.screenLogPanel = screenLogPanel;
+        originalRender(view, safeLocals, renderCallback);
+      })
+      .catch((err) => {
+        console.error("Screen log render injection error:", err);
+        safeLocals.screenLogPanel = buildEmptyScreenLogPanelModel();
+        originalRender(view, safeLocals, renderCallback);
+      });
+  };
+  return next();
+});
+
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  let capturedJsonPayload = null;
+  const originalJson = res.json.bind(res);
+
+  res.json = function patchedJson(payload) {
+    capturedJsonPayload = payload;
+    return originalJson(payload);
+  };
+
+  res.on("finish", () => {
+    if (!req.session?.user) return;
+    if (!req.screenMenuKey) return;
+    if (shouldSkipScreenActionLog(req)) return;
+
+    const level = determineScreenActionLogLevel(res.statusCode);
+    const metaJson = stringifyScreenLogMeta({
+      durationMs: Date.now() - startedAt,
+      statusCode: res.statusCode,
+      method: req.method,
+      path: req.originalUrl || req.path || "/"
+    });
+
+    void insertScreenActionLogEntry({
+      menuKey: req.screenMenuKey,
+      actionKey: `${String(req.method || "GET").toUpperCase()} ${String(req.route?.path || req.path || "/").trim()}`,
+      requestMethod: req.method,
+      requestPath: req.originalUrl || req.path || "/",
+      statusCode: res.statusCode,
+      level,
+      message: buildScreenActionLogMessage(req, capturedJsonPayload),
+      detailText: buildScreenActionLogDetailText(req, capturedJsonPayload),
+      metaJson,
+      userId: req.session.user?.id
+    });
+  });
+
+  return next();
+});
 
 app.use(async (req, res, next) => {
   if (!req.session?.user) return next();
@@ -21303,11 +21674,15 @@ app.post(
   }
 );
 
-app.get("/general/station-passenger-info", requireAuth, requireMenuAccess("station-passenger-info"), (req, res) => {
+app.get("/obus/station-passenger-info", requireAuth, requireMenuAccess("station-passenger-info"), (req, res) => {
   res.render("general-station-passenger-info", {
     user: req.session.user,
     active: "station-passenger-info"
   });
+});
+
+app.get("/general/station-passenger-info", requireAuth, (req, res) => {
+  return res.redirect("/obus/station-passenger-info");
 });
 
 app.get("/change-password", requireAuth, requireMenuAccess("password"), (req, res) => {
@@ -21328,11 +21703,8 @@ app.get("/menti", requireAuth, requireMenuAccess("menti"), (req, res) => {
   });
 });
 
-app.get("/obus/journey-passengers", requireAuth, requireMenuAccess("journey-passengers"), (req, res) => {
-  res.render("obus-journey-passengers", {
-    user: req.session.user,
-    active: "journey-passengers"
-  });
+app.get("/obus/journey-passengers", requireAuth, (req, res) => {
+  return res.redirect("/obus/station-passenger-info");
 });
 
 module.exports = {
@@ -22472,7 +22844,8 @@ app.get("/permissions/:userId", requireAuth, requireMenuAccess("users"), async (
             route_key: item.routeKey || null,
             sort_order: item.sortOrder,
             icon_key: item.iconKey || "folder",
-            can_view: true
+            can_view: true,
+            can_view_logs: true
           }))
         )
       : await loadSidebarPermissionSectionsForUser(userId);
@@ -22549,6 +22922,20 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       )
     );
 
+    const selectedLogRaw = req.body.menuLogKeys;
+    const selectedLogList = Array.isArray(selectedLogRaw)
+      ? selectedLogRaw
+      : typeof selectedLogRaw === "string" && selectedLogRaw.trim()
+        ? [selectedLogRaw]
+        : [];
+    const selectedLogKeys = Array.from(
+      new Set(
+        selectedLogList
+          .map((value) => String(value || "").trim())
+          .filter((value) => value && validItemKeys.has(value))
+      )
+    );
+
     const selectedSectionsRaw = req.body.sectionKeys;
     const selectedSectionList = Array.isArray(selectedSectionsRaw)
       ? selectedSectionsRaw
@@ -22598,6 +22985,7 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       }
     });
     const finalItemKeys = Array.from(finalItemSet);
+    const finalLogKeys = selectedLogKeys.filter((key) => finalItemSet.has(key));
     const effectiveSectionSet = new Set(currentSectionSet);
     changedSectionKeys.forEach((sectionKey) => {
       if (selectedSectionSet.has(sectionKey)) {
@@ -22647,6 +23035,32 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
       await client.query(
         `
           UPDATE user_sidebar_permissions usp
+          SET can_view_logs = false, updated_at = now()
+          FROM sidebar_menu_items m
+          WHERE usp.user_id = $1
+            AND usp.menu_key = m.key
+            AND m.is_active = true
+            AND m.type = 'item'
+        `,
+        [userId]
+      );
+
+      if (finalLogKeys.length > 0) {
+        const selectedLogPlaceholders = buildInClausePlaceholders(finalLogKeys, 2);
+        await client.query(
+          `
+            UPDATE user_sidebar_permissions
+            SET can_view_logs = true, updated_at = now()
+            WHERE user_id = $1
+              AND menu_key IN (${selectedLogPlaceholders})
+          `,
+          [userId].concat(finalLogKeys)
+        );
+      }
+
+      await client.query(
+        `
+          UPDATE user_sidebar_permissions usp
           SET can_view = false, updated_at = now()
           FROM sidebar_menu_items m
           WHERE usp.user_id = $1
@@ -22683,6 +23097,27 @@ app.post("/permissions/:userId", requireAuth, requireMenuAccess("users"), async 
     console.error(err);
     res.status(500).send("Güncelleme hatası");
   }
+});
+
+app.get("/api/screen-logs/:menuKey", requireAuth, async (req, res) => {
+  const menuKey = String(req.params.menuKey || "").trim();
+  const registryItem = getScreenActionRegistryItem(menuKey);
+  if (!registryItem) {
+    return res.status(404).json({ ok: false, error: "Ekran log kaynağı bulunamadı." });
+  }
+
+  const allowed = await canUserViewScreenLogs(req.session?.user, registryItem.key);
+  if (!allowed) {
+    return res.status(403).json({ ok: false, error: "Bu ekran loglarını görüntüleme yetkiniz yok." });
+  }
+
+  const panel = await loadScreenLogPanelForUser(req.session?.user, registryItem.key, 20);
+  return res.json({
+    ok: true,
+    menuKey: panel.menuKey,
+    title: panel.title,
+    items: Array.isArray(panel.items) ? panel.items : []
+  });
 });
 
 app.get("/health", async (req, res) => {
