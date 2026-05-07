@@ -9,7 +9,9 @@
   </head>
   <body class="dashboard layout">
     <%- include("partials/sidebar", { active }) %>
-    <section class="content"></section>
+    <section class="content">
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
+    </section>
     <script src="/public/app.js" defer></script>
   </body>
 </html>

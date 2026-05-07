@@ -30,6 +30,7 @@
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
 
       <% if (partnerError) { %>
         <div class="alert inline-alert"><%= partnerError %></div>

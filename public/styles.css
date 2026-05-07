@@ -244,20 +244,35 @@ body {
   margin-top: auto;
 }
 
+.page-screen-log {
+  margin: 0 0 18px;
+}
+
 .screen-log-panel {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid #dce5f0;
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.96) 0%, #ffffff 100%);
+  box-shadow: 0 12px 28px rgba(22, 28, 38, 0.08);
 }
 
 .screen-log-toggle {
-  width: 100%;
-  color: #e6edf7;
-  border-color: rgba(255, 255, 255, 0.18);
+  width: fit-content;
+  color: #1f2735;
+  border-color: #d6dde7;
+  background: #ffffff;
+}
+
+.screen-log-toggle:hover {
+  background: #f4f7fb;
+  box-shadow: none;
 }
 
 .screen-log-drawer {
-  background: rgba(9, 14, 22, 0.74);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #f7fafe;
+  border: 1px solid #dce5f0;
   border-radius: 14px;
   padding: 12px;
   display: grid;
@@ -271,18 +286,23 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #f4f7fb;
+  color: #1f2735;
 }
 
 .screen-log-head .ghost {
-  color: #e6edf7;
-  border-color: rgba(255, 255, 255, 0.18);
+  color: #1f2735;
+  border-color: #d6dde7;
   padding: 8px 10px;
+  background: #ffffff;
 }
 
 .screen-log-state {
   font-size: 12px;
-  color: rgba(230, 237, 247, 0.72);
+  color: #607082;
+}
+
+.screen-log-state.inline-alert {
+  margin: 0;
 }
 
 .screen-log-list {
@@ -295,17 +315,24 @@ body {
 .screen-log-item,
 .screen-log-empty {
   border-radius: 12px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #eff4fb;
+  padding: 12px;
+  background: #ffffff;
+  color: #1f2735;
+  border: 1px solid #e1e8f0;
+}
+
+.screen-log-empty {
+  color: #607082;
 }
 
 .screen-log-item-warning {
-  border: 1px solid rgba(244, 180, 0, 0.28);
+  border-color: rgba(244, 180, 0, 0.4);
+  background: #fffaf0;
 }
 
 .screen-log-item-error {
-  border: 1px solid rgba(255, 107, 107, 0.32);
+  border-color: rgba(255, 107, 107, 0.36);
+  background: #fff5f5;
 }
 
 .screen-log-item-head,
@@ -319,7 +346,7 @@ body {
 .screen-log-item-head {
   justify-content: space-between;
   font-size: 11px;
-  color: rgba(230, 237, 247, 0.76);
+  color: #607082;
 }
 
 .screen-log-item-level {
@@ -336,15 +363,19 @@ body {
 .screen-log-item-meta {
   margin-top: 8px;
   font-size: 11px;
-  color: rgba(230, 237, 247, 0.72);
+  color: #607082;
 }
 
 .screen-log-item-detail {
   margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f3f7fb;
+  border: 1px solid #e1e8f0;
   white-space: pre-wrap;
   font: inherit;
   font-size: 11px;
-  color: rgba(230, 237, 247, 0.84);
+  color: #425166;
 }
 
 .sidebar-logout .ghost {
@@ -424,17 +455,6 @@ body.sidebar-collapsed .sidebar-logout .ghost::before {
   content: "OUT";
   font-size: 9px;
   font-weight: 700;
-}
-
-body.sidebar-collapsed .screen-log-head strong,
-body.sidebar-collapsed .screen-log-state,
-body.sidebar-collapsed .screen-log-list,
-body.sidebar-collapsed .screen-log-head .ghost {
-  display: none;
-}
-
-body.sidebar-collapsed .screen-log-drawer {
-  padding: 8px;
 }
 
 .no-menu-home .content {

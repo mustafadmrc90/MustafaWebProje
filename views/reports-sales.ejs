@@ -29,6 +29,7 @@
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
 
       <section class="table-card panel-card sales-filter-section">
         <form class="sales-filter-form" method="get" action="/reports/sales">

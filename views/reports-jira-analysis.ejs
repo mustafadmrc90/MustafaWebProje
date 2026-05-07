@@ -30,6 +30,7 @@
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
 
       <section class="table-card panel-card slack-filter-section">
         <form class="slack-filter-form jira-filter-form" method="get" action="/reports/jira-analysis">
