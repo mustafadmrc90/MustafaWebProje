@@ -68,6 +68,8 @@
     const next = doc.querySelector(".content");
     if (!next) return false;
 
+    document.body.classList.remove("screen-log-modal-open");
+
     const nextSidebar = doc.querySelector(".sidebar");
     if (nextSidebar) {
       // Keep the same sidebar element so delegated click handlers remain attached.
@@ -6324,12 +6326,14 @@
 
     const toggleBtn = panel.querySelector("[data-screen-log-toggle='1']");
     const refreshBtn = panel.querySelector("[data-screen-log-refresh='1']");
-    const drawer = panel.querySelector("[data-screen-log-drawer='1']");
+    const modal = panel.querySelector("[data-screen-log-modal='1']");
+    const dialog = panel.querySelector("[data-screen-log-dialog='1']");
     const stateEl = panel.querySelector("[data-screen-log-state='1']");
     const listEl = panel.querySelector("[data-screen-log-list='1']");
+    const closeButtons = Array.from(panel.querySelectorAll("[data-screen-log-close='1']"));
     const apiPath = String(panel.getAttribute("data-screen-log-api-path") || "").trim();
 
-    if (!toggleBtn || !drawer || !listEl || !apiPath) return;
+    if (!toggleBtn || !modal || !dialog || !listEl || !apiPath) return;
 
     const escapeHtml = (value) =>
       String(value || "")
@@ -6340,8 +6344,14 @@
         .replace(/'/g, "&#39;");
 
     const setOpen = (open) => {
-      drawer.hidden = !open;
+      modal.hidden = !open;
       toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      document.body.classList.toggle("screen-log-modal-open", open);
+      if (open) {
+        window.requestAnimationFrame(() => {
+          dialog.focus();
+        });
+      }
     };
 
     const setState = (text = "", kind = "") => {
@@ -6407,10 +6417,29 @@
     };
 
     toggleBtn.addEventListener("click", () => {
-      const nextOpen = drawer.hidden;
+      const nextOpen = modal.hidden;
       setOpen(nextOpen);
       if (nextOpen) {
         void refreshLogs();
+      }
+    });
+
+    closeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        setOpen(false);
+      });
+    });
+
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        setOpen(false);
+      }
+    });
+
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
       }
     });
 

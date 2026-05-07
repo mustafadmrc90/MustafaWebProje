@@ -4,45 +4,60 @@
   data-screen-log-menu-key="<%= screenLogPanel.menuKey %>"
   data-screen-log-api-path="<%= screenLogPanel.apiPath %>"
 >
+  <% const screenLogModalId = `screen-log-modal-${screenLogPanel.menuKey}`; %>
+  <% const screenLogTitleId = `screen-log-title-${screenLogPanel.menuKey}`; %>
   <button
     type="button"
-    class="screen-log-toggle ghost"
+    class="screen-log-toggle"
     data-screen-log-toggle="1"
     aria-expanded="false"
-    aria-controls="screen-log-drawer"
+    aria-controls="<%= screenLogModalId %>"
   >
     Loglar
   </button>
-  <div class="screen-log-drawer" id="screen-log-drawer" data-screen-log-drawer="1" hidden>
-    <div class="screen-log-head">
-      <strong><%= screenLogPanel.title %></strong>
-      <button type="button" class="ghost" data-screen-log-refresh="1">Yenile</button>
-    </div>
-    <div class="screen-log-state muted" data-screen-log-state="1">
-      Son 20 kayıt gösteriliyor.
-    </div>
-    <div class="screen-log-list" data-screen-log-list="1">
-      <% if (Array.isArray(screenLogPanel.items) && screenLogPanel.items.length > 0) { %>
-        <% screenLogPanel.items.forEach((item) => { %>
-          <article class="screen-log-item screen-log-item-<%= item.level || 'info' %>">
-            <div class="screen-log-item-head">
-              <span class="screen-log-item-level"><%= String(item.level || 'info').toUpperCase() %></span>
-              <time datetime="<%= item.createdAt %>"><%= item.createdAt %></time>
-            </div>
-            <strong class="screen-log-item-message"><%= item.message %></strong>
-            <div class="screen-log-item-meta">
-              <span><%= item.requestMethod %></span>
-              <span><%= item.requestPath %></span>
-              <span><%= item.createdByName %></span>
-            </div>
-            <% if (item.detailText) { %>
-              <pre class="screen-log-item-detail"><%= item.detailText %></pre>
-            <% } %>
-          </article>
-        <% }) %>
-      <% } else { %>
-        <div class="screen-log-empty" data-screen-log-empty="1">Henüz ekran logu yok.</div>
-      <% } %>
+  <div class="screen-log-modal" id="<%= screenLogModalId %>" data-screen-log-modal="1" hidden>
+    <button type="button" class="screen-log-backdrop" data-screen-log-close="1" aria-label="Log popup kapat"></button>
+    <div
+      class="screen-log-dialog"
+      data-screen-log-dialog="1"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="<%= screenLogTitleId %>"
+      tabindex="-1"
+    >
+      <div class="screen-log-head">
+        <strong id="<%= screenLogTitleId %>"><%= screenLogPanel.title %></strong>
+        <div class="screen-log-head-actions">
+          <button type="button" class="ghost" data-screen-log-refresh="1">Yenile</button>
+          <button type="button" class="ghost" data-screen-log-close="1">Kapat</button>
+        </div>
+      </div>
+      <div class="screen-log-state muted" data-screen-log-state="1">
+        Son 20 kayıt gösteriliyor.
+      </div>
+      <div class="screen-log-list" data-screen-log-list="1">
+        <% if (Array.isArray(screenLogPanel.items) && screenLogPanel.items.length > 0) { %>
+          <% screenLogPanel.items.forEach((item) => { %>
+            <article class="screen-log-item screen-log-item-<%= item.level || 'info' %>">
+              <div class="screen-log-item-head">
+                <span class="screen-log-item-level"><%= String(item.level || 'info').toUpperCase() %></span>
+                <time datetime="<%= item.createdAt %>"><%= item.createdAt %></time>
+              </div>
+              <strong class="screen-log-item-message"><%= item.message %></strong>
+              <div class="screen-log-item-meta">
+                <span><%= item.requestMethod %></span>
+                <span><%= item.requestPath %></span>
+                <span><%= item.createdByName %></span>
+              </div>
+              <% if (item.detailText) { %>
+                <pre class="screen-log-item-detail"><%= item.detailText %></pre>
+              <% } %>
+            </article>
+          <% }) %>
+        <% } else { %>
+          <div class="screen-log-empty" data-screen-log-empty="1">Henüz ekran logu yok.</div>
+        <% } %>
+      </div>
     </div>
   </div>
 </section>
