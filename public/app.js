@@ -6319,132 +6319,153 @@
   };
 
   const initScreenLogPanel = () => {
-    const panel = document.querySelector("[data-screen-log-panel='1']");
-    if (!panel) return;
-    if (panel.dataset.screenLogBound === "1") return;
-    panel.dataset.screenLogBound = "1";
+    const panels = Array.from(document.querySelectorAll("[data-screen-log-panel='1']"));
+    if (panels.length === 0) return;
 
-    const toggleBtn = panel.querySelector("[data-screen-log-toggle='1']");
-    const refreshBtn = panel.querySelector("[data-screen-log-refresh='1']");
-    const modal = panel.querySelector("[data-screen-log-modal='1']");
-    const dialog = panel.querySelector("[data-screen-log-dialog='1']");
-    const stateEl = panel.querySelector("[data-screen-log-state='1']");
-    const listEl = panel.querySelector("[data-screen-log-list='1']");
-    const closeButtons = Array.from(panel.querySelectorAll("[data-screen-log-close='1']"));
-    const apiPath = String(panel.getAttribute("data-screen-log-api-path") || "").trim();
-
-    if (!toggleBtn || !modal || !dialog || !listEl || !apiPath) return;
-
-    const escapeHtml = (value) =>
-      String(value || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-    const setOpen = (open) => {
-      modal.hidden = !open;
-      toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
-      document.body.classList.toggle("screen-log-modal-open", open);
-      if (open) {
-        window.requestAnimationFrame(() => {
-          dialog.focus();
-        });
-      }
+    const syncScreenLogBodyState = () => {
+      const hasOpenModal = Array.from(document.querySelectorAll("[data-screen-log-modal='1']")).some(
+        (item) => item instanceof HTMLElement && !item.hidden
+      );
+      document.body.classList.toggle("screen-log-modal-open", hasOpenModal);
     };
 
-    const setState = (text = "", kind = "") => {
-      if (!stateEl) return;
-      stateEl.textContent = String(text || "").trim();
-      stateEl.className = `screen-log-state ${kind === "error" ? "inline-alert" : "muted"}`.trim();
-    };
+    panels.forEach((panel) => {
+      if (panel.dataset.screenLogBound === "1") return;
+      panel.dataset.screenLogBound = "1";
 
-    const renderItems = (items) => {
-      const rows = Array.isArray(items) ? items : [];
-      if (rows.length === 0) {
-        listEl.innerHTML = '<div class="screen-log-empty">Henüz ekran logu yok.</div>';
-        return;
-      }
+      const toggleBtn = panel.querySelector("[data-screen-log-toggle='1']");
+      const refreshBtn = panel.querySelector("[data-screen-log-refresh='1']");
+      const modal = panel.querySelector("[data-screen-log-modal='1']");
+      const dialog = panel.querySelector("[data-screen-log-dialog='1']");
+      const stateEl = panel.querySelector("[data-screen-log-state='1']");
+      const listEl = panel.querySelector("[data-screen-log-list='1']");
+      const closeButtons = Array.from(panel.querySelectorAll("[data-screen-log-close='1']"));
+      const apiPath = String(panel.getAttribute("data-screen-log-api-path") || "").trim();
 
-      listEl.innerHTML = rows
-        .map((item) => {
-          const level = escapeHtml(String(item?.level || "info").trim() || "info");
-          const createdAt = escapeHtml(String(item?.createdAt || "").trim());
-          const message = escapeHtml(String(item?.message || "").trim());
-          const method = escapeHtml(String(item?.requestMethod || "").trim());
-          const path = escapeHtml(String(item?.requestPath || "").trim());
-          const createdByName = escapeHtml(String(item?.createdByName || "-").trim() || "-");
-          const detailText = escapeHtml(String(item?.detailText || "").trim());
-          return `
-            <article class="screen-log-item screen-log-item-${level}">
-              <div class="screen-log-item-head">
-                <span class="screen-log-item-level">${level.toUpperCase()}</span>
-                <time datetime="${createdAt}">${createdAt || "-"}</time>
-              </div>
-              <strong class="screen-log-item-message">${message || "-"}</strong>
-              <div class="screen-log-item-meta">
-                <span>${method || "-"}</span>
-                <span>${path || "-"}</span>
-                <span>${createdByName}</span>
-              </div>
-              ${detailText ? `<pre class="screen-log-item-detail">${detailText}</pre>` : ""}
-            </article>
-          `;
-        })
-        .join("");
-    };
+      if (!toggleBtn || !modal || !dialog || !listEl || !apiPath) return;
 
-    const refreshLogs = async () => {
-      if (panel.dataset.screenLogLoading === "1") return;
-      panel.dataset.screenLogLoading = "1";
-      setState("Loglar yükleniyor...");
-      try {
-        const response = await fetch(apiPath, {
-          headers: { Accept: "application/json" }
-        });
-        const data = await parseJsonResponse(response);
-        if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "Ekran logları okunamadı"));
+      const escapeHtml = (value) =>
+        String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const setOpen = (open) => {
+        modal.hidden = !open;
+        toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        syncScreenLogBodyState();
+        if (open) {
+          window.requestAnimationFrame(() => {
+            dialog.focus();
+          });
         }
-        renderItems(data.items || []);
-        setState("Son 20 kayıt gösteriliyor.");
-      } catch (err) {
-        setState(err?.message || "Ekran logları okunamadı.", "error");
-      } finally {
-        panel.dataset.screenLogLoading = "0";
-      }
-    };
+      };
 
-    toggleBtn.addEventListener("click", () => {
-      const nextOpen = modal.hidden;
-      setOpen(nextOpen);
-      if (nextOpen) {
-        void refreshLogs();
-      }
-    });
-
-    closeButtons.forEach((button) => {
-      button.addEventListener("click", () => {
+      const closeModal = () => {
         setOpen(false);
-      });
-    });
+        window.requestAnimationFrame(() => {
+          toggleBtn.focus();
+        });
+      };
 
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) {
-        setOpen(false);
-      }
-    });
+      const setState = (text = "", kind = "") => {
+        if (!stateEl) return;
+        stateEl.textContent = String(text || "").trim();
+        stateEl.className = `screen-log-state ${kind === "error" ? "inline-alert" : "muted"}`.trim();
+      };
 
-    dialog.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+      const renderItems = (items) => {
+        const rows = Array.isArray(items) ? items : [];
+        if (rows.length === 0) {
+          listEl.innerHTML = '<div class="screen-log-empty">Henüz ekran logu yok.</div>';
+          return;
+        }
+
+        listEl.innerHTML = rows
+          .map((item) => {
+            const level = escapeHtml(String(item?.level || "info").trim() || "info");
+            const createdAt = escapeHtml(String(item?.createdAt || "").trim());
+            const message = escapeHtml(String(item?.message || "").trim());
+            const method = escapeHtml(String(item?.requestMethod || "").trim());
+            const path = escapeHtml(String(item?.requestPath || "").trim());
+            const createdByName = escapeHtml(String(item?.createdByName || "-").trim() || "-");
+            const detailText = escapeHtml(String(item?.detailText || "").trim());
+            return `
+              <article class="screen-log-item screen-log-item-${level}">
+                <div class="screen-log-item-head">
+                  <span class="screen-log-item-level">${level.toUpperCase()}</span>
+                  <time datetime="${createdAt}">${createdAt || "-"}</time>
+                </div>
+                <strong class="screen-log-item-message">${message || "-"}</strong>
+                <div class="screen-log-item-meta">
+                  <span>${method || "-"}</span>
+                  <span>${path || "-"}</span>
+                  <span>${createdByName}</span>
+                </div>
+                ${detailText ? `<pre class="screen-log-item-detail">${detailText}</pre>` : ""}
+              </article>
+            `;
+          })
+          .join("");
+      };
+
+      const refreshLogs = async () => {
+        if (panel.dataset.screenLogLoading === "1") return;
+        panel.dataset.screenLogLoading = "1";
+        setState("Loglar yükleniyor...");
+        try {
+          const response = await fetch(apiPath, {
+            headers: { Accept: "application/json" }
+          });
+          const data = await parseJsonResponse(response);
+          if (!response.ok || !data?.ok) {
+            throw new Error(getApiErrorMessage(response, data, "Ekran logları okunamadı"));
+          }
+          renderItems(data.items || []);
+          setState("Son 20 kayıt gösteriliyor.");
+        } catch (err) {
+          setState(err?.message || "Ekran logları okunamadı.", "error");
+        } finally {
+          panel.dataset.screenLogLoading = "0";
+        }
+      };
+
+      toggleBtn.addEventListener("click", (event) => {
         event.preventDefault();
-        setOpen(false);
-      }
-    });
+        event.stopPropagation();
+        const nextOpen = modal.hidden;
+        setOpen(nextOpen);
+        if (nextOpen) {
+          void refreshLogs();
+        }
+      });
 
-    refreshBtn?.addEventListener("click", () => {
-      void refreshLogs();
+      closeButtons.forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeModal();
+        });
+      });
+
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) {
+          closeModal();
+        }
+      });
+
+      dialog.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeModal();
+        }
+      });
+
+      refreshBtn?.addEventListener("click", () => {
+        void refreshLogs();
+      });
     });
   };
 
