@@ -2313,7 +2313,8 @@ function shouldExcludeAllCompaniesCode(codeValue) {
   const rawCode = String(codeValue || "").trim().toLocaleLowerCase("tr");
   if (!rawCode) return false;
 
-  if (normalizeTokenName(rawCode) === "admin") return true;
+  const normalizedCode = normalizeTokenName(rawCode);
+  if (["admin", "aou2", "dashboard", "corp"].includes(normalizedCode)) return true;
   const normalizedSegments = rawCode.split(/[^a-z0-9]+/i).filter(Boolean);
   if (normalizedSegments.includes("test") || normalizedSegments.includes("old")) return true;
   if (rawCode.startsWith("test") || rawCode.endsWith("test")) return true;
