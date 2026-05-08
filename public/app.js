@@ -4677,6 +4677,7 @@
       const filterValue = String(bulkFilterSelect?.value || "all").trim();
       bulkResultsBody.innerHTML = "";
       bulkCheckRowByKey.clear();
+      const fragment = document.createDocumentFragment();
 
       bulkCheckItems.forEach((item) => {
         const exists = item.exists === true;
@@ -4725,12 +4726,14 @@
         row.appendChild(usernameCell);
         row.appendChild(fullNameCell);
         row.appendChild(statusCell);
-        bulkResultsBody.appendChild(row);
+        fragment.appendChild(row);
         if (rowKey) {
           bulkCheckRowByKey.set(rowKey, row);
         }
         setCreateRowStatus(row, statusState.lines, statusState.kind, statusState.detailBlocks);
       });
+
+      bulkResultsBody.appendChild(fragment);
 
       if (bulkResultsSection) {
         bulkResultsSection.hidden = bulkCheckItems.length === 0;

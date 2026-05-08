@@ -10681,9 +10681,21 @@ function readObusLiveJob(jobId, ownerUserId) {
 
 function readObusLiveJobSnapshot(job, cursor = 0) {
   const safeCursor = Number.isFinite(Number(cursor)) ? Math.max(0, Number(cursor)) : 0;
-  const events = Array.isArray(job?.events)
-    ? job.events.filter((event) => Number(event?.seq || 0) > safeCursor)
-    : [];
+  const sourceEvents = Array.isArray(job?.events) ? job.events : [];
+  let startIndex = sourceEvents.length;
+  let low = 0;
+  let high = sourceEvents.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const seq = Number(sourceEvents[mid]?.seq || 0);
+    if (seq > safeCursor) {
+      startIndex = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  const events = startIndex < sourceEvents.length ? sourceEvents.slice(startIndex) : [];
   const lastSeq = events.length > 0 ? Number(events[events.length - 1]?.seq || safeCursor) : safeCursor;
   return {
     ok: true,
@@ -16342,9 +16354,22 @@ async function runObusUserDeactivateSearchJob(job, usernameFilter) {
 
 function extractObusUsersWithoutPermissionsRows(
   payload,
-  { usernameFilter = "", clusterLabel = "", fallbackPartnerId = "", expectedPartnerId = "", expectedPartnerCode = "" } = {}
+  {
+    usernameFilter = "",
+    usernameFilters = [],
+    clusterLabel = "",
+    fallbackPartnerId = "",
+    expectedPartnerId = "",
+    expectedPartnerCode = ""
+  } = {}
 ) {
   const normalizedFilter = String(usernameFilter || "").trim().toLocaleLowerCase("tr");
+  const normalizedFilterSet = new Set(
+    (Array.isArray(usernameFilters) ? usernameFilters : [usernameFilters])
+      .map((item) => String(item || "").trim().toLocaleLowerCase("tr"))
+      .filter(Boolean)
+  );
+  const hasUsernameFilterSet = normalizedFilterSet.size > 0;
   const normalizedExpectedPartnerId = String(expectedPartnerId || "").trim();
   const normalizedExpectedPartnerCode = String(expectedPartnerCode || "").trim().toLocaleLowerCase("tr");
   const usernameAliases = [
@@ -16474,7 +16499,8 @@ function extractObusUsersWithoutPermissionsRows(
     const normalizedSampleUsername = usernameText.toLocaleLowerCase("tr");
     const shouldInclude =
       (normalizedFilter && normalizedSampleUsername === normalizedFilter) ||
-      (!normalizedFilter && debug.samples.length < 6);
+      (hasUsernameFilterSet && normalizedFilterSet.has(normalizedSampleUsername)) ||
+      (!normalizedFilter && !hasUsernameFilterSet && debug.samples.length < 6);
     if (!shouldInclude) return;
     if (debug.samples.length >= 12) return;
 
@@ -16527,6 +16553,15 @@ function extractObusUsersWithoutPermissionsRows(
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
     debug.candidateCount += 1;
 
+    const usernameRaw = readPartnerRawValueByAliases(row, usernameAliases);
+    const username = formatPartnerCellValue(usernameRaw);
+    const normalizedUsername = String(username || "").trim();
+    const normalizedUsernameKey = normalizedUsername.toLocaleLowerCase("tr");
+    if (hasUsernameFilterSet && normalizedUsernameKey && !normalizedFilterSet.has(normalizedUsernameKey)) {
+      debug.skippedUsernameMismatchCount += 1;
+      return;
+    }
+
     const id = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["id", "user-id", "user_id", "userid"]));
     const explicitPartnerIdRaw = formatPartnerCellValue(
       readPartnerRawValueByAliases(row, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
@@ -16540,8 +16575,6 @@ function extractObusUsersWithoutPermissionsRows(
     const strictIsActive = parseActiveFlagValue(strictIsActiveRaw);
     const statusKeywordRaw = readPartnerRawValueByAliases(row, statusKeywordAliases);
     const statusRaw = readPartnerRawValueByAliases(row, ["status"]);
-    const usernameRaw = readPartnerRawValueByAliases(row, usernameAliases);
-    const username = formatPartnerCellValue(usernameRaw);
     const isActive = inferRowIsActive(row);
     const partnerId =
       explicitPartnerId ||
@@ -16550,7 +16583,6 @@ function extractObusUsersWithoutPermissionsRows(
 
     const normalizedId = String(id || "").trim();
     const normalizedPartnerId = String(partnerId || "").trim();
-    const normalizedUsername = String(username || "").trim();
     if (!normalizedId || !normalizedPartnerId || !normalizedUsername) {
       debug.skippedMissingFieldCount += 1;
       buildDebugSample({
@@ -16667,7 +16699,7 @@ function extractObusUsersWithoutPermissionsRows(
       });
       return;
     }
-    if (normalizedFilter && normalizedUsername.toLocaleLowerCase("tr") !== normalizedFilter) {
+    if (normalizedFilter && normalizedUsernameKey !== normalizedFilter) {
       debug.skippedUsernameMismatchCount += 1;
       buildDebugSample({
         normalizedId,
@@ -16781,6 +16813,7 @@ function extractObusUsersWithoutPermissionsRows(
 async function fetchObusUsersWithoutPermissionsForTarget({
   target,
   usernameFilter,
+  usernameFilters = null,
   includeVerboseDebug = false,
   sessionCache = null
 }) {
@@ -16945,6 +16978,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     }
     const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
       usernameFilter,
+      usernameFilters,
       clusterLabel: cluster,
       fallbackPartnerId: partnerId,
       expectedPartnerId: partnerId,
@@ -19442,26 +19476,6 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries, onItemRes
         password: entry.password
       }));
 
-      if (notifyItemResult) {
-        companyEntryItems.forEach((entry) => {
-          notifyItemResult({
-            key: entry.key,
-            label: `${companyLabel} | ${String(entry.username || "").trim() || "Kullanıcı?"}`,
-            statusKind: "progress",
-            finalize: false,
-            message: "Sorgulanıyor",
-            exists: null,
-            detailText: buildObusBulkCheckRowTraceText({
-              target,
-              companyLabel,
-              entry,
-              includeVerbose: false
-            }),
-            logLines: ["Sorgulanıyor"]
-          });
-        });
-      }
-
       if (!companyValue || !target.cluster || !target.endpointUrl || !target.partnerCode) {
         return companyEntryItems.map((entry) => {
           const errorText = "Firma sorgu hedefi oluşturulamadı.";
@@ -19490,8 +19504,16 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries, onItemRes
         });
       }
 
+      const requestedUsernames = Array.from(
+        new Set(
+          companyEntryItems
+            .map((entry) => String(entry.username || "").trim().toLocaleLowerCase("tr"))
+            .filter(Boolean)
+        )
+      );
       const searchResult = await fetchObusUsersWithoutPermissionsForTarget({
         target,
+        usernameFilters: requestedUsernames,
         sessionCache: sharedSessionCache,
         includeVerboseDebug: notifyItemResult !== null
       });
