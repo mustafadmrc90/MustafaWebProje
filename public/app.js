@@ -4192,6 +4192,73 @@
         liveFailure.textContent = `Hatalı: ${failure}`;
       }
     };
+    const normalizeStatusLine = (text = "") =>
+      String(text || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const collectUniqueStatusLines = (lines) => {
+      const output = [];
+      (Array.isArray(lines) ? lines : [lines]).forEach((line) => {
+        const normalizedLine = normalizeStatusLine(line);
+        if (normalizedLine && !output.includes(normalizedLine)) {
+          output.push(normalizedLine);
+        }
+      });
+      return output;
+    };
+    const splitStatusDetailLines = (text = "") =>
+      String(text || "")
+        .split(/\r?\n/)
+        .map((line) => normalizeStatusLine(line))
+        .filter(Boolean);
+    const buildCreateEventStatusState = (eventItem) => {
+      const rawStatusKind = String(eventItem?.statusKind || "").trim();
+      const statusKind =
+        rawStatusKind || (eventItem?.ok === true ? "success" : eventItem?.ok === false ? "failure" : "pending");
+      const primaryText =
+        statusKind === "failure"
+          ? String(eventItem?.error || eventItem?.message || "").trim() || "İşlem başarısız"
+          : String(eventItem?.message || "").trim() || (statusKind === "success" ? "Kullanıcı oluşturuldu" : "İşleniyor");
+      const errorDetail = String(eventItem?.errorDetail || "").trim();
+      const detailText = String(eventItem?.detailText || "").trim();
+      const detailBlocks = [];
+
+      [primaryText, errorDetail, detailText].forEach((detail) => {
+        const normalizedDetail = String(detail || "").trim();
+        if (normalizedDetail && !detailBlocks.includes(normalizedDetail)) {
+          detailBlocks.push(normalizedDetail);
+        }
+      });
+
+      if (statusKind === "success") {
+        return {
+          kind: statusKind,
+          lines: ["OK"],
+          detailBlocks
+        };
+      }
+
+      const visibleLines = collectUniqueStatusLines(Array.isArray(eventItem?.logLines) ? eventItem.logLines : []);
+      if (visibleLines.length === 0 && detailText) {
+        collectUniqueStatusLines(splitStatusDetailLines(detailText)).forEach((line) => {
+          if (!visibleLines.includes(line)) {
+            visibleLines.push(line);
+          }
+        });
+      }
+      if (visibleLines.length === 0 && errorDetail) {
+        visibleLines.push(normalizeStatusLine(errorDetail));
+      }
+      if (visibleLines.length === 0 && primaryText) {
+        visibleLines.push(normalizeStatusLine(primaryText));
+      }
+
+      return {
+        kind: statusKind,
+        lines: visibleLines,
+        detailBlocks
+      };
+    };
     const getBulkRows = () =>
       bulkUserList ? Array.from(bulkUserList.querySelectorAll("[data-obus-bulk-user-row='1']")) : [];
     const normalizeBulkTemplateEntries = (entries) =>
@@ -4207,7 +4274,8 @@
       item.exists === false &&
       !String(item.error || "").trim() &&
       String(item.liveStatusKind || "").trim() !== "success" &&
-      String(item.liveStatusKind || "").trim() !== "queued";
+      String(item.liveStatusKind || "").trim() !== "queued" &&
+      String(item.liveStatusKind || "").trim() !== "progress";
     const syncBulkCheckItemMap = () => {
       bulkCheckItemByKey.clear();
       bulkCheckItems.forEach((item) => {
@@ -4220,47 +4288,71 @@
       syncBulkCheckItemMap();
     };
     const getBulkCheckStatusState = (item) => {
-      const liveStatusText = String(item?.liveStatusText || "").trim();
+      const liveStatusLines = collectUniqueStatusLines(
+        Array.isArray(item?.liveStatusLines) && item.liveStatusLines.length > 0
+          ? item.liveStatusLines
+          : String(item?.liveStatusText || "").trim()
+      );
       const liveStatusKind = String(item?.liveStatusKind || "").trim();
-      const liveStatusDetail = String(item?.liveStatusDetail || "").trim();
-      if (liveStatusText) {
+      const liveStatusDetails = (Array.isArray(item?.liveStatusDetailBlocks) ? item.liveStatusDetailBlocks : [item?.liveStatusDetail])
+        .map((detail) => String(detail || "").trim())
+        .filter(Boolean);
+      if (liveStatusLines.length > 0) {
         return {
-          text: liveStatusText,
+          lines: liveStatusLines,
           kind: liveStatusKind || "pending",
-          detail: liveStatusDetail
+          detailBlocks: liveStatusDetails
         };
       }
 
       const queryError = String(item?.error || "").trim();
       if (queryError) {
+        const detailBlocks = [
+          queryError,
+          String(item?.errorDetail || "").trim(),
+          String(item?.detailText || "").trim()
+        ].filter(Boolean);
         return {
-          text: queryError,
+          lines: [queryError],
           kind: "failure",
-          detail: queryError
+          detailBlocks
         };
       }
 
       if (item?.exists === true) {
         return {
-          text: "Var",
+          lines: ["Var"],
           kind: "success",
-          detail: ""
+          detailBlocks: [String(item?.detailText || "").trim()].filter(Boolean)
+        };
+      }
+
+      if (item?.exists === false) {
+        return {
+          lines: ["Yok"],
+          kind: "pending",
+          detailBlocks: [String(item?.detailText || "").trim()].filter(Boolean)
         };
       }
 
       return {
-        text: "Yok",
+        lines: ["Sırada"],
         kind: "pending",
-        detail: ""
+        detailBlocks: [String(item?.detailText || "").trim()].filter(Boolean)
       };
     };
     const updateBulkCounters = () => {
       if (!isBulkMode) return;
       const total = bulkCheckItems.length;
+      const processed = bulkCheckItems.filter(
+        (item) => item.exists === true || item.exists === false || Boolean(String(item?.error || "").trim())
+      ).length;
       const missing = bulkCheckItems.filter((item) => item.exists === false).length;
       const existing = bulkCheckItems.filter((item) => item.exists === true).length;
-      const errors = bulkCheckItems.filter((item) => item.exists === null || item.error).length;
-      if (bulkTotalCounter) bulkTotalCounter.textContent = `Toplam: ${total}`;
+      const errors = bulkCheckItems.filter((item) => Boolean(String(item?.error || "").trim())).length;
+      if (bulkTotalCounter) {
+        bulkTotalCounter.textContent = total > 0 ? `İşlenen: ${processed}/${total}` : "Toplam: 0";
+      }
       if (bulkMissingCounter) bulkMissingCounter.textContent = `Yok: ${missing}`;
       if (bulkExistingCounter) bulkExistingCounter.textContent = `Var: ${existing}`;
       if (bulkErrorCounter) bulkErrorCounter.textContent = `Hata: ${errors}`;
@@ -4289,6 +4381,9 @@
       setBulkCheckItems([]);
       bulkCheckRowByKey.clear();
       bulkSelectedCreateKeys.clear();
+      if (bulkFilterSelect) {
+        bulkFilterSelect.value = "all";
+      }
       if (bulkResultsBody) {
         bulkResultsBody.innerHTML = "";
       }
@@ -4592,6 +4687,7 @@
         const rowKey = String(item.key || "").trim();
         const row = document.createElement("tr");
         row.setAttribute("data-obus-bulk-check-key", rowKey);
+        row.setAttribute("data-obus-create-status-key", rowKey);
         const canCreate = isBulkMissingCandidate(item);
         const statusState = getBulkCheckStatusState(item);
 
@@ -4633,7 +4729,7 @@
         if (rowKey) {
           bulkCheckRowByKey.set(rowKey, row);
         }
-        setCreateRowStatus(row, statusState.text, statusState.kind, statusState.detail);
+        setCreateRowStatus(row, statusState.lines, statusState.kind, statusState.detailBlocks);
       });
 
       if (bulkResultsSection) {
@@ -4643,12 +4739,20 @@
       updateBulkSelectAllState();
       updateBulkCreateButtonState();
     };
-    const setCreateRowStatus = (row, text, kind, detail = "") => {
+    const setCreateRowStatus = (row, lines, kind, detailBlocks = []) => {
       const cell = row?.querySelector("[data-obus-create-status='1']");
       if (!cell) return;
-      cell.textContent = String(text || "").trim() || "-";
+      const visibleLines = collectUniqueStatusLines(lines);
+      cell.textContent =
+        visibleLines.length <= 1
+          ? String(visibleLines[0] || "").trim() || "-"
+          : visibleLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
       cell.className = `obus-live-status ${kind || "pending"}`;
-      const tooltip = String(detail || "").trim();
+      const tooltip = (Array.isArray(detailBlocks) ? detailBlocks : [detailBlocks])
+        .map((detail) => String(detail || "").trim())
+        .filter(Boolean)
+        .join("\n\n")
+        .trim();
       if (tooltip) {
         cell.setAttribute("title", tooltip);
         cell.classList.add("has-detail");
@@ -4670,32 +4774,145 @@
         checkbox.checked = canCreate && bulkSelectedCreateKeys.has(normalizedKey);
       }
       const statusState = getBulkCheckStatusState(item);
-      setCreateRowStatus(row, statusState.text, statusState.kind, statusState.detail);
+      setCreateRowStatus(row, statusState.lines, statusState.kind, statusState.detailBlocks);
     };
-    const setBulkCheckItemLiveState = (key, { text = "", kind = "", detail = "" } = {}) => {
+    const setBulkCheckItemLiveState = ({ key, lines = [], kind = "", detailBlocks = [], text = "", detail = "" } = {}) => {
       const normalizedKey = String(key || "").trim();
       if (!normalizedKey) return;
       const item = bulkCheckItemByKey.get(normalizedKey);
       if (!item) return;
 
-      item.liveStatusText = String(text || "").trim();
+      const normalizedLines = collectUniqueStatusLines(
+        Array.isArray(lines) && lines.length > 0 ? lines : String(text || "").trim()
+      );
+      const normalizedDetails = (Array.isArray(detailBlocks) && detailBlocks.length > 0 ? detailBlocks : [detail])
+        .map((detailItem) => String(detailItem || "").trim())
+        .filter(Boolean);
+      item.liveStatusLines = normalizedLines;
+      item.liveStatusText = normalizedLines[0] || "";
       item.liveStatusKind = String(kind || "").trim();
-      item.liveStatusDetail = String(detail || "").trim();
+      item.liveStatusDetailBlocks = normalizedDetails;
+      item.liveStatusDetail = normalizedDetails.join("\n\n").trim();
       if (item.liveStatusKind === "success") {
         bulkSelectedCreateKeys.delete(normalizedKey);
       }
       updateBulkCheckRowStatusByKey(normalizedKey);
+      updateBulkCounters();
       updateBulkSelectAllState();
       updateBulkCreateButtonState();
+    };
+    const buildBulkCheckEventStatusState = (eventItem) => {
+      const rawStatusKind = String(eventItem?.statusKind || "").trim().toLocaleLowerCase("tr");
+      const errorText = String(eventItem?.error || "").trim();
+      const errorDetail = String(eventItem?.errorDetail || "").trim();
+      const detailText = String(eventItem?.detailText || "").trim();
+      const messageText = String(eventItem?.message || "").trim();
+      const detailBlocks = [messageText, errorText, errorDetail, detailText].filter(Boolean);
+
+      if (rawStatusKind === "progress" || rawStatusKind === "pending" || rawStatusKind === "info") {
+        return {
+          kind: "progress",
+          lines: [messageText || "Sorgulanıyor"],
+          detailBlocks
+        };
+      }
+      if (errorText || rawStatusKind === "failure") {
+        return {
+          kind: "failure",
+          lines: [errorText || messageText || "Sorgu başarısız"],
+          detailBlocks
+        };
+      }
+      if (eventItem?.exists === true || rawStatusKind === "existing") {
+        return {
+          kind: "success",
+          lines: ["Var"],
+          detailBlocks
+        };
+      }
+      if (eventItem?.exists === false || rawStatusKind === "missing") {
+        return {
+          kind: "pending",
+          lines: ["Yok"],
+          detailBlocks
+        };
+      }
+      return {
+        kind: "pending",
+        lines: [messageText || "Sırada"],
+        detailBlocks
+      };
+    };
+    const applyBulkCheckEventToRow = (eventItem) => {
+      const key = String(eventItem?.key || "").trim();
+      if (!key) return;
+      const item = bulkCheckItemByKey.get(key);
+      if (!item) return;
+
+      const rawStatusKind = String(eventItem?.statusKind || "").trim().toLocaleLowerCase("tr");
+      const hasExists = Object.prototype.hasOwnProperty.call(eventItem || {}, "exists");
+      const nextExists = hasExists ? (eventItem?.exists === true ? true : eventItem?.exists === false ? false : null) : item.exists;
+      const nextError = String(eventItem?.error || "").trim();
+      const nextErrorDetail = String(eventItem?.errorDetail || "").trim();
+      const nextDetailText = String(eventItem?.detailText || "").trim();
+      const nextLogLines = collectUniqueStatusLines(Array.isArray(eventItem?.logLines) ? eventItem.logLines : []);
+
+      item.error = nextError;
+      item.errorDetail = nextErrorDetail;
+      item.detailText = nextDetailText;
+      item.logLines = nextLogLines;
+
+      if (rawStatusKind === "progress" || rawStatusKind === "pending" || rawStatusKind === "info") {
+        item.exists = null;
+        item.error = "";
+      } else {
+        item.exists = nextExists;
+      }
+
+      if (item.error) {
+        bulkSelectedCreateKeys.delete(key);
+      } else if (item.exists === false) {
+        bulkSelectedCreateKeys.add(key);
+      } else {
+        bulkSelectedCreateKeys.delete(key);
+      }
+
+      const statusState = buildBulkCheckEventStatusState(eventItem);
+      setBulkCheckItemLiveState({
+        key,
+        lines: statusState.lines,
+        kind: statusState.kind,
+        detailBlocks: statusState.detailBlocks
+      });
+    };
+    const markBulkCheckRowsFailedIfPending = (errorText) => {
+      const fallbackError = String(errorText || "").trim() || "Toplu kullanıcı sorgusu tamamlanamadı.";
+      bulkCheckItems.forEach((item) => {
+        const key = String(item?.key || "").trim();
+        const currentKind = String(item?.liveStatusKind || "").trim();
+        const alreadyFinal = item?.exists === true || item?.exists === false || Boolean(String(item?.error || "").trim());
+        if (!key || alreadyFinal || currentKind === "failure") return;
+        item.exists = null;
+        item.error = fallbackError;
+        item.errorDetail = fallbackError;
+        item.detailText = fallbackError;
+        setBulkCheckItemLiveState({
+          key,
+          lines: [fallbackError],
+          kind: "failure",
+          detailBlocks: [fallbackError]
+        });
+      });
     };
     const markBulkCreateTargetsQueued = (items) => {
       (Array.isArray(items) ? items : []).forEach((item) => {
         const key = String(item?.key || "").trim();
         if (!key) return;
-        setBulkCheckItemLiveState(key, {
-          text: "Sırada",
-          kind: "queued",
-          detail: ""
+        setBulkCheckItemLiveState({
+          key,
+          lines: ["Sırada"],
+          kind: "progress",
+          detailBlocks: []
         });
       });
     };
@@ -4706,10 +4923,11 @@
         const currentItem = bulkCheckItemByKey.get(key);
         const currentKind = String(currentItem?.liveStatusKind || "").trim();
         if (!key || currentKind === "success" || currentKind === "failure") return;
-        setBulkCheckItemLiveState(key, {
-          text: fallbackError,
+        setBulkCheckItemLiveState({
+          key,
+          lines: [fallbackError],
           kind: "failure",
-          detail: fallbackError
+          detailBlocks: [fallbackError]
         });
       });
     };
@@ -4723,16 +4941,18 @@
         if (!key) return;
         const row = document.createElement("tr");
         row.setAttribute("data-obus-create-row-key", key);
+        row.setAttribute("data-obus-create-status-key", key);
         const labelCell = document.createElement("td");
         labelCell.textContent = label;
         const statusCell = document.createElement("td");
         statusCell.setAttribute("data-obus-create-status", "1");
         statusCell.className = "obus-live-status pending";
-        statusCell.textContent = "Sırada";
+        statusCell.textContent = "-";
         row.appendChild(labelCell);
         row.appendChild(statusCell);
         liveBody.appendChild(row);
         liveRowByKey.set(key, row);
+        setCreateRowStatus(row, ["Sırada"], "progress");
       });
       if (liveResultsSection) {
         liveResultsSection.hidden = liveRowByKey.size === 0;
@@ -4740,37 +4960,20 @@
     };
     const applyCreateEventToRow = (eventItem) => {
       const key = String(eventItem?.key || "").trim();
+      const statusState = buildCreateEventStatusState(eventItem);
       if (isBulkMode) {
         if (!key) return;
-        if (eventItem?.ok === true) {
-          setBulkCheckItemLiveState(key, {
-            text: "OK",
-            kind: "success",
-            detail: String(eventItem?.message || "Kullanıcı oluşturuldu.").trim()
-          });
-        } else {
-          const errorText = String(eventItem?.error || "İşlem başarısız").trim();
-          const errorDetail = String(eventItem?.errorDetail || errorText).trim();
-          setBulkCheckItemLiveState(key, {
-            text: errorText,
-            kind: "failure",
-            detail: errorDetail
-          });
-        }
+        setBulkCheckItemLiveState({
+          key,
+          lines: statusState.lines,
+          kind: statusState.kind,
+          detailBlocks: statusState.detailBlocks
+        });
         return;
       }
       const row = liveRowByKey.get(key);
       if (!row) return;
-      if (eventItem?.ok === true) {
-        setCreateRowStatus(row, eventItem.message || "Kullanıcı oluşturuldu", "success");
-      } else {
-        setCreateRowStatus(
-          row,
-          eventItem.error || "İşlem başarısız",
-          "failure",
-          eventItem.errorDetail || ""
-        );
-      }
+      setCreateRowStatus(row, statusState.lines, statusState.kind, statusState.detailBlocks);
     };
     const pollLiveJob = async (jobId, onEvent) => {
       let cursor = 0;
@@ -5263,21 +5466,27 @@
               throw new Error(getApiErrorMessage(checkResponse, checkData, "Toplu kullanıcı sorgusu başlatılamadı"));
             }
 
-            setBulkCheckItems(Array.isArray(checkData.items) ? checkData.items : []);
+            const queuedItems = Array.isArray(checkData.items) ? checkData.items : [];
+            setBulkCheckItems(queuedItems);
             bulkSelectedCreateKeys.clear();
-            bulkCheckItems.forEach((item) => {
-              if (isBulkMissingCandidate(item)) {
-                const key = String(item.key || "").trim();
-                if (key) bulkSelectedCreateKeys.add(key);
-              }
-            });
             renderBulkCheckRows();
+            setLiveMessage(`${queuedItems.length} satır sorgu sırasına alındı. Sonuçlar altta akacak.`, "success");
 
-            const errorCount = Number(checkData.errorCount || 0);
-            if (errorCount > 0) {
-              setLiveMessage("Sorgu tamamlandı. Bazı satırlarda hata var; sadece Yok olanlar oluşturulabilir.", "error");
+            const finalState = await pollLiveJob(checkData.jobId, applyBulkCheckEventToRow);
+            const missingCount = bulkCheckItems.filter((item) => item.exists === false).length;
+            const existingCount = bulkCheckItems.filter((item) => item.exists === true).length;
+            const errorCount = bulkCheckItems.filter((item) => Boolean(String(item?.error || "").trim())).length;
+
+            if (finalState?.error) {
+              markBulkCheckRowsFailedIfPending(finalState.error);
+              setLiveMessage(finalState.error, "error");
+            } else if (errorCount > 0) {
+              setLiveMessage(
+                `Sorgu tamamlandı. Yok: ${missingCount}, Var: ${existingCount}, Hata: ${errorCount}.`,
+                "error"
+              );
             } else {
-              setLiveMessage("Sorgu tamamlandı. Var/Yok durumuna göre filtreleyip yok olanları oluşturabilirsiniz.", "success");
+              setLiveMessage(`Sorgu tamamlandı. Yok: ${missingCount}, Var: ${existingCount}.`, "success");
             }
           } catch (err) {
             setLiveMessage(err?.message || "Toplu kullanıcı sorgusu tamamlanamadı.", "error");
