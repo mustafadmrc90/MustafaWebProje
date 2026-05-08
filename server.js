@@ -16357,6 +16357,7 @@ function extractObusUsersWithoutPermissionsRows(
   {
     usernameFilter = "",
     usernameFilters = [],
+    collectDebug = true,
     clusterLabel = "",
     fallbackPartnerId = "",
     expectedPartnerId = "",
@@ -16384,16 +16385,23 @@ function extractObusUsersWithoutPermissionsRows(
   ];
   const partnerCodeAliases = ["partner-code", "partner_code", "partnercode", "partnerCode", "code", "Code"];
   const collected = [];
-  const debug = {
-    candidateCount: 0,
-    acceptedCount: 0,
-    skippedMissingFieldCount: 0,
-    skippedInactiveCount: 0,
-    skippedUnknownStateCount: 0,
-    skippedUsernameMismatchCount: 0,
-    skippedMissingTargetContextCount: 0,
-    skippedTargetMismatchCount: 0,
-    samples: []
+  const debug =
+    collectDebug === true
+      ? {
+          candidateCount: 0,
+          acceptedCount: 0,
+          skippedMissingFieldCount: 0,
+          skippedInactiveCount: 0,
+          skippedUnknownStateCount: 0,
+          skippedUsernameMismatchCount: 0,
+          skippedMissingTargetContextCount: 0,
+          skippedTargetMismatchCount: 0,
+          samples: []
+        }
+      : null;
+  const incrementDebug = (key) => {
+    if (!debug || !key) return;
+    debug[key] = Number(debug[key] || 0) + 1;
   };
   const passiveAliases = [
     "is-passive",
@@ -16495,6 +16503,7 @@ function extractObusUsersWithoutPermissionsRows(
     statusKeywordRaw,
     statusRaw
   } = {}) => {
+    if (!debug) return;
     const usernameText = String(normalizedUsername || "").trim();
     const normalizedSampleUsername = usernameText.toLocaleLowerCase("tr");
     const shouldInclude =
@@ -16551,14 +16560,14 @@ function extractObusUsersWithoutPermissionsRows(
 
   const pushCandidateRow = (row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) return;
-    debug.candidateCount += 1;
+    incrementDebug("candidateCount");
 
     const usernameRaw = readPartnerRawValueByAliases(row, usernameAliases);
     const username = formatPartnerCellValue(usernameRaw);
     const normalizedUsername = String(username || "").trim();
     const normalizedUsernameKey = normalizedUsername.toLocaleLowerCase("tr");
     if (hasUsernameFilterSet && normalizedUsernameKey && !normalizedFilterSet.has(normalizedUsernameKey)) {
-      debug.skippedUsernameMismatchCount += 1;
+      incrementDebug("skippedUsernameMismatchCount");
       return;
     }
 
@@ -16584,7 +16593,7 @@ function extractObusUsersWithoutPermissionsRows(
     const normalizedId = String(id || "").trim();
     const normalizedPartnerId = String(partnerId || "").trim();
     if (!normalizedId || !normalizedPartnerId || !normalizedUsername) {
-      debug.skippedMissingFieldCount += 1;
+      incrementDebug("skippedMissingFieldCount");
       buildDebugSample({
         normalizedId,
         normalizedPartnerId,
@@ -16604,7 +16613,7 @@ function extractObusUsersWithoutPermissionsRows(
       const hasExplicitPartnerId = Boolean(explicitPartnerId);
       const hasExplicitPartnerCode = Boolean(explicitPartnerCode);
       if (!hasExplicitPartnerId && !hasExplicitPartnerCode) {
-        debug.skippedMissingTargetContextCount += 1;
+        incrementDebug("skippedMissingTargetContextCount");
         buildDebugSample({
           normalizedId,
           normalizedPartnerId,
@@ -16621,7 +16630,7 @@ function extractObusUsersWithoutPermissionsRows(
         return;
       }
       if (hasExplicitPartnerId && normalizedExpectedPartnerId && explicitPartnerId !== normalizedExpectedPartnerId) {
-        debug.skippedTargetMismatchCount += 1;
+        incrementDebug("skippedTargetMismatchCount");
         buildDebugSample({
           normalizedId,
           normalizedPartnerId,
@@ -16639,7 +16648,7 @@ function extractObusUsersWithoutPermissionsRows(
       }
       if (!hasExplicitPartnerId && hasExplicitPartnerCode && normalizedExpectedPartnerCode) {
         if (explicitPartnerCode.toLocaleLowerCase("tr") !== normalizedExpectedPartnerCode) {
-          debug.skippedTargetMismatchCount += 1;
+          incrementDebug("skippedTargetMismatchCount");
           buildDebugSample({
             normalizedId,
             normalizedPartnerId,
@@ -16659,9 +16668,9 @@ function extractObusUsersWithoutPermissionsRows(
     }
     if (strictIsActive !== true) {
       if (strictIsActive === false) {
-        debug.skippedInactiveCount += 1;
+        incrementDebug("skippedInactiveCount");
       } else {
-        debug.skippedUnknownStateCount += 1;
+        incrementDebug("skippedUnknownStateCount");
       }
       buildDebugSample({
         normalizedId,
@@ -16680,9 +16689,9 @@ function extractObusUsersWithoutPermissionsRows(
     }
     if (isActive !== true) {
       if (isActive === false) {
-        debug.skippedInactiveCount += 1;
+        incrementDebug("skippedInactiveCount");
       } else {
-        debug.skippedUnknownStateCount += 1;
+        incrementDebug("skippedUnknownStateCount");
       }
       buildDebugSample({
         normalizedId,
@@ -16700,7 +16709,7 @@ function extractObusUsersWithoutPermissionsRows(
       return;
     }
     if (normalizedFilter && normalizedUsernameKey !== normalizedFilter) {
-      debug.skippedUsernameMismatchCount += 1;
+      incrementDebug("skippedUsernameMismatchCount");
       buildDebugSample({
         normalizedId,
         normalizedPartnerId,
@@ -16716,7 +16725,7 @@ function extractObusUsersWithoutPermissionsRows(
       });
       return;
     }
-    debug.acceptedCount += 1;
+    incrementDebug("acceptedCount");
     buildDebugSample({
       normalizedId,
       normalizedPartnerId,
@@ -16814,6 +16823,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({
   target,
   usernameFilter,
   usernameFilters = null,
+  collectParserDebug = true,
   includeVerboseDebug = false,
   sessionCache = null
 }) {
@@ -16874,7 +16884,7 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     sessionCache
   });
   debugItem.loginUrl = String(loginResult?.loginUrl || "").trim();
-  if (includeVerboseDebug) {
+  if (includeVerboseDebug || !loginResult?.ok) {
     debugItem.loginServiceLogs = Array.isArray(loginResult?.serviceLogs) ? loginResult.serviceLogs : [];
   }
   if (!loginResult.ok) {
@@ -16922,29 +16932,36 @@ async function fetchObusUsersWithoutPermissionsForTarget({
     const raw = await response.text();
     const parsed = parseJsonSafe(raw);
     const requestNote = "body-without-data";
-    debugItem.requestPreview = stringifyObusUserDeactivateTraceValue(requestBody, 3200);
-    debugItem.responsePreview = stringifyObusUserDeactivateTraceValue(parsed ?? raw, 4200);
     debugItem.responseStatus = response.status;
     debugItem.responseNote = requestNote;
+    if (includeVerboseDebug || !response.ok) {
+      debugItem.requestPreview = stringifyObusUserDeactivateTraceValue(requestBody, 3200);
+      debugItem.responsePreview = stringifyObusUserDeactivateTraceValue(parsed ?? raw, 4200);
+    }
     const apiError =
       (parsed &&
         typeof parsed === "object" &&
         String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
       response.statusText ||
       "Bilinmeyen hata";
-    const requestTrace = buildObusServiceTraceEntry({
-      service: "GetUsersWithoutPermissions",
-      url: endpointUrl,
-      status: response.status,
-      requestBody,
-      responseBody: parsed ?? raw,
-      note: requestNote
-    });
+    const requestTrace =
+      includeVerboseDebug || !response.ok
+        ? buildObusServiceTraceEntry({
+            service: "GetUsersWithoutPermissions",
+            url: endpointUrl,
+            status: response.status,
+            requestBody,
+            responseBody: parsed ?? raw,
+            note: requestNote
+          })
+        : null;
 
     if (!response.ok) {
-      if (includeVerboseDebug) {
+      if (requestTrace) {
         requestTrace.error = truncateObusDebugText(apiError, 260);
-        debugItem.requestTraces.push(requestTrace);
+        if (includeVerboseDebug) {
+          debugItem.requestTraces.push(requestTrace);
+        }
       }
       debugItem.error = `${cluster}: HTTP ${response.status}: ${apiError} (${companyRef})`;
       return {
@@ -16960,9 +16977,11 @@ async function fetchObusUsersWithoutPermissionsForTarget({
       typeof parsed === "object" &&
       ("status" in parsed || "success" in parsed || "status-code" in parsed);
     if (hasStatusField && !isSuccessStatusPayload(parsed)) {
-      if (includeVerboseDebug) {
+      if (requestTrace) {
         requestTrace.error = truncateObusDebugText(apiError, 260);
-        debugItem.requestTraces.push(requestTrace);
+        if (includeVerboseDebug) {
+          debugItem.requestTraces.push(requestTrace);
+        }
       }
       debugItem.error = `${cluster}: ${apiError || "GetUsersWithoutPermissions başarısız."} (${companyRef})`;
       return {
@@ -16973,12 +16992,13 @@ async function fetchObusUsersWithoutPermissionsForTarget({
       };
     }
 
-    if (includeVerboseDebug) {
+    if (includeVerboseDebug && requestTrace) {
       debugItem.requestTraces.push(requestTrace);
     }
     const extractedResult = extractObusUsersWithoutPermissionsRows(parsed, {
       usernameFilter,
       usernameFilters,
+      collectDebug: collectParserDebug,
       clusterLabel: cluster,
       fallbackPartnerId: partnerId,
       expectedPartnerId: partnerId,
@@ -19495,7 +19515,7 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries, onItemRes
               companyLabel,
               entry,
               errorText,
-              includeVerbose: true
+              includeVerbose: false
             }),
             logLines: [errorText]
           };
@@ -19514,8 +19534,9 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries, onItemRes
       const searchResult = await fetchObusUsersWithoutPermissionsForTarget({
         target,
         usernameFilters: requestedUsernames,
+        collectParserDebug: false,
         sessionCache: sharedSessionCache,
-        includeVerboseDebug: notifyItemResult !== null
+        includeVerboseDebug: false
       });
       if (searchResult?.error) {
         return companyEntryItems.map((entry) => {
@@ -19537,7 +19558,7 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries, onItemRes
               companyLabel,
               entry,
               errorText,
-              includeVerbose: true
+              includeVerbose: false
             }),
             logLines: [errorText]
           };

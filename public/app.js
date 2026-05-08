@@ -4143,6 +4143,8 @@
     let legacyBulkTemplatesImportAttempted = false;
     let typeAheadText = "";
     let typeAheadTimerId = null;
+    let bulkUiBatchDepth = 0;
+    let bulkUiNeedsAggregateRefresh = false;
 
     const parseJson = (raw, fallback) => {
       const text = String(raw || "").trim();
@@ -4364,6 +4366,31 @@
         return key && bulkSelectedCreateKeys.has(key) && isBulkMissingCandidate(item);
       }).length;
       bulkCreateBtn.disabled = selectedCount === 0;
+    };
+    const flushBulkAggregateUiRefresh = () => {
+      updateBulkCounters();
+      updateBulkSelectAllState();
+      updateBulkCreateButtonState();
+    };
+    const beginBulkUiBatch = () => {
+      bulkUiBatchDepth += 1;
+    };
+    const endBulkUiBatch = () => {
+      if (bulkUiBatchDepth > 0) {
+        bulkUiBatchDepth -= 1;
+      }
+      if (bulkUiBatchDepth === 0 && bulkUiNeedsAggregateRefresh) {
+        bulkUiNeedsAggregateRefresh = false;
+        flushBulkAggregateUiRefresh();
+      }
+    };
+    const runBulkUiBatch = (callback) => {
+      beginBulkUiBatch();
+      try {
+        return typeof callback === "function" ? callback() : undefined;
+      } finally {
+        endBulkUiBatch();
+      }
     };
     const updateBulkSelectAllState = () => {
       if (!bulkSelectAllCheckbox) return;
@@ -4800,9 +4827,11 @@
         bulkSelectedCreateKeys.delete(normalizedKey);
       }
       updateBulkCheckRowStatusByKey(normalizedKey);
-      updateBulkCounters();
-      updateBulkSelectAllState();
-      updateBulkCreateButtonState();
+      if (bulkUiBatchDepth > 0) {
+        bulkUiNeedsAggregateRefresh = true;
+      } else {
+        flushBulkAggregateUiRefresh();
+      }
     };
     const buildBulkCheckEventStatusState = (eventItem) => {
       const rawStatusKind = String(eventItem?.statusKind || "").trim().toLocaleLowerCase("tr");
@@ -4890,47 +4919,53 @@
     };
     const markBulkCheckRowsFailedIfPending = (errorText) => {
       const fallbackError = String(errorText || "").trim() || "Toplu kullanıcı sorgusu tamamlanamadı.";
-      bulkCheckItems.forEach((item) => {
-        const key = String(item?.key || "").trim();
-        const currentKind = String(item?.liveStatusKind || "").trim();
-        const alreadyFinal = item?.exists === true || item?.exists === false || Boolean(String(item?.error || "").trim());
-        if (!key || alreadyFinal || currentKind === "failure") return;
-        item.exists = null;
-        item.error = fallbackError;
-        item.errorDetail = fallbackError;
-        item.detailText = fallbackError;
-        setBulkCheckItemLiveState({
-          key,
-          lines: [fallbackError],
-          kind: "failure",
-          detailBlocks: [fallbackError]
+      runBulkUiBatch(() => {
+        bulkCheckItems.forEach((item) => {
+          const key = String(item?.key || "").trim();
+          const currentKind = String(item?.liveStatusKind || "").trim();
+          const alreadyFinal = item?.exists === true || item?.exists === false || Boolean(String(item?.error || "").trim());
+          if (!key || alreadyFinal || currentKind === "failure") return;
+          item.exists = null;
+          item.error = fallbackError;
+          item.errorDetail = fallbackError;
+          item.detailText = fallbackError;
+          setBulkCheckItemLiveState({
+            key,
+            lines: [fallbackError],
+            kind: "failure",
+            detailBlocks: [fallbackError]
+          });
         });
       });
     };
     const markBulkCreateTargetsQueued = (items) => {
-      (Array.isArray(items) ? items : []).forEach((item) => {
-        const key = String(item?.key || "").trim();
-        if (!key) return;
-        setBulkCheckItemLiveState({
-          key,
-          lines: ["Sırada"],
-          kind: "progress",
-          detailBlocks: []
+      runBulkUiBatch(() => {
+        (Array.isArray(items) ? items : []).forEach((item) => {
+          const key = String(item?.key || "").trim();
+          if (!key) return;
+          setBulkCheckItemLiveState({
+            key,
+            lines: ["Sırada"],
+            kind: "progress",
+            detailBlocks: []
+          });
         });
       });
     };
     const markBulkCreateTargetsFailedIfPending = (items, errorText) => {
       const fallbackError = String(errorText || "").trim() || "İşlem tamamlanamadı.";
-      (Array.isArray(items) ? items : []).forEach((item) => {
-        const key = String(item?.key || "").trim();
-        const currentItem = bulkCheckItemByKey.get(key);
-        const currentKind = String(currentItem?.liveStatusKind || "").trim();
-        if (!key || currentKind === "success" || currentKind === "failure") return;
-        setBulkCheckItemLiveState({
-          key,
-          lines: [fallbackError],
-          kind: "failure",
-          detailBlocks: [fallbackError]
+      runBulkUiBatch(() => {
+        (Array.isArray(items) ? items : []).forEach((item) => {
+          const key = String(item?.key || "").trim();
+          const currentItem = bulkCheckItemByKey.get(key);
+          const currentKind = String(currentItem?.liveStatusKind || "").trim();
+          if (!key || currentKind === "success" || currentKind === "failure") return;
+          setBulkCheckItemLiveState({
+            key,
+            lines: [fallbackError],
+            kind: "failure",
+            detailBlocks: [fallbackError]
+          });
         });
       });
     };
@@ -4993,8 +5028,10 @@
         }
 
         const events = Array.isArray(data.events) ? data.events : [];
-        events.forEach((eventItem) => {
-          if (typeof onEvent === "function") onEvent(eventItem);
+        runBulkUiBatch(() => {
+          events.forEach((eventItem) => {
+            if (typeof onEvent === "function") onEvent(eventItem);
+          });
         });
         cursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : cursor;
         setLiveCounters({
