@@ -11,7 +11,7 @@
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
-      <div class="station-passenger-mobile-shell" data-station-passenger-page="1">
+      <div class="station-passenger-mobile-shell" data-station-passenger-page="1" data-station-passenger-search-mode="realtime">
         <section class="station-passenger-mobile-screen">
           <header class="page-header">
             <div class="page-title">
@@ -31,6 +31,34 @@
             </div>
           </header>
           <%- include("partials/page-screen-log", { screenLogPanel }) %>
+
+          <section class="table-card panel-card station-passenger-mode-card">
+            <div
+              class="station-passenger-mode-toggle"
+              data-station-passenger-mode-toggle
+              data-search-mode="realtime"
+              role="group"
+              aria-label="Durak yolcu bilgisi sorgu modu"
+            >
+              <span class="station-passenger-mode-toggle-thumb" aria-hidden="true"></span>
+              <button
+                type="button"
+                class="station-passenger-mode-button is-active"
+                data-station-passenger-mode-button="realtime"
+                aria-pressed="true"
+              >
+                Gerçek zamanda sorgula
+              </button>
+              <button
+                type="button"
+                class="station-passenger-mode-button"
+                data-station-passenger-mode-button="all-stations"
+                aria-pressed="false"
+              >
+                Tüm durakları sorgula
+              </button>
+            </div>
+          </section>
 
           <section class="table-card panel-card station-passenger-plate-card">
             <label class="station-passenger-field" for="station-passenger-plate">

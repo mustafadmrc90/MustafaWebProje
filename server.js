@@ -4915,17 +4915,40 @@ async function resolveStationPassengerTargetCandidate({ endpointUrl = "", cluste
       (!itemCluster || itemCluster === normalizedClusterLabel)
     );
   });
-
-  return {
-    candidate: targetCandidateFromCache || {
+  const baseCandidate =
+    targetCandidateFromCache || {
       code: targetCode,
       id: targetId,
       cluster: normalizedClusterLabel,
       url: endpointUrl,
-      branchId: targetId
+      branchId: ""
+    };
+
+  let resolvedBranchId = String(baseCandidate?.branchId || "").trim();
+  let branchLookupError = "";
+  if (!resolvedBranchId && normalizedClusterLabel && targetCode && targetId) {
+    const branchLookupResult = await fetchObusMerkezBranchMapForTarget({
+      clusterLabel: normalizedClusterLabel,
+      partnerCode: targetCode,
+      fallbackPartnerId: targetId
+    });
+    branchLookupError = String(branchLookupResult?.error || "").trim();
+    resolvedBranchId =
+      String(branchLookupResult?.map?.get?.(targetId) || "").trim() ||
+      String(
+        (Array.isArray(branchLookupResult?.rows)
+          ? branchLookupResult.rows.find((item) => String(item?.partnerId || "").trim() === targetId)
+          : null)?.branchId || ""
+      ).trim();
+  }
+
+  return {
+    candidate: {
+      ...baseCandidate,
+      branchId: resolvedBranchId || String(baseCandidate?.branchId || "").trim() || targetId
     },
     fromCache: Boolean(targetCandidateFromCache),
-    partnerError: String(partnerError || "").trim()
+    partnerError: [String(partnerError || "").trim(), branchLookupError].filter(Boolean).join(" | ")
   };
 }
 

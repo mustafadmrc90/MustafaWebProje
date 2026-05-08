@@ -3199,8 +3199,13 @@
     if (page.dataset.bound === "1") return;
     page.dataset.bound = "1";
 
+    const stationPassengerSearchModeStorageKey = "stationPassengerSearchMode";
+    const normalizeStationPassengerSearchMode = (value) =>
+      String(value || "").trim().toLowerCase() === "all-stations" ? "all-stations" : "realtime";
     const plateInput = page.querySelector("[data-station-passenger-plate-input]");
     const goButton = page.querySelector("[data-station-passenger-go-button]");
+    const modeToggleEl = page.querySelector("[data-station-passenger-mode-toggle]");
+    const modeButtons = Array.from(page.querySelectorAll("[data-station-passenger-mode-button]"));
     const statusEl = page.querySelector("[data-station-passenger-status]");
     const resultsListEl = page.querySelector("[data-station-passenger-results-list]");
     const resultsCountEl = page.querySelector("[data-station-passenger-results-count]");
@@ -3218,6 +3223,8 @@
     if (
       !plateInput ||
       !goButton ||
+      !modeToggleEl ||
+      modeButtons.length < 2 ||
       !statusEl ||
       !resultsListEl ||
       !resultsCountEl ||
@@ -3238,6 +3245,7 @@
 
     let requestSequence = 0;
     let selectedResultIndex = -1;
+    let selectedSearchMode = normalizeStationPassengerSearchMode(page.dataset.stationPassengerSearchMode);
     let resultItems = [];
     let selectedTripId = "";
     const journeyStationsCache = new Map();
@@ -3249,6 +3257,47 @@
     page.stationPassengerSelectedJourneyStations = [];
     page.stationPassengerSelectedNextStation = null;
     page.stationPassengerSelectedPassengerState = null;
+
+    const readStoredSearchMode = () => {
+      try {
+        return normalizeStationPassengerSearchMode(window.localStorage.getItem(stationPassengerSearchModeStorageKey));
+      } catch (err) {
+        return "realtime";
+      }
+    };
+
+    const persistSearchMode = (mode) => {
+      try {
+        window.localStorage.setItem(stationPassengerSearchModeStorageKey, mode);
+      } catch (err) {
+        // Ignore storage failures and keep in-memory mode.
+      }
+    };
+
+    const setSearchMode = (mode, { persist = true } = {}) => {
+      selectedSearchMode = normalizeStationPassengerSearchMode(mode);
+      page.dataset.stationPassengerSearchMode = selectedSearchMode;
+      modeToggleEl.dataset.searchMode = selectedSearchMode;
+
+      modeButtons.forEach((buttonEl) => {
+        const buttonMode = normalizeStationPassengerSearchMode(buttonEl.dataset.stationPassengerModeButton);
+        const isActive = buttonMode === selectedSearchMode;
+        buttonEl.classList.toggle("is-active", isActive);
+        buttonEl.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      if (persist) {
+        persistSearchMode(selectedSearchMode);
+      }
+    };
+
+    setSearchMode(readStoredSearchMode(), { persist: false });
+
+    modeButtons.forEach((buttonEl) => {
+      buttonEl.addEventListener("click", () => {
+        setSearchMode(buttonEl.dataset.stationPassengerModeButton);
+      });
+    });
 
     const normalizePlateDisplay = (value) =>
       String(value || "")
@@ -3882,7 +3931,7 @@
       return requestPromise;
     };
 
-    const runSearch = async () => {
+    const executeSearchRequest = async () => {
       const displayPlate = normalizePlateDisplay(plateInput.value);
       if (!displayPlate.replace(/\s+/g, "")) {
         setStatus("Plaka girilmesi zorunludur.", "error");
@@ -3938,6 +3987,28 @@
       }
     };
 
+    const runRealtimeSearch = async () => executeSearchRequest();
+    const runAllStationsSearch = async () => executeSearchRequest();
+
+    const runSearch = async () => {
+      if (selectedSearchMode === "all-stations") {
+        return runAllStationsSearch();
+      }
+      return runRealtimeSearch();
+    };
+
+    const handleRealtimeJourneySelection = async ({ tripId, item, index }) =>
+      loadJourneyStations({ tripId, item, index });
+    const handleAllStationsJourneySelection = async ({ tripId, item, index }) =>
+      loadJourneyStations({ tripId, item, index });
+
+    const handleJourneySelection = async ({ tripId, item, index }) => {
+      if (selectedSearchMode === "all-stations") {
+        return handleAllStationsJourneySelection({ tripId, item, index });
+      }
+      return handleRealtimeJourneySelection({ tripId, item, index });
+    };
+
     plateInput.addEventListener("input", () => {
       const normalized = String(plateInput.value || "")
         .toLocaleUpperCase("tr")
@@ -3973,7 +4044,7 @@
           }
         })
       );
-      void loadJourneyStations({
+      void handleJourneySelection({
         tripId: String(resultItems[nextIndex]?.tripId || "").trim(),
         item: resultItems[nextIndex],
         index: nextIndex
