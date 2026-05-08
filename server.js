@@ -1,6 +1,7 @@
 const path = require("path");
 const fsSync = require("fs");
 const fs = require("fs/promises");
+const { execFileSync } = require("child_process");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
@@ -50,6 +51,67 @@ function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
 }
 
 loadLocalEnvFile();
+
+const MACOS_KEYCHAIN_ACCOUNT = "default";
+const MACOS_KEYCHAIN_SERVICE_PREFIX = "MustafaWebProje";
+const macOsKeychainSecretCache = new Map();
+
+function buildMacOsKeychainServiceName(secretName = "") {
+  return `${MACOS_KEYCHAIN_SERVICE_PREFIX}/${String(secretName || "").trim()}`;
+}
+
+function normalizeMacOsKeychainSecretValue(rawValue, trim = true) {
+  const text = String(rawValue == null ? "" : rawValue).replace(/\r?\n$/, "");
+  return trim ? text.trim() : text;
+}
+
+function readMacOsKeychainSecret(secretName, { trim = true } = {}) {
+  if (process.platform !== "darwin") return "";
+
+  const normalizedSecretName = String(secretName || "").trim();
+  if (!normalizedSecretName) return "";
+
+  const cacheKey = `${normalizedSecretName}:${trim ? "trim" : "raw"}`;
+  if (macOsKeychainSecretCache.has(cacheKey)) {
+    return macOsKeychainSecretCache.get(cacheKey);
+  }
+
+  try {
+    const serviceName = buildMacOsKeychainServiceName(normalizedSecretName);
+    const rawValue = execFileSync(
+      "/usr/bin/security",
+      ["find-generic-password", "-a", MACOS_KEYCHAIN_ACCOUNT, "-s", serviceName, "-w"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    const normalizedValue = normalizeMacOsKeychainSecretValue(rawValue, trim);
+    macOsKeychainSecretCache.set(cacheKey, normalizedValue);
+    return normalizedValue;
+  } catch (err) {
+    macOsKeychainSecretCache.set(cacheKey, "");
+    return "";
+  }
+}
+
+function joinSecretNamesForDisplay(secretNames = []) {
+  const names = (Array.isArray(secretNames) ? secretNames : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} ve ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} ve ${names[names.length - 1]}`;
+}
+
+function buildMissingMacOsKeychainSecretsMessage(secretNames = []) {
+  const secretText = joinSecretNamesForDisplay(secretNames);
+  if (!secretText) {
+    return "Gerekli macOS Keychain secret'i bulunamadi.";
+  }
+  return `macOS Keychain'de ${secretText} bulunamadi. scripts/setup-macos-keychain-secrets.sh calistirin.`;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -140,8 +202,10 @@ const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
-const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGIN_USERNAME || "").trim();
-const OBUS_USER_CREATE_LOGIN_PASSWORD = String(process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "");
+const OBUS_USER_CREATE_LOGIN_USERNAME = readMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_USERNAME");
+const OBUS_USER_CREATE_LOGIN_PASSWORD = readMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_PASSWORD", {
+  trim: false
+});
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
 const OBUS_LIVE_JOB_MAX_EVENTS = Number.parseInt(process.env.OBUS_LIVE_JOB_MAX_EVENTS || "10000", 10) || 10000;
 const INVENTORY_BRANCHES_API_URL =
@@ -149,8 +213,10 @@ const INVENTORY_BRANCHES_API_URL =
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
 const INVENTORY_BRANCHES_API_AUTH =
   process.env.INVENTORY_BRANCHES_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
-const INVENTORY_BRANCHES_LOGIN_USERNAME = String(process.env.INVENTORY_BRANCHES_LOGIN_USERNAME || "").trim();
-const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(process.env.INVENTORY_BRANCHES_LOGIN_PASSWORD || "");
+const INVENTORY_BRANCHES_LOGIN_USERNAME = readMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_USERNAME");
+const INVENTORY_BRANCHES_LOGIN_PASSWORD = readMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_PASSWORD", {
+  trim: false
+});
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const STATION_PASSENGER_INFO_API_URL =
@@ -451,8 +517,10 @@ const SCREEN_ACTION_LOG_SKIP_PATTERNS = [
   /^\/api\/obus-live\/[^/]+/i,
   /^\/api\/screen-logs\/[^/]+/i
 ];
-const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "").trim();
-const OBUS_JOB_FIXED_PASSWORD = String(process.env.OBUS_JOB_FIXED_PASSWORD || "");
+const OBUS_JOB_FIXED_USERNAME = readMacOsKeychainSecret("OBUS_JOB_FIXED_USERNAME");
+const OBUS_JOB_FIXED_PASSWORD = readMacOsKeychainSecret("OBUS_JOB_FIXED_PASSWORD", {
+  trim: false
+});
 const OBUS_JOBS_AUTO_RUN_ENABLED =
   String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
 const OBUS_JOBS_AUTO_RUN_TIME = String(process.env.OBUS_JOBS_AUTO_RUN_TIME || "10:00").trim();
@@ -6866,7 +6934,10 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       requestUrl: endpointUrl,
       requestDate,
       requestDateTime,
-      error: "INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD zorunludur.",
+      error: buildMissingMacOsKeychainSecretsMessage([
+        "INVENTORY_BRANCHES_LOGIN_USERNAME",
+        "INVENTORY_BRANCHES_LOGIN_PASSWORD"
+      ]),
       detail: ""
     };
   }
@@ -7524,7 +7595,10 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   if (!INVENTORY_BRANCHES_LOGIN_USERNAME || !INVENTORY_BRANCHES_LOGIN_PASSWORD) {
     return {
       rows: sourceRows,
-      notice: "ObusMerkezSubeID için INVENTORY_BRANCHES_LOGIN_USERNAME ve INVENTORY_BRANCHES_LOGIN_PASSWORD gerekli."
+      notice: buildMissingMacOsKeychainSecretsMessage([
+        "INVENTORY_BRANCHES_LOGIN_USERNAME",
+        "INVENTORY_BRANCHES_LOGIN_PASSWORD"
+      ])
     };
   }
 
@@ -15924,6 +15998,14 @@ async function executeObusJobsScreenAction({ filters, partnerItems }) {
   const report = buildObusJobsReportModel();
   report.requested = true;
 
+  if (!OBUS_JOB_FIXED_USERNAME || !OBUS_JOB_FIXED_PASSWORD) {
+    report.error = buildMissingMacOsKeychainSecretsMessage([
+      "OBUS_JOB_FIXED_USERNAME",
+      "OBUS_JOB_FIXED_PASSWORD"
+    ]);
+    return report;
+  }
+
   const endpointBaseUrl = String(filters.endpointUrl || OBUS_JOBS_API_URL).trim() || OBUS_JOBS_API_URL;
   const companyCandidatesByCluster = buildClusterCompanyCandidates(partnerItems);
   const clusterLabels = Array.from(
@@ -17811,6 +17893,16 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
       return res.status(400).json({ ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." });
     }
 
+    if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+      return res.status(400).json({
+        ok: false,
+        error: buildMissingMacOsKeychainSecretsMessage([
+          "OBUS_USER_CREATE_LOGIN_USERNAME",
+          "OBUS_USER_CREATE_LOGIN_PASSWORD"
+        ])
+      });
+    }
+
     const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
     if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
       return res.status(400).json({ ok: false, error: partnerError });
@@ -17911,6 +18003,16 @@ app.post("/api/obus-rule-define/update", requireAuth, requireMenuAccess("obus-ru
       parsedCapacityBegin > parsedCapacityEnd
     ) {
       return res.status(400).json({ ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." });
+    }
+
+    if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+      return res.status(400).json({
+        ok: false,
+        error: buildMissingMacOsKeychainSecretsMessage([
+          "OBUS_USER_CREATE_LOGIN_USERNAME",
+          "OBUS_USER_CREATE_LOGIN_PASSWORD"
+        ])
+      });
     }
 
     const { companies, partnerItems, partnerError } = await loadAuthorizedLinesCompanies();

@@ -41,14 +41,25 @@ cp .env.example .env
 
 - `INVENTORY_BRANCHES_API_URL` (varsayılan: `https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches`)
 - `INVENTORY_BRANCHES_API_AUTH` (varsayılan: `Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt`)
-- `INVENTORY_BRANCHES_LOGIN_USERNAME` (`ObusMerkezSubeID` doldurma ve Station Passenger `userlogin` akisi icin gerekli)
-- `INVENTORY_BRANCHES_LOGIN_PASSWORD` (`ObusMerkezSubeID` doldurma ve Station Passenger `userlogin` akisi icin gerekli)
-- `OBUS_JOB_FIXED_USERNAME` (Obus Jobs servis login'i icin gerekli; kodda default yok)
-- `OBUS_JOB_FIXED_PASSWORD` (Obus Jobs servis login'i icin gerekli; kodda default yok)
-- `OBUS_USER_CREATE_LOGIN_USERNAME` (partner rule login'i icin gerekli; kodda default yok)
-- `OBUS_USER_CREATE_LOGIN_PASSWORD` (partner rule login'i icin gerekli; kodda default yok)
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
+
+### macOS Keychain Secret'lari
+
+Asagidaki login bilgileri `.env` dosyasindan degil, macOS Keychain'den okunur:
+
+- `MustafaWebProje/INVENTORY_BRANCHES_LOGIN_USERNAME`
+- `MustafaWebProje/INVENTORY_BRANCHES_LOGIN_PASSWORD`
+- `MustafaWebProje/OBUS_JOB_FIXED_USERNAME`
+- `MustafaWebProje/OBUS_JOB_FIXED_PASSWORD`
+- `MustafaWebProje/OBUS_USER_CREATE_LOGIN_USERNAME`
+- `MustafaWebProje/OBUS_USER_CREATE_LOGIN_PASSWORD`
+
+Kurulum icin:
+
+```bash
+./scripts/setup-macos-keychain-secrets.sh
+```
 
 ### Opsiyonel Jira Analiz Ortam Değişkenleri
 
