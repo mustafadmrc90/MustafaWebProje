@@ -284,6 +284,10 @@ body {
   padding: 24px;
 }
 
+.screen-log-modal[hidden] {
+  display: none;
+}
+
 .screen-log-backdrop {
   position: absolute;
   inset: 0;

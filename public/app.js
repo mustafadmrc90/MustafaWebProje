@@ -6354,6 +6354,7 @@
 
       const setOpen = (open) => {
         modal.hidden = !open;
+        modal.setAttribute("aria-hidden", open ? "false" : "true");
         toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
         syncScreenLogBodyState();
         if (open) {
