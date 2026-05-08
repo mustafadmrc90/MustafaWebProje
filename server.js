@@ -65,6 +65,18 @@ function normalizeMacOsKeychainSecretValue(rawValue, trim = true) {
   return trim ? text.trim() : text;
 }
 
+function readLegacyLocalSecret(secretNames = [], { trim = true } = {}) {
+  const names = Array.isArray(secretNames) ? secretNames : [secretNames];
+  for (const name of names) {
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName) continue;
+    const rawValue = process.env[normalizedName];
+    const normalizedValue = normalizeMacOsKeychainSecretValue(rawValue, trim);
+    if (normalizedValue) return normalizedValue;
+  }
+  return "";
+}
+
 function readMacOsKeychainSecret(secretName, { trim = true } = {}) {
   if (process.platform !== "darwin") return "";
 
@@ -95,6 +107,43 @@ function readMacOsKeychainSecret(secretName, { trim = true } = {}) {
   }
 }
 
+function writeMacOsKeychainSecret(secretName, secretValue, { trim = true } = {}) {
+  if (process.platform !== "darwin") return false;
+
+  const normalizedSecretName = String(secretName || "").trim();
+  const normalizedSecretValue = normalizeMacOsKeychainSecretValue(secretValue, trim);
+  if (!normalizedSecretName || !normalizedSecretValue) return false;
+
+  try {
+    const serviceName = buildMacOsKeychainServiceName(normalizedSecretName);
+    execFileSync(
+      "/usr/bin/security",
+      ["add-generic-password", "-U", "-a", MACOS_KEYCHAIN_ACCOUNT, "-s", serviceName, "-w", normalizedSecretValue],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    macOsKeychainSecretCache.set(`${normalizedSecretName}:trim`, normalizedSecretValue.trim());
+    macOsKeychainSecretCache.set(`${normalizedSecretName}:raw`, normalizedSecretValue);
+    return true;
+  } catch (err) {
+    console.warn(`macOS Keychain yazma hatasi (${normalizedSecretName}): ${err?.message || "Bilinmeyen hata"}`);
+    return false;
+  }
+}
+
+function resolveMacOsKeychainSecret(secretName, { trim = true, legacyEnvNames = [] } = {}) {
+  const keychainValue = readMacOsKeychainSecret(secretName, { trim });
+  if (keychainValue) return keychainValue;
+
+  const fallbackValue = readLegacyLocalSecret(legacyEnvNames, { trim });
+  if (!fallbackValue) return "";
+
+  writeMacOsKeychainSecret(secretName, fallbackValue, { trim });
+  return fallbackValue;
+}
+
 function joinSecretNamesForDisplay(secretNames = []) {
   const names = (Array.isArray(secretNames) ? secretNames : [])
     .map((item) => String(item || "").trim())
@@ -108,9 +157,9 @@ function joinSecretNamesForDisplay(secretNames = []) {
 function buildMissingMacOsKeychainSecretsMessage(secretNames = []) {
   const secretText = joinSecretNamesForDisplay(secretNames);
   if (!secretText) {
-    return "Gerekli macOS Keychain secret'i bulunamadi.";
+    return "Obus servis giris bilgileri tanimli degil.";
   }
-  return `macOS Keychain'de ${secretText} bulunamadi. scripts/setup-macos-keychain-secrets.sh calistirin.`;
+  return `Obus servis giris bilgileri eksik: ${secretText}.`;
 }
 
 const app = express();
@@ -202,9 +251,12 @@ const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
-const OBUS_USER_CREATE_LOGIN_USERNAME = readMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_USERNAME");
-const OBUS_USER_CREATE_LOGIN_PASSWORD = readMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_PASSWORD", {
-  trim: false
+const OBUS_USER_CREATE_LOGIN_USERNAME = resolveMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_USERNAME", {
+  legacyEnvNames: ["OBUS_USER_CREATE_LOGIN_USERNAME", "INVENTORY_BRANCHES_LOGIN_USERNAME"]
+});
+const OBUS_USER_CREATE_LOGIN_PASSWORD = resolveMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_PASSWORD", {
+  trim: false,
+  legacyEnvNames: ["OBUS_USER_CREATE_LOGIN_PASSWORD", "INVENTORY_BRANCHES_LOGIN_PASSWORD"]
 });
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
 const OBUS_LIVE_JOB_MAX_EVENTS = Number.parseInt(process.env.OBUS_LIVE_JOB_MAX_EVENTS || "10000", 10) || 10000;
@@ -213,9 +265,12 @@ const INVENTORY_BRANCHES_API_URL =
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
 const INVENTORY_BRANCHES_API_AUTH =
   process.env.INVENTORY_BRANCHES_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
-const INVENTORY_BRANCHES_LOGIN_USERNAME = readMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_USERNAME");
-const INVENTORY_BRANCHES_LOGIN_PASSWORD = readMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_PASSWORD", {
-  trim: false
+const INVENTORY_BRANCHES_LOGIN_USERNAME = resolveMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_USERNAME", {
+  legacyEnvNames: ["INVENTORY_BRANCHES_LOGIN_USERNAME"]
+});
+const INVENTORY_BRANCHES_LOGIN_PASSWORD = resolveMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_PASSWORD", {
+  trim: false,
+  legacyEnvNames: ["INVENTORY_BRANCHES_LOGIN_PASSWORD"]
 });
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
@@ -517,9 +572,12 @@ const SCREEN_ACTION_LOG_SKIP_PATTERNS = [
   /^\/api\/obus-live\/[^/]+/i,
   /^\/api\/screen-logs\/[^/]+/i
 ];
-const OBUS_JOB_FIXED_USERNAME = readMacOsKeychainSecret("OBUS_JOB_FIXED_USERNAME");
-const OBUS_JOB_FIXED_PASSWORD = readMacOsKeychainSecret("OBUS_JOB_FIXED_PASSWORD", {
-  trim: false
+const OBUS_JOB_FIXED_USERNAME = resolveMacOsKeychainSecret("OBUS_JOB_FIXED_USERNAME", {
+  legacyEnvNames: ["OBUS_JOB_FIXED_USERNAME", "INVENTORY_BRANCHES_LOGIN_USERNAME"]
+});
+const OBUS_JOB_FIXED_PASSWORD = resolveMacOsKeychainSecret("OBUS_JOB_FIXED_PASSWORD", {
+  trim: false,
+  legacyEnvNames: ["OBUS_JOB_FIXED_PASSWORD", "INVENTORY_BRANCHES_LOGIN_PASSWORD"]
 });
 const OBUS_JOBS_AUTO_RUN_ENABLED =
   String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
