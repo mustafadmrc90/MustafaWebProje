@@ -19016,18 +19016,7 @@ function buildObusGetUsersWithoutPermissionsTargetForCompany(company) {
 async function checkObusBulkUsersByCompanies({ companies, userEntries }) {
   const selectedCompanies = Array.isArray(companies) ? companies : [];
   const entries = Array.isArray(userEntries) ? userEntries : [];
-  const workItems = [];
-
-  selectedCompanies.forEach((company) => {
-    entries.forEach((entry) => {
-      workItems.push({
-        company,
-        entry
-      });
-    });
-  });
-
-  if (workItems.length === 0) {
+  if (selectedCompanies.length === 0 || entries.length === 0) {
     return {
       items: [],
       totalCount: 0,
@@ -19037,92 +19026,116 @@ async function checkObusBulkUsersByCompanies({ companies, userEntries }) {
     };
   }
 
-  const workerResults = await runWithConcurrency(
-    workItems,
+  const normalizedEntries = entries.map((entry, index) => {
+    const fullName = String(entry?.fullName || "").trim();
+    const username = String(entry?.username || "").trim();
+    const password = String(entry?.password || "");
+    const entryId = String(entry?.entryId || `row-${index + 1}`).trim() || `row-${index + 1}`;
+    return {
+      fullName,
+      username,
+      password,
+      entryId
+    };
+  });
+  const sharedSessionCache = new Map();
+  const companyResults = await runWithConcurrency(
+    selectedCompanies,
     Math.max(1, Math.min(10, OBUS_USER_DEACTIVATE_CONCURRENCY)),
-    async (workItem, index) => {
-      const company = workItem?.company;
-      const entry = workItem?.entry;
-      const fullName = String(entry?.fullName || "").trim();
-      const username = String(entry?.username || "").trim();
-      const password = String(entry?.password || "");
-      const entryId = String(entry?.entryId || `row-${index + 1}`).trim() || `row-${index + 1}`;
-
+    async (company) => {
       const target = buildObusGetUsersWithoutPermissionsTargetForCompany(company);
       const companyValue = String(target.companyValue || "").trim();
       const companyLabel = String(target.companyLabel || companyValue || "Firma").trim();
-      const resultKey = `${companyValue}|||${entryId}`;
 
       if (!companyValue || !target.cluster || !target.endpointUrl || !target.partnerCode) {
-        return {
-          key: resultKey,
+        return normalizedEntries.map((entry) => ({
+          key: `${companyValue}|||${entry.entryId}`,
           companyValue,
           companyLabel,
-          entryId,
-          fullName,
-          username,
-          password,
+          entryId: entry.entryId,
+          fullName: entry.fullName,
+          username: entry.username,
+          password: entry.password,
           exists: null,
           error: "Firma sorgu hedefi oluşturulamadı."
-        };
-      }
-
-      if (!username) {
-        return {
-          key: resultKey,
-          companyValue,
-          companyLabel,
-          entryId,
-          fullName,
-          username,
-          password,
-          exists: null,
-          error: "KullanıcıAdı zorunludur."
-        };
+        }));
       }
 
       const searchResult = await fetchObusUsersWithoutPermissionsForTarget({
         target,
-        usernameFilter: username
+        sessionCache: sharedSessionCache
       });
       if (searchResult?.error) {
+        return normalizedEntries.map((entry) => ({
+          key: `${companyValue}|||${entry.entryId}`,
+          companyValue,
+          companyLabel,
+          entryId: entry.entryId,
+          fullName: entry.fullName,
+          username: entry.username,
+          password: entry.password,
+          exists: null,
+          error: entry.username ? String(searchResult.error || "Sorgu başarısız.").trim() : "KullanıcıAdı zorunludur."
+        }));
+      }
+
+      const existingUsernames = new Set(
+        (Array.isArray(searchResult?.rows) ? searchResult.rows : [])
+          .map((row) => String(row?.username || "").trim().toLocaleLowerCase("tr"))
+          .filter(Boolean)
+      );
+
+      return normalizedEntries.map((entry) => {
+        const username = String(entry.username || "").trim();
+        const resultKey = `${companyValue}|||${entry.entryId}`;
+        if (!username) {
+          return {
+            key: resultKey,
+            companyValue,
+            companyLabel,
+            entryId: entry.entryId,
+            fullName: entry.fullName,
+            username,
+            password: entry.password,
+            exists: null,
+            error: "KullanıcıAdı zorunludur."
+          };
+        }
+
         return {
           key: resultKey,
           companyValue,
           companyLabel,
-          entryId,
-          fullName,
+          entryId: entry.entryId,
+          fullName: entry.fullName,
           username,
-          password,
-          exists: null,
-          error: String(searchResult.error || "Sorgu başarısız.").trim()
+          password: entry.password,
+          exists: existingUsernames.has(username.toLocaleLowerCase("tr")),
+          error: ""
         };
-      }
-
-      const usernameNormalized = String(username || "").trim().toLocaleLowerCase("tr");
-      const exists = Array.isArray(searchResult?.rows)
-        ? searchResult.rows.some(
-            (row) => String(row?.username || "").trim().toLocaleLowerCase("tr") === usernameNormalized
-          )
-        : false;
-
-      return {
-        key: resultKey,
-        companyValue,
-        companyLabel,
-        entryId,
-        fullName,
-        username,
-        password,
-        exists,
-        error: ""
-      };
+      });
     }
   );
 
-  const items = workerResults
-    .map((result) => (result && typeof result === "object" ? result : null))
-    .filter(Boolean);
+  const items = companyResults.flatMap((result, index) => {
+    if (Array.isArray(result)) return result;
+    const company = selectedCompanies[index];
+    const fallbackTarget = buildObusGetUsersWithoutPermissionsTargetForCompany(company);
+    const companyValue = String(fallbackTarget.companyValue || "").trim();
+    const companyLabel = String(fallbackTarget.companyLabel || companyValue || "Firma").trim();
+    const fallbackError = String(result?.error?.message || result?.error || "Sorgu başarısız.").trim();
+    return normalizedEntries.map((entry) => ({
+      key: `${companyValue}|||${entry.entryId}`,
+      companyValue,
+      companyLabel,
+      entryId: entry.entryId,
+      fullName: entry.fullName,
+      username: entry.username,
+      password: entry.password,
+      exists: null,
+      error: entry.username ? fallbackError : "KullanıcıAdı zorunludur."
+    }));
+  });
   const existingCount = items.filter((item) => item.exists === true).length;
   const missingCount = items.filter((item) => item.exists === false).length;
   const errorCount = items.filter((item) => item.exists === null || item.error).length;
