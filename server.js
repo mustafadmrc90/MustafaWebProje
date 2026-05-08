@@ -52,6 +52,58 @@ function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
 
 loadLocalEnvFile();
 
+function readLocalEnvFileSecret(secretNames = [], { trim = true, filePath = path.join(__dirname, ".env") } = {}) {
+  const targetNames = new Set(
+    (Array.isArray(secretNames) ? secretNames : [secretNames])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  );
+  if (targetNames.size === 0) return "";
+
+  try {
+    if (!fsSync.existsSync(filePath)) return "";
+    const raw = fsSync.readFileSync(filePath, "utf8");
+    const lines = String(raw || "")
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/);
+
+    for (const line of lines) {
+      const trimmed = String(line || "").trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const normalizedLine = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+      const eqIndex = normalizedLine.indexOf("=");
+      if (eqIndex <= 0) continue;
+
+      const key = normalizedLine.slice(0, eqIndex).trim();
+      if (!targetNames.has(key)) continue;
+
+      let value = normalizedLine.slice(eqIndex + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        const quote = value[0];
+        value = value.slice(1, -1);
+        if (quote === '"') {
+          value = value
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "\r")
+            .replace(/\\t/g, "\t")
+            .replace(/\\\"/g, '"')
+            .replace(/\\\\/g, "\\");
+        }
+      }
+
+      const normalizedValue = normalizeMacOsKeychainSecretValue(value, trim);
+      if (normalizedValue) return normalizedValue;
+    }
+  } catch (err) {
+    return "";
+  }
+
+  return "";
+}
+
 const MACOS_KEYCHAIN_ACCOUNT = "default";
 const MACOS_KEYCHAIN_SERVICE_PREFIX = "MustafaWebProje";
 const macOsKeychainSecretCache = new Map();
@@ -74,7 +126,7 @@ function readLegacyLocalSecret(secretNames = [], { trim = true } = {}) {
     const normalizedValue = normalizeMacOsKeychainSecretValue(rawValue, trim);
     if (normalizedValue) return normalizedValue;
   }
-  return "";
+  return readLocalEnvFileSecret(names, { trim });
 }
 
 function readMacOsKeychainSecret(secretName, { trim = true } = {}) {
@@ -144,6 +196,24 @@ function resolveMacOsKeychainSecret(secretName, { trim = true, legacyEnvNames = 
   return fallbackValue;
 }
 
+function resolveObusCredentialSecret(secretNames = [], { trim = true } = {}) {
+  const names = (Array.isArray(secretNames) ? secretNames : [secretNames])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (names.length === 0) return "";
+
+  for (const secretName of names) {
+    const keychainValue = readMacOsKeychainSecret(secretName, { trim });
+    if (keychainValue) return keychainValue;
+  }
+
+  const fallbackValue = readLegacyLocalSecret(names, { trim });
+  if (!fallbackValue) return "";
+
+  writeMacOsKeychainSecret(names[0], fallbackValue, { trim });
+  return fallbackValue;
+}
+
 function joinSecretNamesForDisplay(secretNames = []) {
   const names = (Array.isArray(secretNames) ? secretNames : [])
     .map((item) => String(item || "").trim())
@@ -160,6 +230,69 @@ function buildMissingMacOsKeychainSecretsMessage(secretNames = []) {
     return "Obus servis giris bilgileri tanimli degil.";
   }
   return `Obus servis giris bilgileri eksik: ${secretText}.`;
+}
+
+function getInventoryBranchesLoginCredentials() {
+  return {
+    username: resolveObusCredentialSecret(
+      [
+        "INVENTORY_BRANCHES_LOGIN_USERNAME",
+        "OBUS_JOB_FIXED_USERNAME",
+        "OBUS_USER_CREATE_LOGIN_USERNAME"
+      ],
+      { trim: true }
+    ),
+    password: resolveObusCredentialSecret(
+      [
+        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
+        "OBUS_JOB_FIXED_PASSWORD",
+        "OBUS_USER_CREATE_LOGIN_PASSWORD"
+      ],
+      { trim: false }
+    )
+  };
+}
+
+function getObusJobFixedCredentials() {
+  return {
+    username: resolveObusCredentialSecret(
+      [
+        "OBUS_JOB_FIXED_USERNAME",
+        "INVENTORY_BRANCHES_LOGIN_USERNAME",
+        "OBUS_USER_CREATE_LOGIN_USERNAME"
+      ],
+      { trim: true }
+    ),
+    password: resolveObusCredentialSecret(
+      [
+        "OBUS_JOB_FIXED_PASSWORD",
+        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
+        "OBUS_USER_CREATE_LOGIN_PASSWORD"
+      ],
+      { trim: false }
+    )
+  };
+}
+
+function getObusUserCreateLoginCredentials() {
+  return {
+    username: resolveObusCredentialSecret(
+      [
+        "OBUS_USER_CREATE_LOGIN_USERNAME",
+        "INVENTORY_BRANCHES_LOGIN_USERNAME",
+        "OBUS_JOB_FIXED_USERNAME"
+      ],
+      { trim: true }
+    ),
+    password: resolveObusCredentialSecret(
+      [
+        "OBUS_USER_CREATE_LOGIN_PASSWORD",
+        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
+        "OBUS_JOB_FIXED_PASSWORD"
+      ],
+      { trim: false }
+    )
+  };
 }
 
 const app = express();
@@ -251,13 +384,6 @@ const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
-const OBUS_USER_CREATE_LOGIN_USERNAME = resolveMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_USERNAME", {
-  legacyEnvNames: ["OBUS_USER_CREATE_LOGIN_USERNAME", "INVENTORY_BRANCHES_LOGIN_USERNAME"]
-});
-const OBUS_USER_CREATE_LOGIN_PASSWORD = resolveMacOsKeychainSecret("OBUS_USER_CREATE_LOGIN_PASSWORD", {
-  trim: false,
-  legacyEnvNames: ["OBUS_USER_CREATE_LOGIN_PASSWORD", "INVENTORY_BRANCHES_LOGIN_PASSWORD"]
-});
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
 const OBUS_LIVE_JOB_MAX_EVENTS = Number.parseInt(process.env.OBUS_LIVE_JOB_MAX_EVENTS || "10000", 10) || 10000;
 const INVENTORY_BRANCHES_API_URL =
@@ -265,13 +391,6 @@ const INVENTORY_BRANCHES_API_URL =
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
 const INVENTORY_BRANCHES_API_AUTH =
   process.env.INVENTORY_BRANCHES_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
-const INVENTORY_BRANCHES_LOGIN_USERNAME = resolveMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_USERNAME", {
-  legacyEnvNames: ["INVENTORY_BRANCHES_LOGIN_USERNAME"]
-});
-const INVENTORY_BRANCHES_LOGIN_PASSWORD = resolveMacOsKeychainSecret("INVENTORY_BRANCHES_LOGIN_PASSWORD", {
-  trim: false,
-  legacyEnvNames: ["INVENTORY_BRANCHES_LOGIN_PASSWORD"]
-});
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const STATION_PASSENGER_INFO_API_URL =
@@ -572,13 +691,6 @@ const SCREEN_ACTION_LOG_SKIP_PATTERNS = [
   /^\/api\/obus-live\/[^/]+/i,
   /^\/api\/screen-logs\/[^/]+/i
 ];
-const OBUS_JOB_FIXED_USERNAME = resolveMacOsKeychainSecret("OBUS_JOB_FIXED_USERNAME", {
-  legacyEnvNames: ["OBUS_JOB_FIXED_USERNAME", "INVENTORY_BRANCHES_LOGIN_USERNAME"]
-});
-const OBUS_JOB_FIXED_PASSWORD = resolveMacOsKeychainSecret("OBUS_JOB_FIXED_PASSWORD", {
-  trim: false,
-  legacyEnvNames: ["OBUS_JOB_FIXED_PASSWORD", "INVENTORY_BRANCHES_LOGIN_PASSWORD"]
-});
 const OBUS_JOBS_AUTO_RUN_ENABLED =
   String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
 const OBUS_JOBS_AUTO_RUN_TIME = String(process.env.OBUS_JOBS_AUTO_RUN_TIME || "10:00").trim();
@@ -3342,6 +3454,16 @@ function buildUserLoginBaseUrlsWithOverrides({ companyUrl, endpointUrl, partnerC
   return preferredBaseUrls;
 }
 
+function buildUniqueLoginBranchCandidates(...values) {
+  const unique = [];
+  values.flat().forEach((value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) return;
+    if (!unique.includes(normalized)) unique.push(normalized);
+  });
+  return unique;
+}
+
 function buildClusterPartnerUrls(baseUrl) {
   const raw = String(baseUrl || "").trim();
   if (!raw) return [];
@@ -4435,46 +4557,56 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     fallbackBranchId
   });
   const initialToken = String(initialResult?.token || "").trim();
-  const obusMerkezBranchKey = String(initialResult?.obusMerkezBranchKey || "").trim();
+  const retryBranchCandidates = buildUniqueLoginBranchCandidates(
+    initialResult?.obusMerkezBranchKey,
+    initialResult?.branchId,
+    fallbackBranchId,
+    partnerId
+  );
 
-  if (!(initialResult?.ok === true && !initialToken && obusMerkezBranchKey)) {
+  if (!(initialResult?.ok === true && !initialToken && retryBranchCandidates.length > 0)) {
     return initialResult;
   }
 
-  const retryResult = await fetchAuthorizedLinesLoginInfo({
-    endpointUrl,
-    companyUrl,
-    partnerCode,
-    partnerId,
-    username,
-    password,
-    fallbackBranchId,
-    loginBranchId: obusMerkezBranchKey
-  });
-  const retryToken = String(retryResult?.token || "").trim();
-  if (retryResult?.ok === true && retryToken) {
-    return retryResult;
+  const retryResults = [];
+  for (const branchCandidate of retryBranchCandidates) {
+    const retryResult = await fetchAuthorizedLinesLoginInfo({
+      endpointUrl,
+      companyUrl,
+      partnerCode,
+      partnerId,
+      username,
+      password,
+      fallbackBranchId,
+      loginBranchId: branchCandidate
+    });
+    retryResults.push(retryResult);
+    const retryToken = String(retryResult?.token || "").trim();
+    if (retryResult?.ok === true && retryToken) {
+      return retryResult;
+    }
   }
 
   const mergedDetail = [
     String(initialResult?.tokenMissingDetail || initialResult?.errorDetail || "").trim(),
-    String(retryResult?.tokenMissingDetail || retryResult?.errorDetail || "").trim()
+    ...retryResults.map((item) => String(item?.tokenMissingDetail || item?.errorDetail || "").trim())
   ]
     .filter(Boolean)
     .join(" | ");
+  const finalRetryResult = retryResults[retryResults.length - 1] || null;
 
   return {
     ok: false,
-    error: String(retryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
+    error: String(finalRetryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
     errorDetail: mergedDetail,
-    sessionId: String(retryResult?.sessionId || initialResult?.sessionId || "").trim(),
-    deviceId: String(retryResult?.deviceId || initialResult?.deviceId || "").trim(),
-    branchId: String(retryResult?.branchId || initialResult?.branchId || obusMerkezBranchKey || "").trim(),
-    token: retryToken,
-    obusMerkezBranchKey: String(retryResult?.obusMerkezBranchKey || obusMerkezBranchKey || "").trim(),
+    sessionId: String(finalRetryResult?.sessionId || initialResult?.sessionId || "").trim(),
+    deviceId: String(finalRetryResult?.deviceId || initialResult?.deviceId || "").trim(),
+    branchId: String(finalRetryResult?.branchId || initialResult?.branchId || retryBranchCandidates[0] || "").trim(),
+    token: String(finalRetryResult?.token || "").trim(),
+    obusMerkezBranchKey: String(finalRetryResult?.obusMerkezBranchKey || initialResult?.obusMerkezBranchKey || "").trim(),
     tokenMissingDetail: mergedDetail,
-    rawLoginBody: String(retryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
-    loginUrl: String(retryResult?.loginUrl || initialResult?.loginUrl || "").trim()
+    rawLoginBody: String(finalRetryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
+    loginUrl: String(finalRetryResult?.loginUrl || initialResult?.loginUrl || "").trim()
   };
 }
 
@@ -5811,54 +5943,71 @@ async function resolveStationPassengerLoginResult({
     timeoutMs
   });
   const initialToken = String(initialResult?.token || "").trim();
-  const obusMerkezBranchKey = String(initialResult?.obusMerkezBranchKey || "").trim();
+  const retryBranchCandidates = buildUniqueLoginBranchCandidates(
+    loginBranchId,
+    initialResult?.obusMerkezBranchKey,
+    initialResult?.branchId,
+    fallbackBranchId,
+    partnerId
+  ).filter((item) => item !== String(loginBranchId || "").trim());
 
-  if (!(initialResult?.ok === true && !initialToken && obusMerkezBranchKey)) {
+  if (!(initialResult?.ok === true && !initialToken && retryBranchCandidates.length > 0)) {
     return initialResult;
   }
 
-  const retryResult = await fetchAuthorizedLinesLoginInfo({
-    endpointUrl,
-    companyUrl,
-    partnerCode,
-    partnerId,
-    username,
-    password,
-    fallbackBranchId,
-    allowEmptyPartnerCode,
-    loginBranchId: obusMerkezBranchKey,
-    authorization,
-    timeoutMs
-  });
-  const retryToken = String(retryResult?.token || "").trim();
-  if (retryResult?.ok === true && retryToken) {
-    return retryResult;
+  const retryResults = [];
+  for (const branchCandidate of retryBranchCandidates) {
+    const retryResult = await fetchAuthorizedLinesLoginInfo({
+      endpointUrl,
+      companyUrl,
+      partnerCode,
+      partnerId,
+      username,
+      password,
+      fallbackBranchId,
+      allowEmptyPartnerCode,
+      loginBranchId: branchCandidate,
+      authorization,
+      timeoutMs
+    });
+    retryResults.push(retryResult);
+    const retryToken = String(retryResult?.token || "").trim();
+    if (retryResult?.ok === true && retryToken) {
+      return retryResult;
+    }
   }
 
   const mergedDetail = [
     String(initialResult?.tokenMissingDetail || initialResult?.errorDetail || "").trim(),
-    String(retryResult?.tokenMissingDetail || retryResult?.errorDetail || "").trim()
+    ...retryResults.map((item) => String(item?.tokenMissingDetail || item?.errorDetail || "").trim())
   ]
     .filter(Boolean)
     .join(" | ");
+  const finalRetryResult = retryResults[retryResults.length - 1] || null;
 
   return {
     ok: false,
-    error: String(retryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
+    error: String(finalRetryResult?.error || "").trim() || "UserLogin branch seçimi sonrası token alınamadı.",
     errorDetail: mergedDetail,
-    sessionId: String(retryResult?.sessionId || initialResult?.sessionId || "").trim(),
-    deviceId: String(retryResult?.deviceId || initialResult?.deviceId || "").trim(),
-    branchId: String(retryResult?.branchId || initialResult?.branchId || obusMerkezBranchKey || "").trim(),
-    token: retryToken,
-    obusMerkezBranchKey: String(retryResult?.obusMerkezBranchKey || obusMerkezBranchKey || "").trim(),
+    sessionId: String(finalRetryResult?.sessionId || initialResult?.sessionId || "").trim(),
+    deviceId: String(finalRetryResult?.deviceId || initialResult?.deviceId || "").trim(),
+    branchId: String(finalRetryResult?.branchId || initialResult?.branchId || retryBranchCandidates[0] || "").trim(),
+    token: String(finalRetryResult?.token || "").trim(),
+    obusMerkezBranchKey: String(
+      finalRetryResult?.obusMerkezBranchKey || initialResult?.obusMerkezBranchKey || ""
+    ).trim(),
     tokenMissingDetail: mergedDetail,
-    rawLoginBody: String(retryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
-    loginUrl: String(retryResult?.loginUrl || initialResult?.loginUrl || "").trim(),
+    rawLoginBody: String(finalRetryResult?.rawLoginBody || initialResult?.rawLoginBody || "").trim(),
+    loginUrl: String(finalRetryResult?.loginUrl || initialResult?.loginUrl || "").trim(),
     serviceLogs: [
       ...(Array.isArray(initialResult?.serviceLogs) ? initialResult.serviceLogs : []),
-      ...(Array.isArray(retryResult?.serviceLogs) ? retryResult.serviceLogs : [])
+      ...retryResults.flatMap((item) => (Array.isArray(item?.serviceLogs) ? item.serviceLogs : []))
     ],
-    failedServiceLog: retryResult?.failedServiceLog || initialResult?.failedServiceLog || null
+    failedServiceLog:
+      finalRetryResult?.failedServiceLog ||
+      retryResults.find((item) => item?.failedServiceLog)?.failedServiceLog ||
+      initialResult?.failedServiceLog ||
+      null
   };
 }
 
@@ -6964,6 +7113,7 @@ async function fetchStationPassengerPassengerStateHistory({
 async function searchStationPassengerJourneysByPlate(plateQuery) {
   const normalizedPlate = normalizeStationPassengerPlate(plateQuery);
   const displayPlate = formatStationPassengerPlateDisplay(plateQuery) || String(plateQuery || "").trim();
+  const inventoryLogin = getInventoryBranchesLoginCredentials();
   const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
   const clusterLabel = extractClusterLabel(endpointUrl || STATION_PASSENGER_INFO_API_URL) || "cluster3";
   const requestDateParts = buildStationPassengerRequestDateParts(new Date());
@@ -6985,7 +7135,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     };
   }
 
-  if (!INVENTORY_BRANCHES_LOGIN_USERNAME || !INVENTORY_BRANCHES_LOGIN_PASSWORD) {
+  if (!inventoryLogin.username || !inventoryLogin.password) {
     return {
       ok: false,
       items: [],
@@ -7013,8 +7163,8 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
     companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
     partnerCode: String(targetCandidate.code || "").trim(),
     partnerId: String(targetCandidate.id || "").trim(),
-    username: INVENTORY_BRANCHES_LOGIN_USERNAME,
-    password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+    username: inventoryLogin.username,
+    password: inventoryLogin.password,
     fallbackBranchId: String(targetCandidate.branchId || targetCandidate.id || "").trim(),
     allowEmptyPartnerCode: false,
     authorization: STATION_PASSENGER_INFO_API_AUTH,
@@ -7484,6 +7634,7 @@ async function fetchObusMerkezBranchMapForTarget({
   fallbackPartnerId = "",
   signal
 }) {
+  const inventoryLogin = getInventoryBranchesLoginCredentials();
   const cluster = extractClusterLabel(clusterLabel);
   const endpointUrl = normalizeTargetUrl(buildUrlForCluster(INVENTORY_BRANCHES_API_URL, cluster));
   const normalizedPartnerCode = String(partnerCode || "").trim();
@@ -7505,8 +7656,8 @@ async function fetchObusMerkezBranchMapForTarget({
     companyUrl: endpointUrl,
     partnerCode: normalizedPartnerCode,
     partnerId: normalizedFallbackPartnerId,
-    username: INVENTORY_BRANCHES_LOGIN_USERNAME,
-    password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+    username: inventoryLogin.username,
+    password: inventoryLogin.password,
     fallbackBranchId: normalizedFallbackPartnerId,
     timeoutMs: 20000,
     authorization: INVENTORY_BRANCHES_API_AUTH,
@@ -7646,11 +7797,12 @@ async function fetchObusMerkezBranchMapForTarget({
 
 async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   const sourceRows = Array.isArray(rows) ? rows : [];
+  const inventoryLogin = getInventoryBranchesLoginCredentials();
   if (sourceRows.length === 0) {
     return { rows: [], notice: null };
   }
 
-  if (!INVENTORY_BRANCHES_LOGIN_USERNAME || !INVENTORY_BRANCHES_LOGIN_PASSWORD) {
+  if (!inventoryLogin.username || !inventoryLogin.password) {
     return {
       rows: sourceRows,
       notice: buildMissingMacOsKeychainSecretsMessage([
@@ -15357,6 +15509,12 @@ async function fetchAuthorizedLinesLoginInfo({
           findNestedValue(parsed, new Set(["authorizationtoken"])) ||
           "";
         const obusMerkezBranchKey = String(extractObusMerkezBranchKeyFromUserLoginPayload(parsed) || "").trim();
+        const detectedBranchId = buildUniqueLoginBranchCandidates(
+          obusMerkezBranchKey,
+          extractBranchIdFromUserLoginPayload(parsed),
+          findNestedValue(parsed, new Set(["defaultbranchid", "activebranchid", "selectedbranchid", "branchid", "branch"])),
+          fallbackBranchId
+        )[0] || "";
         if (!String(tokenValue || "").trim()) {
           const tokenMissingDetail = buildUserLoginTokenMissingDetail({
             loginUrl,
@@ -15367,14 +15525,14 @@ async function fetchAuthorizedLinesLoginInfo({
             responseHeaders,
             rawBody: raw
           });
-          if (obusMerkezBranchKey) {
+          if (detectedBranchId) {
             return {
               ok: true,
               error: null,
               errorDetail: "",
               sessionId: sessionResult.sessionId,
               deviceId: sessionResult.deviceId,
-              branchId: obusMerkezBranchKey,
+              branchId: detectedBranchId,
               token: "",
               obusMerkezBranchKey,
               loginUrl,
@@ -15390,9 +15548,7 @@ async function fetchAuthorizedLinesLoginInfo({
           continue;
         }
         const branchId =
-          obusMerkezBranchKey ||
-          extractBranchIdFromUserLoginPayload(parsed) ||
-          findNestedValue(parsed, new Set(["branchid", "branch"])) ||
+          detectedBranchId ||
           extractBranchIdFromToken(tokenValue) ||
           extractBranchIdFromHeaders(responseHeaders) ||
           extractBranchIdFromText(raw) ||
@@ -16055,8 +16211,9 @@ async function fetchObusJobsClusterReport({
 async function executeObusJobsScreenAction({ filters, partnerItems }) {
   const report = buildObusJobsReportModel();
   report.requested = true;
+  const obusJobsLogin = getObusJobFixedCredentials();
 
-  if (!OBUS_JOB_FIXED_USERNAME || !OBUS_JOB_FIXED_PASSWORD) {
+  if (!obusJobsLogin.username || !obusJobsLogin.password) {
     report.error = buildMissingMacOsKeychainSecretsMessage([
       "OBUS_JOB_FIXED_USERNAME",
       "OBUS_JOB_FIXED_PASSWORD"
@@ -16079,8 +16236,8 @@ async function executeObusJobsScreenAction({ filters, partnerItems }) {
         clusterLabel,
         endpointBaseUrl,
         companyCandidates: companyCandidatesByCluster.get(clusterLabel) || [],
-        username: OBUS_JOB_FIXED_USERNAME,
-        password: OBUS_JOB_FIXED_PASSWORD
+        username: obusJobsLogin.username,
+        password: obusJobsLogin.password
       })
   );
 
@@ -16294,6 +16451,7 @@ function buildObusPartnerRuleUpdateRequestBody({
 }
 
 async function createObusPartnerRuleForCompany({ company, startDate, endDate, rate, capacityBegin, capacityEnd }) {
+  const obusUserCreateLogin = getObusUserCreateLoginCredentials();
   const companyLabel = String(company?.label || "").trim() || String(company?.meta?.code || "").trim() || "Firma";
   const parsedCompanyValue = parseCompanyOptionValue(company?.value);
   const companyCluster = normalizeObusClusterLabel(
@@ -16360,8 +16518,8 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
     companyUrl: "",
     partnerCode,
     partnerId: partnerIdRaw,
-    username: OBUS_USER_CREATE_LOGIN_USERNAME,
-    password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+    username: obusUserCreateLogin.username,
+    password: obusUserCreateLogin.password,
     fallbackBranchId: branchRaw,
     loginBranchId: branchRaw,
     timeoutMs: OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS,
@@ -16538,6 +16696,7 @@ async function updateObusPartnerRuleForCompany({
   capacityBegin,
   capacityEnd
 }) {
+  const obusUserCreateLogin = getObusUserCreateLoginCredentials();
   const companyLabel = String(company?.label || "").trim() || String(company?.meta?.code || "").trim() || "Firma";
   const parsedCompanyValue = parseCompanyOptionValue(company?.value);
   const companyCluster = normalizeObusClusterLabel(
@@ -16621,8 +16780,8 @@ async function updateObusPartnerRuleForCompany({
     companyUrl: "",
     partnerCode,
     partnerId: partnerIdRaw,
-    username: OBUS_USER_CREATE_LOGIN_USERNAME,
-    password: OBUS_USER_CREATE_LOGIN_PASSWORD,
+    username: obusUserCreateLogin.username,
+    password: obusUserCreateLogin.password,
     fallbackBranchId: branchRaw,
     loginBranchId: branchRaw,
     timeoutMs: OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS,
@@ -17917,6 +18076,7 @@ app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-d
 
 app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-rule-define"), async (req, res) => {
   try {
+    const obusUserCreateLogin = getObusUserCreateLoginCredentials();
     const selectedCompanyValues = Array.from(
       new Set(parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies))
     );
@@ -17951,7 +18111,7 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
       return res.status(400).json({ ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." });
     }
 
-    if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+    if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
       return res.status(400).json({
         ok: false,
         error: buildMissingMacOsKeychainSecretsMessage([
@@ -18020,6 +18180,7 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
 
 app.post("/api/obus-rule-define/update", requireAuth, requireMenuAccess("obus-rule-define"), async (req, res) => {
   try {
+    const obusUserCreateLogin = getObusUserCreateLoginCredentials();
     const selectedCompanyValues = Array.from(
       new Set(parseSelectedCompanyValuesFromInput(req.body?.selectedCompanies))
     );
@@ -18063,7 +18224,7 @@ app.post("/api/obus-rule-define/update", requireAuth, requireMenuAccess("obus-ru
       return res.status(400).json({ ok: false, error: "CapacityBegin, CapacityEnd'ten büyük olamaz." });
     }
 
-    if (!OBUS_USER_CREATE_LOGIN_USERNAME || !OBUS_USER_CREATE_LOGIN_PASSWORD) {
+    if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
       return res.status(400).json({
         ok: false,
         error: buildMissingMacOsKeychainSecretsMessage([
@@ -18217,6 +18378,7 @@ app.post(
   requireMenuAccess("station-passenger-info"),
   async (req, res) => {
     try {
+      const inventoryLogin = getInventoryBranchesLoginCredentials();
       const tripId = String(req.body?.tripId || req.body?.journeyId || req.body?.seferId || "").trim();
       if (!tripId) {
         return res.status(400).json({ ok: false, error: "journey-id zorunludur." });
@@ -18239,8 +18401,8 @@ app.post(
           companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
           partnerCode: String(targetCandidate.code || "").trim(),
           partnerId: String(targetCandidate.id || "").trim(),
-          username: INVENTORY_BRANCHES_LOGIN_USERNAME,
-          password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+          username: inventoryLogin.username,
+          password: inventoryLogin.password,
           fallbackBranchId: String(targetCandidate.branchId || targetCandidate.id || "").trim(),
           allowEmptyPartnerCode: false,
           authorization: STATION_PASSENGER_INFO_API_AUTH,
@@ -18390,6 +18552,7 @@ app.post(
   requireMenuAccess("station-passenger-info"),
   async (req, res) => {
     try {
+      const inventoryLogin = getInventoryBranchesLoginCredentials();
       const tripId = String(req.body?.tripId || req.body?.journeyId || req.body?.seferId || "").trim();
       const stationId = String(req.body?.stationId || req.body?.["station-id"] || "").trim();
       if (!tripId) {
@@ -18416,8 +18579,8 @@ app.post(
           companyUrl: String(targetCandidate.url || endpointUrl).trim() || endpointUrl,
           partnerCode: String(targetCandidate.code || "").trim(),
           partnerId: String(targetCandidate.id || "").trim(),
-          username: INVENTORY_BRANCHES_LOGIN_USERNAME,
-          password: INVENTORY_BRANCHES_LOGIN_PASSWORD,
+          username: inventoryLogin.username,
+          password: inventoryLogin.password,
           fallbackBranchId: String(targetCandidate.branchId || targetCandidate.id || "").trim(),
           allowEmptyPartnerCode: false,
           authorization: STATION_PASSENGER_INFO_API_AUTH,
