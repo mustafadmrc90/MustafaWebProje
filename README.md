@@ -43,6 +43,10 @@ cp .env.example .env
 - `INVENTORY_BRANCHES_API_AUTH` (varsayılan: `Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt`)
 - `INVENTORY_BRANCHES_LOGIN_USERNAME` (`ObusMerkezSubeID` doldurmak için gerekli)
 - `INVENTORY_BRANCHES_LOGIN_PASSWORD` (`ObusMerkezSubeID` doldurmak için gerekli)
+- `OBUS_JOB_FIXED_USERNAME` (Obus Jobs servis login'i için gerekli)
+- `OBUS_JOB_FIXED_PASSWORD` (Obus Jobs servis login'i için gerekli)
+- `OBUS_USER_CREATE_LOGIN_USERNAME` (create user / delete user / partner rule login'i için gerekli)
+- `OBUS_USER_CREATE_LOGIN_PASSWORD` (create user / delete user / partner rule login'i için gerekli)
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
 
