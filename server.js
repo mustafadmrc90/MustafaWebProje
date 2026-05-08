@@ -140,8 +140,8 @@ const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
-const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGIN_USERNAME || "busproductapp").trim();
-const OBUS_USER_CREATE_LOGIN_PASSWORD = String(process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "Mstfdmrc123..");
+const OBUS_USER_CREATE_LOGIN_USERNAME = String(process.env.OBUS_USER_CREATE_LOGIN_USERNAME || "").trim();
+const OBUS_USER_CREATE_LOGIN_PASSWORD = String(process.env.OBUS_USER_CREATE_LOGIN_PASSWORD || "");
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
 const OBUS_LIVE_JOB_MAX_EVENTS = Number.parseInt(process.env.OBUS_LIVE_JOB_MAX_EVENTS || "10000", 10) || 10000;
 const INVENTORY_BRANCHES_API_URL =
@@ -149,12 +149,8 @@ const INVENTORY_BRANCHES_API_URL =
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
 const INVENTORY_BRANCHES_API_AUTH =
   process.env.INVENTORY_BRANCHES_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
-const INVENTORY_BRANCHES_LOGIN_USERNAME = String(
-  process.env.INVENTORY_BRANCHES_LOGIN_USERNAME || "busproductapp"
-).trim();
-const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(
-  process.env.INVENTORY_BRANCHES_LOGIN_PASSWORD || "Mstfdmrc123.."
-);
+const INVENTORY_BRANCHES_LOGIN_USERNAME = String(process.env.INVENTORY_BRANCHES_LOGIN_USERNAME || "").trim();
+const INVENTORY_BRANCHES_LOGIN_PASSWORD = String(process.env.INVENTORY_BRANCHES_LOGIN_PASSWORD || "");
 const INVENTORY_BRANCHES_CLUSTER_CONCURRENCY =
   Number.parseInt(process.env.INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || "4", 10) || 4;
 const STATION_PASSENGER_INFO_API_URL =
@@ -455,8 +451,8 @@ const SCREEN_ACTION_LOG_SKIP_PATTERNS = [
   /^\/api\/obus-live\/[^/]+/i,
   /^\/api\/screen-logs\/[^/]+/i
 ];
-const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "busproductapp").trim();
-const OBUS_JOB_FIXED_PASSWORD = String(process.env.OBUS_JOB_FIXED_PASSWORD || "Mstfdmrc123..");
+const OBUS_JOB_FIXED_USERNAME = String(process.env.OBUS_JOB_FIXED_USERNAME || "").trim();
+const OBUS_JOB_FIXED_PASSWORD = String(process.env.OBUS_JOB_FIXED_PASSWORD || "");
 const OBUS_JOBS_AUTO_RUN_ENABLED =
   String(process.env.OBUS_JOBS_AUTO_RUN_ENABLED || "true").trim().toLowerCase() !== "false";
 const OBUS_JOBS_AUTO_RUN_TIME = String(process.env.OBUS_JOBS_AUTO_RUN_TIME || "10:00").trim();
