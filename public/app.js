@@ -4773,22 +4773,43 @@
       const cell = row?.querySelector("[data-obus-create-status='1']");
       if (!cell) return;
       const visibleLines = collectUniqueStatusLines(lines);
-      cell.textContent =
+      const statusText =
         visibleLines.length <= 1
           ? String(visibleLines[0] || "").trim() || "-"
           : visibleLines.map((line, index) => `${index + 1}. ${line}`).join("\n");
+      cell.textContent = "";
       cell.className = `obus-live-status ${kind || "pending"}`;
+      const textSpan = document.createElement("span");
+      textSpan.className = "obus-live-status-text";
+      textSpan.textContent = statusText;
+      cell.appendChild(textSpan);
       const tooltip = (Array.isArray(detailBlocks) ? detailBlocks : [detailBlocks])
         .map((detail) => String(detail || "").trim())
         .filter(Boolean)
         .join("\n\n")
         .trim();
+      const isCreateLiveRow = Boolean(row?.closest("[data-obus-user-create-live-results='1']"));
+      const shouldRenderInlineDetail = Boolean(tooltip) && kind === "failure" && isCreateLiveRow;
       if (tooltip) {
         cell.setAttribute("title", tooltip);
-        cell.classList.add("has-detail");
+        if (!shouldRenderInlineDetail) {
+          cell.classList.add("has-detail");
+        }
       } else {
         cell.removeAttribute("title");
         cell.classList.remove("has-detail");
+      }
+      if (shouldRenderInlineDetail) {
+        const detailsEl = document.createElement("details");
+        detailsEl.className = "obus-live-status-inline-detail";
+        const summaryEl = document.createElement("summary");
+        summaryEl.textContent = "Detay";
+        const preEl = document.createElement("pre");
+        preEl.className = "screen-log-item-detail";
+        preEl.textContent = tooltip;
+        detailsEl.appendChild(summaryEl);
+        detailsEl.appendChild(preEl);
+        cell.appendChild(detailsEl);
       }
     };
     const updateBulkCheckRowStatusByKey = (key) => {

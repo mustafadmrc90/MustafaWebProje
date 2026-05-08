@@ -294,11 +294,18 @@
             <h3>Hatalı Firmalar</h3>
             <ul class="obus-user-create-result-list failure">
               <% report.failureItems.forEach((item) => { %>
+                <% const failureDetail = String(item.detailText || item.errorDetail || '').trim(); %>
                 <li>
                   <strong><%= item.label %></strong>
                   <span
-                    <% if (item.errorDetail) { %>class="obus-detail-hint" title="<%= item.errorDetail %>"<% } %>
+                    <% if (failureDetail) { %>class="obus-detail-hint" title="<%= failureDetail %>"<% } %>
                   ><%= item.error %></span>
+                  <% if (failureDetail) { %>
+                    <details class="obus-user-create-result-detail">
+                      <summary>Detayı Göster</summary>
+                      <pre class="screen-log-item-detail"><%= failureDetail %></pre>
+                    </details>
+                  <% } %>
                 </li>
               <% }) %>
             </ul>

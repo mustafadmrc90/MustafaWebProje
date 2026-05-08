@@ -4690,6 +4690,20 @@ button.ghost {
   cursor: help;
 }
 
+.obus-user-create-result-detail,
+.obus-live-status-inline-detail {
+  margin-top: 6px;
+}
+
+.obus-user-create-result-detail summary,
+.obus-live-status-inline-detail summary {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4f6176;
+  cursor: pointer;
+  user-select: none;
+}
+
 .obus-live-message {
   margin-top: 4px;
   margin-bottom: 0;
@@ -4709,6 +4723,10 @@ button.ghost {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.45;
+}
+
+.obus-live-status-text {
+  display: block;
 }
 
 .obus-live-status.pending {
