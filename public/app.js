@@ -6470,6 +6470,7 @@
   };
 
   const initEndpointUI = async () => {
+    initScreenLogPanel();
     initSalesTabs();
     initSalesReportLoading();
     initSlackReportLoading();
@@ -6486,7 +6487,6 @@
     initAllCompaniesObusJobMonitor();
     initMentiHelper();
     initPermissionsBulkForm();
-    initScreenLogPanel();
 
     const modal = document.querySelector("#endpoint-modal");
     if (!modal) return;
