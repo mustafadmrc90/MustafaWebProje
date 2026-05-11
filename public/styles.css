@@ -3697,7 +3697,42 @@ button.ghost {
   border-radius: 14px;
   background: #fff;
   padding: 12px;
+  display: grid;
+  gap: 10px;
   color: #5f6b7a;
+  line-height: 1.5;
+}
+
+.obus-user-create-message-group-list {
+  display: grid;
+  gap: 8px;
+}
+
+.obus-user-create-message-group-item {
+  border: 1px solid #d7e0ec;
+  border-radius: 12px;
+  background: #f7f9fc;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.obus-user-create-message-group-item.is-duplicate {
+  border-color: #c7d7ea;
+  background: #f8fbff;
+}
+
+.obus-user-create-message-group-text {
+  color: #1f2735;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.obus-user-create-summary-note {
+  color: #4f6176;
+  font-size: 12px;
   line-height: 1.5;
 }
 

@@ -3484,6 +3484,20 @@
       return Array.from(eventMap.values());
     };
 
+    const normalizeLiveMessageText = (value) => String(value || "").replace(/\s+/g, " ").trim();
+
+    const getLiveEventMessageText = (event = null, { includePending = true } = {}) => {
+      const explicitText = normalizeLiveMessageText(String(event?.message || "").trim() || String(event?.error || "").trim());
+      if (explicitText) return explicitText;
+      if (includePending && buildLiveEventTone(event) === "pending") return "İstek akışı devam ediyor.";
+      return "";
+    };
+
+    const isDuplicateUserMessage = (messageText = "") =>
+      normalizeLiveMessageText(messageText)
+        .toLocaleLowerCase("tr")
+        .includes("bu kullanıcı isimli kullanıcı daha önceden sisteme kayıt olmuştur");
+
     const parseLiveEventMeta = (event = null) => {
       const keyParts = String(event?.key || "").split("|||");
       const rowToken = String(keyParts[keyParts.length - 1] || "").trim();
@@ -3498,17 +3512,74 @@
 
     const setLiveSummary = (rows) => {
       const list = Array.isArray(rows) ? rows : [];
+      responseSummaryEl.innerHTML = "";
       if (list.length === 0) {
-        responseSummaryEl.textContent = createJobRunning
+        const emptyText = document.createElement("div");
+        emptyText.textContent = createJobRunning
           ? "İş başlatıldı. Firma bazlı satırlar alttaki tabloda hazırlanıyor."
           : "Firma bazlı canlı akış alttaki tabloda gösterilir.";
+        responseSummaryEl.appendChild(emptyText);
         return;
       }
 
       const successCount = list.filter((event) => buildLiveEventTone(event) === "success").length;
       const errorCount = list.filter((event) => buildLiveEventTone(event) === "error").length;
       const pendingCount = Math.max(0, list.length - successCount - errorCount);
-      responseSummaryEl.textContent = `Toplam ${list.length} firma/kullanıcı satırı izleniyor. Başarılı: ${successCount} | Hatalı: ${errorCount} | Bekleyen: ${pendingCount}`;
+
+      const summaryText = document.createElement("div");
+      summaryText.textContent = `Toplam ${list.length} firma/kullanıcı satırı izleniyor. Başarılı: ${successCount} | Hatalı: ${errorCount} | Bekleyen: ${pendingCount}`;
+      responseSummaryEl.appendChild(summaryText);
+
+      const groupedMessages = new Map();
+      list.forEach((event) => {
+        const messageText = getLiveEventMessageText(event, { includePending: false });
+        if (!messageText) return;
+        const groupKey = normalizeLiveMessageText(messageText).toLocaleLowerCase("tr");
+        const current = groupedMessages.get(groupKey) || {
+          text: messageText,
+          count: 0
+        };
+        current.count += 1;
+        groupedMessages.set(groupKey, current);
+      });
+
+      if (groupedMessages.size > 0) {
+        const groupList = document.createElement("div");
+        groupList.className = "obus-user-create-message-group-list";
+
+        Array.from(groupedMessages.values())
+          .sort((a, b) => b.count - a.count || a.text.localeCompare(b.text, "tr"))
+          .forEach((group) => {
+            const item = document.createElement("div");
+            item.className = `obus-user-create-message-group-item${
+              isDuplicateUserMessage(group.text) ? " is-duplicate" : ""
+            }`;
+
+            const label = document.createElement("span");
+            label.className = "obus-user-create-message-group-text";
+            label.textContent = group.text;
+
+            const count = document.createElement("span");
+            count.className = "pill";
+            count.textContent = `${group.count} adet`;
+
+            item.appendChild(label);
+            item.appendChild(count);
+            groupList.appendChild(item);
+          });
+
+        responseSummaryEl.appendChild(groupList);
+      }
+
+      const hiddenDuplicateCount = list.filter((event) =>
+        isDuplicateUserMessage(getLiveEventMessageText(event, { includePending: false }))
+      ).length;
+      if (hiddenDuplicateCount > 0) {
+        const note = document.createElement("div");
+        note.className = "obus-user-create-summary-note";
+        note.textContent = `"Bu kullanıcı isimli kullanıcı daha önceden sisteme kayıt olmuştur." mesajlı ${hiddenDuplicateCount} satır tabloda gösterilmiyor.`;
+        responseSummaryEl.appendChild(note);
+      }
     };
 
     const appendLiveCell = (rowEl, label, value, extraClass = "") => {
@@ -3533,17 +3604,21 @@
       responseListEl.innerHTML = "";
       const rows = buildLiveEventRows();
       setLiveSummary(rows);
-      if (rows.length === 0) {
+      const visibleRows = rows.filter((event) => !isDuplicateUserMessage(getLiveEventMessageText(event, { includePending: false })));
+      if (visibleRows.length === 0) {
         const emptyState = document.createElement("div");
         emptyState.className = "obus-user-create-live-empty";
-        emptyState.textContent = createJobRunning
-          ? "Canlı durum hazırlanıyor. Firma bazlı satırlar birazdan burada görünecek."
-          : "Toplu kullanıcı oluşturma henüz başlatılmadı.";
+        emptyState.textContent =
+          rows.length > 0
+            ? 'Tabloda gösterilecek farklı bir mesaj kalmadı. Tekrar kullanıcı kayıtları özet bölümünde sayılıyor.'
+            : createJobRunning
+              ? "Canlı durum hazırlanıyor. Firma bazlı satırlar birazdan burada görünecek."
+              : "Toplu kullanıcı oluşturma henüz başlatılmadı.";
         responseListEl.appendChild(emptyState);
         return;
       }
 
-      rows.forEach((event) => {
+      visibleRows.forEach((event) => {
         const tone = buildLiveEventTone(event);
         const meta = parseLiveEventMeta(event);
         const row = document.createElement("article");
@@ -3582,9 +3657,7 @@
         row.appendChild(statusCell);
 
         const messageText =
-          String(event?.message || "").trim() ||
-          String(event?.error || "").trim() ||
-          (tone === "pending" ? "İstek akışı devam ediyor." : "");
+          getLiveEventMessageText(event, { includePending: true }) || (tone === "pending" ? "İstek akışı devam ediyor." : "");
         appendLiveCell(row, "Mesaj", messageText || "-", !messageText ? "is-muted" : "");
 
         const detailLines = Array.from(
