@@ -3270,6 +3270,8 @@
     let activeJobPollTimerId = 0;
     let activeJobEvents = [];
     let activeJobFailureCount = 0;
+    let activeJobCreatedAt = 0;
+    let activeJobFinishedAt = 0;
 
     const permissionTypes = [
       "CanSeePassengerInformation",
@@ -3349,7 +3351,7 @@
         email: null,
         notes: null,
         password: String(entry?.password || ""),
-        phone: null,
+        phone: "9999999999",
         username: String(entry?.username || "").trim(),
         "ignore-password-check": false,
         id: 0,
@@ -3498,6 +3500,22 @@
         .toLocaleLowerCase("tr")
         .includes("bu kullanıcı isimli kullanıcı daha önceden sisteme kayıt olmuştur");
 
+    const formatLiveDuration = (durationMs) => {
+      const safeMs = Number.isFinite(Number(durationMs)) ? Math.max(0, Number(durationMs)) : 0;
+      const totalSeconds = Math.floor(safeMs / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      if (hours > 0) {
+        return `${hours} sa ${String(minutes).padStart(2, "0")} dk ${String(seconds).padStart(2, "0")} sn`;
+      }
+      if (minutes > 0) {
+        return `${minutes} dk ${String(seconds).padStart(2, "0")} sn`;
+      }
+      return `${seconds} sn`;
+    };
+
     const parseLiveEventMeta = (event = null) => {
       const keyParts = String(event?.key || "").split("|||");
       const rowToken = String(keyParts[keyParts.length - 1] || "").trim();
@@ -3529,6 +3547,15 @@
       const summaryText = document.createElement("div");
       summaryText.textContent = `Toplam ${list.length} firma/kullanıcı satırı izleniyor. Başarılı: ${successCount} | Hatalı: ${errorCount} | Bekleyen: ${pendingCount}`;
       responseSummaryEl.appendChild(summaryText);
+
+      if (activeJobCreatedAt > 0) {
+        const durationText = document.createElement("div");
+        const effectiveFinishedAt =
+          activeJobFinishedAt > 0 ? activeJobFinishedAt : createJobRunning ? Date.now() : 0;
+        const durationMs = effectiveFinishedAt > 0 ? effectiveFinishedAt - activeJobCreatedAt : 0;
+        durationText.textContent = `Çalışma süresi: ${formatLiveDuration(durationMs)}`;
+        responseSummaryEl.appendChild(durationText);
+      }
 
       const groupedMessages = new Map();
       list.forEach((event) => {
@@ -3814,6 +3841,8 @@
 
         activeJobFailureCount = 0;
         activeJobCursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : activeJobCursor;
+        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : activeJobCreatedAt;
+        activeJobFinishedAt = Number.isFinite(Number(data.finishedAt)) ? Number(data.finishedAt) : 0;
         if (Array.isArray(data.events) && data.events.length > 0) {
           activeJobEvents = activeJobEvents.concat(data.events);
         }
@@ -4084,6 +4113,8 @@
           activeJobCursor = 0;
           activeJobEvents = [];
           activeJobFailureCount = 0;
+          activeJobCreatedAt = Date.now();
+          activeJobFinishedAt = 0;
           syncActionState();
           renderJobResponseList();
           setStatus(
