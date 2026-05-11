@@ -3518,6 +3518,174 @@ button.ghost {
   white-space: pre-line;
 }
 
+.obus-user-create-page-card {
+  padding-bottom: 18px;
+}
+
+.obus-user-create-workbench {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.obus-user-create-summary-card,
+.obus-user-create-editor-card,
+.obus-user-create-preview-card {
+  border: 1px solid #d7e0ec;
+  border-radius: 16px;
+  background: #f7f9fc;
+  padding: 14px;
+  min-width: 0;
+}
+
+.obus-user-create-summary-card,
+.obus-user-create-editor-card,
+.obus-user-create-preview-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.obus-user-create-summary-card h2,
+.obus-user-create-editor-card h2,
+.obus-user-create-preview-card h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+  color: #1f2735;
+}
+
+.obus-user-create-summary-card p,
+.obus-user-create-editor-card p,
+.obus-user-create-preview-card p {
+  margin: 0;
+  color: #5f6b7a;
+  line-height: 1.45;
+}
+
+.obus-user-create-meta-list {
+  display: grid;
+  gap: 10px;
+}
+
+.obus-user-create-meta-item {
+  border: 1px solid #d7e0ec;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.obus-user-create-meta-item strong {
+  font-size: 13px;
+  color: #1f2735;
+}
+
+.obus-user-create-meta-item span {
+  font-size: 12px;
+  color: #5f6b7a;
+}
+
+.obus-user-create-template-grid,
+.obus-user-create-row-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.obus-user-create-template-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.obus-user-create-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.obus-user-create-field > span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #4f6176;
+}
+
+.obus-user-create-field input,
+.obus-user-create-field select {
+  border-radius: 10px;
+  border: 1px solid #b9c6d7;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  min-height: 38px;
+  color: #1f2735;
+  width: 100%;
+  min-width: 0;
+  font-family: inherit;
+}
+
+.obus-user-create-field input:focus,
+.obus-user-create-field select:focus {
+  outline: none;
+  border-color: #8ca4c0;
+  background: #fff;
+}
+
+.obus-user-create-template-actions,
+.obus-user-create-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.obus-user-create-status {
+  min-height: 20px;
+  white-space: pre-line;
+}
+
+.obus-user-create-status.is-error {
+  color: #b42318;
+}
+
+.obus-user-create-status.is-success {
+  color: #027a48;
+}
+
+.obus-user-create-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.obus-user-create-row {
+  border: 1px solid #d7e0ec;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.obus-user-create-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.obus-user-create-row-remove {
+  min-height: 36px;
+}
+
+.obus-user-create-preview-card .allowed-lines-debug-pre {
+  min-height: 220px;
+  max-height: 420px;
+}
+
 .jira-board-page .content {
   padding-top: 18px;
 }
@@ -5473,6 +5641,15 @@ button.ghost {
   }
 
   .obus-rule-define-mode-list {
+    grid-template-columns: 1fr;
+  }
+
+  .obus-user-create-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .obus-user-create-template-grid,
+  .obus-user-create-row-grid {
     grid-template-columns: 1fr;
   }
 

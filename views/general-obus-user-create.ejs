@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout obus-user-create-page">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="10" cy="8" r="4"></circle>
+                <path d="M19 8v6"></path>
+                <path d="M16 11h6"></path>
+              </svg>
+            </span>
+            <span>Obus Kullanıcı Oluştur</span>
+          </h1>
+          <p>Ad Soyad, kullanıcı adı ve şifre satırlarını hazırlayın; isterseniz şablon olarak kaydedip daha sonra tekrar açın.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
+
+      <section class="table-card panel-card obus-user-create-page-card">
+        <div
+          class="obus-user-create-workbench"
+          data-obus-user-create-page="1"
+          data-obus-user-create-template-list-url="/api/obus-user-create/templates"
+          data-obus-user-create-template-save-url="/api/obus-user-create/templates"
+          data-obus-user-create-template-detail-base-url="/api/obus-user-create/templates"
+          data-obus-user-create-template-delete-base-url="/api/obus-user-create/templates"
+        >
+          <aside class="obus-user-create-summary-card">
+            <div>
+              <h2>Hazırlık Alanı</h2>
+              <p>Bu ekran şu aşamada kullanıcı satırlarını ve şablonları yönetir. Gerçek Obus isteği, göndermeniz gereken API detayları geldiğinde bağlanacak.</p>
+            </div>
+
+            <div class="obus-user-create-meta-list">
+              <div class="obus-user-create-meta-item">
+                <strong>Çoklu satır</strong>
+                <span>`Satır Ekle` ile birden fazla kullanıcıyı tek ekranda hazırlayabilirsiniz.</span>
+              </div>
+              <div class="obus-user-create-meta-item">
+                <strong>Şablon kaydı</strong>
+                <span>Şablonlar veritabanında tutulur; daha sonra aynı kullanıcı listesini tekrar açabilirsiniz.</span>
+              </div>
+              <div class="obus-user-create-meta-item">
+                <strong>JSON önizleme</strong>
+                <span>Sağ tarafta daha sonra istek gövdesine bağlanacak kullanıcı listesi önizlenir.</span>
+              </div>
+            </div>
+          </aside>
+
+          <section class="obus-user-create-editor-card">
+            <div>
+              <h2>Kullanıcı Listesi</h2>
+              <p>İsterseniz önce şablon adı girip kaydedin, isterseniz kayıtlı bir şablonu yükleyip devam edin.</p>
+            </div>
+
+            <div class="obus-user-create-template-grid">
+              <label class="obus-user-create-field">
+                <span>Şablon Adı</span>
+                <input
+                  type="text"
+                  value=""
+                  autocomplete="off"
+                  placeholder="Örn: Mayıs toplu kullanıcıları"
+                  data-obus-user-create-template-name="1"
+                />
+              </label>
+
+              <label class="obus-user-create-field">
+                <span>Kayıtlı Şablonlar</span>
+                <select data-obus-user-create-template-select="1">
+                  <option value="">Kayıtlı şablon yok</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="obus-user-create-template-actions">
+              <button type="button" class="button-link" data-obus-user-create-save-template="1">Şablonu Kaydet</button>
+              <button type="button" class="ghost" data-obus-user-create-refresh-templates="1">Listeyi Yenile</button>
+              <button type="button" class="ghost" data-obus-user-create-load-template="1">Şablonu Yükle</button>
+              <button type="button" class="ghost" data-obus-user-create-delete-template="1">Şablonu Sil</button>
+            </div>
+
+            <div class="obus-user-create-status muted" data-obus-user-create-status="1">
+              Kullanıcı satırlarını hazırlayın ve isterseniz şablon olarak kaydedin.
+            </div>
+
+            <div class="obus-user-create-rows" data-obus-user-create-rows="1"></div>
+
+            <div class="obus-user-create-editor-actions">
+              <button type="button" class="button-link" data-obus-user-create-add-row="1">Satır Ekle</button>
+              <button type="button" class="ghost" data-obus-user-create-clear-rows="1">Satırları Temizle</button>
+              <span class="pill muted" data-obus-user-create-row-count="1">1 satır / 0 dolu</span>
+            </div>
+          </section>
+
+          <article class="obus-user-create-preview-card">
+            <div class="journey-search-card-head">
+              <h3>Payload Önizleme</h3>
+              <span class="pill muted">JSON</span>
+            </div>
+            <pre class="allowed-lines-debug-pre" data-obus-user-create-preview="1">{
+  "data": {
+    "user": []
+  },
+  "meta": {
+    "requestReady": false
+  }
+}</pre>
+
+            <div class="journey-search-card-head">
+              <h3>Durum</h3>
+              <span class="pill muted">Beklemede</span>
+            </div>
+            <pre class="allowed-lines-debug-pre" data-obus-user-create-response-preview="1">{
+  "ok": false,
+  "message": "İstek detayları henüz tanımlanmadı."
+}</pre>
+          </article>
+
+          <template id="obus-user-create-row-template">
+            <div class="obus-user-create-row" data-obus-user-create-row="1">
+              <div class="obus-user-create-row-head">
+                <span class="pill muted" data-obus-user-create-row-index="1">Satır 1</span>
+                <button type="button" class="ghost obus-user-create-row-remove" data-obus-user-create-remove-row="1">
+                  Satırı Sil
+                </button>
+              </div>
+
+              <div class="obus-user-create-row-grid">
+                <label class="obus-user-create-field">
+                  <span>Ad Soyad</span>
+                  <input type="text" autocomplete="off" data-obus-user-create-input="fullName" />
+                </label>
+
+                <label class="obus-user-create-field">
+                  <span>Kullanıcı Adı</span>
+                  <input type="text" autocomplete="off" data-obus-user-create-input="username" />
+                </label>
+
+                <label class="obus-user-create-field">
+                  <span>Şifre</span>
+                  <input type="password" autocomplete="new-password" data-obus-user-create-input="password" />
+                </label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+    </section>
+
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

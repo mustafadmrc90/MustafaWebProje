@@ -3193,6 +3193,444 @@
     updatePreview();
   };
 
+  const initObusUserCreateWorkbench = () => {
+    const root = document.querySelector("[data-obus-user-create-page='1']");
+    if (!root) return;
+    if (root.dataset.bound === "1") return;
+    root.dataset.bound = "1";
+
+    const listUrl = String(root.getAttribute("data-obus-user-create-template-list-url") || "").trim();
+    const saveUrl = String(root.getAttribute("data-obus-user-create-template-save-url") || "").trim();
+    const detailBaseUrl = String(root.getAttribute("data-obus-user-create-template-detail-base-url") || "").trim();
+    const deleteBaseUrl = String(root.getAttribute("data-obus-user-create-template-delete-base-url") || "").trim();
+    const rowsContainer = root.querySelector("[data-obus-user-create-rows='1']");
+    const rowTemplate = root.querySelector("#obus-user-create-row-template");
+    const templateNameInput = root.querySelector("[data-obus-user-create-template-name='1']");
+    const templateSelect = root.querySelector("[data-obus-user-create-template-select='1']");
+    const addRowButton = root.querySelector("[data-obus-user-create-add-row='1']");
+    const clearRowsButton = root.querySelector("[data-obus-user-create-clear-rows='1']");
+    const saveTemplateButton = root.querySelector("[data-obus-user-create-save-template='1']");
+    const refreshTemplatesButton = root.querySelector("[data-obus-user-create-refresh-templates='1']");
+    const loadTemplateButton = root.querySelector("[data-obus-user-create-load-template='1']");
+    const deleteTemplateButton = root.querySelector("[data-obus-user-create-delete-template='1']");
+    const statusEl = root.querySelector("[data-obus-user-create-status='1']");
+    const rowCountEl = root.querySelector("[data-obus-user-create-row-count='1']");
+    const previewEl = root.querySelector("[data-obus-user-create-preview='1']");
+    const responsePreviewEl = root.querySelector("[data-obus-user-create-response-preview='1']");
+
+    if (
+      !listUrl ||
+      !saveUrl ||
+      !detailBaseUrl ||
+      !deleteBaseUrl ||
+      !rowsContainer ||
+      !rowTemplate ||
+      !templateNameInput ||
+      !templateSelect ||
+      !addRowButton ||
+      !clearRowsButton ||
+      !saveTemplateButton ||
+      !refreshTemplatesButton ||
+      !loadTemplateButton ||
+      !deleteTemplateButton ||
+      !statusEl ||
+      !rowCountEl ||
+      !previewEl ||
+      !responsePreviewEl
+    ) {
+      return;
+    }
+
+    let currentTemplateId = null;
+    let templates = [];
+    let pendingRequests = 0;
+
+    const createEmptyEntry = () => ({
+      fullName: "",
+      username: "",
+      password: ""
+    });
+
+    const normalizeTemplateName = (value) =>
+      String(value || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .slice(0, 120);
+
+    const normalizeEntryText = (value) => String(value || "").trim().slice(0, 160);
+    const normalizeEntryPassword = (value) => String(value || "").slice(0, 160);
+
+    const isBusy = () => pendingRequests > 0;
+
+    const getRows = () => Array.from(rowsContainer.querySelectorAll("[data-obus-user-create-row='1']"));
+
+    const readEntries = () =>
+      getRows().map((row) => ({
+        fullName: normalizeEntryText(row.querySelector("[data-obus-user-create-input='fullName']")?.value || ""),
+        username: normalizeEntryText(row.querySelector("[data-obus-user-create-input='username']")?.value || ""),
+        password: normalizeEntryPassword(row.querySelector("[data-obus-user-create-input='password']")?.value || "")
+      }));
+
+    const readFilledEntries = () =>
+      readEntries().filter((entry) => entry.fullName || entry.username || entry.password);
+
+    const setStatus = (message, tone = "muted") => {
+      statusEl.textContent = String(message || "").trim();
+      statusEl.classList.remove("is-error", "is-success");
+      if (tone === "error") {
+        statusEl.classList.add("is-error");
+      } else if (tone === "success") {
+        statusEl.classList.add("is-success");
+      }
+    };
+
+    const syncActionState = () => {
+      const disabled = isBusy();
+      templateNameInput.disabled = disabled;
+      templateSelect.disabled = disabled;
+      addRowButton.disabled = disabled;
+      clearRowsButton.disabled = disabled;
+      saveTemplateButton.disabled = disabled;
+      refreshTemplatesButton.disabled = disabled;
+      loadTemplateButton.disabled = disabled || !String(templateSelect.value || "").trim();
+      deleteTemplateButton.disabled = disabled || !String(templateSelect.value || "").trim();
+      getRows().forEach((row) => {
+        row.querySelectorAll("input").forEach((input) => {
+          input.disabled = disabled;
+        });
+        const removeButton = row.querySelector("[data-obus-user-create-remove-row='1']");
+        if (removeButton) {
+          removeButton.disabled = disabled;
+        }
+      });
+    };
+
+    const setBusy = (nextBusy) => {
+      pendingRequests = nextBusy ? pendingRequests + 1 : Math.max(0, pendingRequests - 1);
+      syncActionState();
+    };
+
+    const syncRowMeta = () => {
+      const rows = getRows();
+      const filledCount = readFilledEntries().length;
+      rows.forEach((row, index) => {
+        const indexBadge = row.querySelector("[data-obus-user-create-row-index='1']");
+        if (indexBadge) {
+          indexBadge.textContent = `Satır ${index + 1}`;
+        }
+      });
+      rowCountEl.textContent = `${rows.length} satır / ${filledCount} dolu`;
+    };
+
+    const renderPreview = () => {
+      const filledEntries = readFilledEntries();
+      previewEl.textContent = JSON.stringify(
+        {
+          data: {
+            user: filledEntries.map((entry) => ({
+              "full-name": entry.fullName,
+              username: entry.username,
+              password: entry.password
+            }))
+          },
+          meta: {
+            templateId: currentTemplateId,
+            templateName: normalizeTemplateName(templateNameInput.value || ""),
+            requestReady: false,
+            entryCount: filledEntries.length,
+            note: "İstek detayları henüz tanımlanmadı."
+          }
+        },
+        null,
+        2
+      );
+      responsePreviewEl.textContent = JSON.stringify(
+        {
+          ok: false,
+          message: "İstek detayları henüz tanımlanmadı. Bilgiler geldiğinde bu ekran gönderim için bağlanacak."
+        },
+        null,
+        2
+      );
+      syncRowMeta();
+    };
+
+    const appendRow = (entry = createEmptyEntry(), { focus = false } = {}) => {
+      const fragment = rowTemplate.content.cloneNode(true);
+      const row = fragment.querySelector("[data-obus-user-create-row='1']");
+      if (!row) return;
+
+      const fullNameInput = row.querySelector("[data-obus-user-create-input='fullName']");
+      const usernameInput = row.querySelector("[data-obus-user-create-input='username']");
+      const passwordInput = row.querySelector("[data-obus-user-create-input='password']");
+
+      if (fullNameInput) fullNameInput.value = String(entry.fullName || "");
+      if (usernameInput) usernameInput.value = String(entry.username || "");
+      if (passwordInput) passwordInput.value = String(entry.password || "");
+
+      rowsContainer.appendChild(fragment);
+      syncActionState();
+      renderPreview();
+
+      if (focus && fullNameInput) {
+        window.requestAnimationFrame(() => {
+          fullNameInput.focus();
+          fullNameInput.select();
+        });
+      }
+    };
+
+    const renderRows = (entries) => {
+      rowsContainer.innerHTML = "";
+      const normalizedEntries = Array.isArray(entries)
+        ? entries
+            .map((entry) => ({
+              fullName: String(entry?.fullName || ""),
+              username: String(entry?.username || ""),
+              password: String(entry?.password || "")
+            }))
+            .filter((entry) => entry.fullName || entry.username || entry.password)
+        : [];
+      const rowsToRender = normalizedEntries.length > 0 ? normalizedEntries : [createEmptyEntry()];
+      rowsToRender.forEach((entry) => appendRow(entry));
+      syncActionState();
+      renderPreview();
+    };
+
+    const renderTemplateOptions = (selectedId = currentTemplateId) => {
+      const normalizedSelectedId = String(selectedId || "").trim();
+      templateSelect.innerHTML = "";
+
+      const placeholderOption = document.createElement("option");
+      placeholderOption.value = "";
+      placeholderOption.textContent = templates.length > 0 ? "Şablon seçin" : "Kayıtlı şablon yok";
+      templateSelect.appendChild(placeholderOption);
+
+      const dateFormatter = new Intl.DateTimeFormat("tr-TR", {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+
+      templates.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = String(item.id || "").trim();
+        const updatedAtText = item.updatedAt ? dateFormatter.format(new Date(item.updatedAt)) : "-";
+        option.textContent = `${item.name || "Adsız şablon"} (${Number(item.entryCount || 0)} kullanıcı) • ${updatedAtText}`;
+        if (option.value === normalizedSelectedId) {
+          option.selected = true;
+        }
+        templateSelect.appendChild(option);
+      });
+
+      syncActionState();
+    };
+
+    const buildDetailUrl = (templateId) => `${detailBaseUrl}/${encodeURIComponent(String(templateId || "").trim())}`;
+    const buildDeleteUrl = (templateId) => `${deleteBaseUrl}/${encodeURIComponent(String(templateId || "").trim())}`;
+
+    const loadTemplates = async ({ selectedId = currentTemplateId, announceSuccess = false } = {}) => {
+      setBusy(true);
+      try {
+        const response = await fetch(listUrl, {
+          headers: {
+            Accept: "application/json"
+          }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok || !Array.isArray(data.items)) {
+          throw new Error(getApiErrorMessage(response, data, "Şablon listesi okunamadı"));
+        }
+
+        templates = data.items || [];
+        const selectedTemplate = templates.find((item) => String(item.id || "") === String(selectedId || ""));
+        currentTemplateId = selectedTemplate ? selectedTemplate.id : null;
+        renderTemplateOptions(selectedTemplate ? selectedTemplate.id : "");
+
+        if (announceSuccess) {
+          setStatus("Şablon listesi yenilendi.", "success");
+        }
+      } catch (err) {
+        setStatus(err?.message || "Şablon listesi okunamadı.", "error");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const loadTemplateById = async (templateId) => {
+      const normalizedId = String(templateId || "").trim();
+      if (!normalizedId) {
+        setStatus("Yüklenecek bir şablon seçin.", "error");
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const response = await fetch(buildDetailUrl(normalizedId), {
+          headers: {
+            Accept: "application/json"
+          }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok || !data?.item) {
+          throw new Error(getApiErrorMessage(response, data, "Şablon yüklenemedi"));
+        }
+
+        currentTemplateId = data.item.id;
+        templateNameInput.value = String(data.item.name || "");
+        renderRows(Array.isArray(data.item.entries) ? data.item.entries : []);
+        renderTemplateOptions(currentTemplateId);
+        setStatus(`${data.item.name || "Şablon"} yüklendi.`, "success");
+      } catch (err) {
+        setStatus(err?.message || "Şablon yüklenemedi.", "error");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const saveTemplate = async () => {
+      const payload = {
+        templateId: currentTemplateId,
+        name: normalizeTemplateName(templateNameInput.value || ""),
+        entries: readEntries()
+      };
+
+      if (!payload.name) {
+        setStatus("Şablon adı zorunludur.", "error");
+        templateNameInput.focus();
+        return;
+      }
+      if (!readFilledEntries().length) {
+        setStatus("Kaydetmek için en az bir kullanıcı satırı doldurun.", "error");
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const response = await fetch(saveUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok || !data?.item) {
+          throw new Error(getApiErrorMessage(response, data, "Şablon kaydedilemedi"));
+        }
+
+        currentTemplateId = data.item.id;
+        templateNameInput.value = String(data.item.name || payload.name || "");
+        await loadTemplates({ selectedId: currentTemplateId });
+        setStatus(data.action === "created" ? "Şablon kaydedildi." : "Şablon güncellendi.", "success");
+      } catch (err) {
+        setStatus(err?.message || "Şablon kaydedilemedi.", "error");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const deleteTemplate = async () => {
+      const targetId = String(templateSelect.value || currentTemplateId || "").trim();
+      if (!targetId) {
+        setStatus("Silinecek bir şablon seçin.", "error");
+        return;
+      }
+
+      const selectedTemplate = templates.find((item) => String(item.id || "") === targetId);
+      if (!window.confirm(`${selectedTemplate?.name || "Seçili şablon"} silinsin mi?`)) {
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const response = await fetch(buildDeleteUrl(targetId), {
+          method: "DELETE",
+          headers: {
+            Accept: "application/json"
+          }
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || data?.ok === false) {
+          throw new Error(getApiErrorMessage(response, data, "Şablon silinemedi"));
+        }
+
+        if (String(currentTemplateId || "") === targetId) {
+          currentTemplateId = null;
+        }
+        templateSelect.value = "";
+        await loadTemplates({ selectedId: "" });
+        setStatus("Şablon silindi.", "success");
+      } catch (err) {
+        setStatus(err?.message || "Şablon silinemedi.", "error");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    rowsContainer.addEventListener("input", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.matches("[data-obus-user-create-input]")) return;
+      renderPreview();
+    });
+
+    rowsContainer.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-obus-user-create-remove-row='1']");
+      if (!button || isBusy()) return;
+      const row = button.closest("[data-obus-user-create-row='1']");
+      if (!row) return;
+
+      if (getRows().length <= 1) {
+        row.querySelectorAll("input").forEach((input) => {
+          input.value = "";
+        });
+      } else {
+        row.remove();
+      }
+      renderPreview();
+    });
+
+    addRowButton.addEventListener("click", () => {
+      if (isBusy()) return;
+      appendRow(createEmptyEntry(), { focus: true });
+    });
+
+    clearRowsButton.addEventListener("click", () => {
+      if (isBusy()) return;
+      renderRows([createEmptyEntry()]);
+      setStatus("Satırlar temizlendi.", "success");
+    });
+
+    saveTemplateButton.addEventListener("click", () => {
+      void saveTemplate();
+    });
+
+    refreshTemplatesButton.addEventListener("click", () => {
+      void loadTemplates({ selectedId: currentTemplateId, announceSuccess: true });
+    });
+
+    loadTemplateButton.addEventListener("click", () => {
+      void loadTemplateById(templateSelect.value);
+    });
+
+    deleteTemplateButton.addEventListener("click", () => {
+      void deleteTemplate();
+    });
+
+    templateSelect.addEventListener("change", () => {
+      syncActionState();
+    });
+
+    templateNameInput.addEventListener("input", () => {
+      renderPreview();
+    });
+
+    renderRows([createEmptyEntry()]);
+    setStatus("Kullanıcı satırlarını hazırlayın ve isterseniz şablon olarak kaydedin.", "muted");
+    void loadTemplates();
+  };
+
   const initStationPassengerInfoPage = () => {
     const page = document.querySelector("[data-station-passenger-page='1']");
     if (!page) return;
@@ -4697,6 +5135,7 @@
     initJourneyUpdateFloatingScrollbar();
     initJourneySearchForm();
     initObusRuleDefineWorkbench();
+    initObusUserCreateWorkbench();
     initStationPassengerInfoPage();
     initAllCompaniesLoading();
     initAllCompaniesObusJobMonitor();

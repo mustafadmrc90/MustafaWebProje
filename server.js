@@ -576,6 +576,16 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "obus-rule-define"
   },
   {
+    key: "obus-user-create",
+    type: "item",
+    label: "Obus Kullanıcı Oluştur",
+    parentKey: "general",
+    route: "/general/obus-user-create",
+    routeKey: "obus-user-create",
+    sortOrder: 20,
+    iconKey: "obus-user-create"
+  },
+  {
     key: "reports",
     type: "section",
     label: "Raporlar",
@@ -706,6 +716,9 @@ const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
 const jiraEpicMetaCache = new Map();
 const stationPassengerWebStationsCache = new Map();
+const OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH = 120;
+const OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH = 160;
+const OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT = 250;
 const obusJobsAutoState = {
   timerId: null,
   isRunning: false
@@ -1639,7 +1652,7 @@ async function syncSidebarMenusAndPermissions() {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key IN ('obus-rule-define', 'journey-search', 'journey-update') THEN true
+          WHEN m.key IN ('obus-rule-define', 'obus-user-create', 'journey-search', 'journey-update') THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END,
@@ -1678,7 +1691,7 @@ async function ensureSidebarPermissionsForUser(userId) {
         m.key,
         CASE
           WHEN m.type = 'section' THEN true
-          WHEN m.key IN ('obus-rule-define', 'journey-search', 'journey-update') THEN true
+          WHEN m.key IN ('obus-rule-define', 'obus-user-create', 'journey-search', 'journey-update') THEN true
           WHEN lower(u.username) = 'admin' THEN true
           ELSE false
         END,
@@ -16997,6 +17010,278 @@ async function updateObusPartnerRulesByCompanies({
   };
 }
 
+function normalizeObusBulkUserTemplateName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH);
+}
+
+function normalizeObusBulkUserTemplateText(value) {
+  return String(value || "").trim().slice(0, OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH);
+}
+
+function normalizeObusBulkUserTemplatePassword(value) {
+  const text = typeof value === "string" ? value : String(value || "");
+  return text.slice(0, OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH);
+}
+
+function extractObusBulkUserTemplateEntriesSource(input) {
+  if (Array.isArray(input)) return input;
+  if (input && typeof input === "object") {
+    if (Array.isArray(input.entries)) return input.entries;
+    if (Array.isArray(input.users)) return input.users;
+  }
+  return [];
+}
+
+function normalizeObusBulkUserTemplateEntry(input = {}) {
+  const entry = input && typeof input === "object" ? input : {};
+  return {
+    fullName: normalizeObusBulkUserTemplateText(
+      entry.fullName ??
+        entry["full-name"] ??
+        entry.full_name ??
+        entry.fullname ??
+        entry.nameSurname ??
+        entry.name_surname ??
+        ""
+    ),
+    username: normalizeObusBulkUserTemplateText(entry.username ?? entry.userName ?? entry.user_name ?? ""),
+    password: normalizeObusBulkUserTemplatePassword(entry.password ?? "")
+  };
+}
+
+function normalizeObusBulkUserTemplateEntries(input) {
+  return extractObusBulkUserTemplateEntriesSource(input)
+    .slice(0, OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT)
+    .map((entry) => normalizeObusBulkUserTemplateEntry(entry))
+    .filter((entry) => entry.fullName || entry.username || entry.password);
+}
+
+function parseObusBulkUserTemplateEntries(entriesJson) {
+  if (typeof entriesJson !== "string") {
+    return normalizeObusBulkUserTemplateEntries(entriesJson);
+  }
+
+  const raw = String(entriesJson || "").trim();
+  if (!raw) return [];
+  return normalizeObusBulkUserTemplateEntries(parseJsonSafe(raw) || []);
+}
+
+function serializeObusBulkUserTemplateEntries(entries) {
+  return JSON.stringify({
+    version: 1,
+    entries: normalizeObusBulkUserTemplateEntries(entries)
+  });
+}
+
+function buildObusBulkUserTemplateResponseItem(row, { includeEntries = false } = {}) {
+  const entries = parseObusBulkUserTemplateEntries(row?.entries_json);
+  const payload = {
+    id: Number.isInteger(Number(row?.id)) ? Number(row.id) : null,
+    name: normalizeObusBulkUserTemplateName(row?.name),
+    entryCount: entries.length,
+    createdAt: row?.created_at ? new Date(row.created_at).toISOString() : "",
+    updatedAt: row?.updated_at ? new Date(row.updated_at).toISOString() : ""
+  };
+
+  if (includeEntries) {
+    payload.entries = entries;
+  }
+
+  return payload;
+}
+
+async function listObusBulkUserTemplatesForUser(userId) {
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(userIdNum)) return [];
+
+  const result = await pool.query(
+    `
+      SELECT id, name, entries_json, created_at, updated_at
+      FROM obus_bulk_user_templates
+      WHERE created_by = $1 OR updated_by = $1
+      ORDER BY lower(name) ASC, updated_at DESC, id DESC
+    `,
+    [userIdNum]
+  );
+
+  return result.rows.map((row) => buildObusBulkUserTemplateResponseItem(row));
+}
+
+async function getObusBulkUserTemplateByIdForUser(templateId, userId) {
+  const templateIdNum = Number(templateId);
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(templateIdNum) || !Number.isInteger(userIdNum)) return null;
+
+  const result = await pool.query(
+    `
+      SELECT id, name, entries_json, created_at, updated_at
+      FROM obus_bulk_user_templates
+      WHERE id = $1
+        AND (created_by = $2 OR updated_by = $2)
+      LIMIT 1
+    `,
+    [templateIdNum, userIdNum]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function findObusBulkUserTemplateByNameForUser(name, userId, excludeTemplateId = null) {
+  const normalizedName = normalizeObusBulkUserTemplateName(name);
+  const userIdNum = Number(userId);
+  const excludeIdNum = Number(excludeTemplateId);
+  if (!normalizedName || !Number.isInteger(userIdNum)) return null;
+
+  if (Number.isInteger(excludeIdNum)) {
+    const result = await pool.query(
+      `
+        SELECT id, name, entries_json, created_at, updated_at
+        FROM obus_bulk_user_templates
+        WHERE lower(name) = lower($1)
+          AND (created_by = $2 OR updated_by = $2)
+          AND id <> $3
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+      `,
+      [normalizedName, userIdNum, excludeIdNum]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  const result = await pool.query(
+    `
+      SELECT id, name, entries_json, created_at, updated_at
+      FROM obus_bulk_user_templates
+      WHERE lower(name) = lower($1)
+        AND (created_by = $2 OR updated_by = $2)
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `,
+    [normalizedName, userIdNum]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function saveObusBulkUserTemplateForUser({
+  templateId = null,
+  name,
+  entries,
+  userId
+}) {
+  const normalizedName = normalizeObusBulkUserTemplateName(name);
+  const userIdNum = Number(userId);
+  const templateIdNum = Number(templateId);
+  const normalizedEntries = normalizeObusBulkUserTemplateEntries(entries);
+
+  if (!normalizedName) {
+    throw new Error("Şablon adı zorunludur.");
+  }
+  if (!Number.isInteger(userIdNum)) {
+    throw new Error("Geçersiz kullanıcı.");
+  }
+  if (!normalizedEntries.length) {
+    throw new Error("Kaydetmek için en az bir kullanıcı satırı doldurulmalıdır.");
+  }
+
+  const serializedEntries = serializeObusBulkUserTemplateEntries(normalizedEntries);
+  const selectedTemplate = Number.isInteger(templateIdNum)
+    ? await getObusBulkUserTemplateByIdForUser(templateIdNum, userIdNum)
+    : null;
+  const duplicateByName = await findObusBulkUserTemplateByNameForUser(
+    normalizedName,
+    userIdNum,
+    selectedTemplate?.id || null
+  );
+
+  if (selectedTemplate) {
+    if (duplicateByName && Number(duplicateByName.id) !== Number(selectedTemplate.id)) {
+      const conflictError = new Error("Bu şablon adı zaten kullanılıyor.");
+      conflictError.code = "template_name_exists";
+      throw conflictError;
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE obus_bulk_user_templates
+        SET name = $2,
+            entries_json = $3,
+            updated_by = $4,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, name, entries_json, created_at, updated_at
+      `,
+      [selectedTemplate.id, normalizedName, serializedEntries, userIdNum]
+    );
+
+    return {
+      action: "updated",
+      item: buildObusBulkUserTemplateResponseItem(result.rows[0], { includeEntries: true })
+    };
+  }
+
+  if (duplicateByName) {
+    const result = await pool.query(
+      `
+        UPDATE obus_bulk_user_templates
+        SET name = $2,
+            entries_json = $3,
+            updated_by = $4,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id, name, entries_json, created_at, updated_at
+      `,
+      [duplicateByName.id, normalizedName, serializedEntries, userIdNum]
+    );
+
+    return {
+      action: "updated",
+      item: buildObusBulkUserTemplateResponseItem(result.rows[0], { includeEntries: true })
+    };
+  }
+
+  const insertResult = await pool.query(
+    `
+      INSERT INTO obus_bulk_user_templates (
+        name,
+        entries_json,
+        created_by,
+        updated_by,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $3, now())
+      RETURNING id, name, entries_json, created_at, updated_at
+    `,
+    [normalizedName, serializedEntries, userIdNum]
+  );
+
+  return {
+    action: "created",
+    item: buildObusBulkUserTemplateResponseItem(insertResult.rows[0], { includeEntries: true })
+  };
+}
+
+async function deleteObusBulkUserTemplateForUser(templateId, userId) {
+  const templateIdNum = Number(templateId);
+  const userIdNum = Number(userId);
+  if (!Number.isInteger(templateIdNum) || !Number.isInteger(userIdNum)) return false;
+
+  const result = await pool.query(
+    `
+      DELETE FROM obus_bulk_user_templates
+      WHERE id = $1
+        AND (created_by = $2 OR updated_by = $2)
+    `,
+    [templateIdNum, userIdNum]
+  );
+
+  return result.rowCount > 0;
+}
+
 app.get("/", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -18051,6 +18336,123 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
     report
   });
 });
+
+app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), (req, res) => {
+  res.render("general-obus-user-create", {
+    user: req.session.user,
+    active: "obus-user-create"
+  });
+});
+
+app.get("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
+  try {
+    const items = await listObusBulkUserTemplatesForUser(req.session.user?.id || null);
+    return res.json({
+      ok: true,
+      items
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: `Şablon listesi okunamadı: ${err?.message || "Bilinmeyen hata"}`
+    });
+  }
+});
+
+app.get(
+  "/api/obus-user-create/templates/:id",
+  requireAuth,
+  requireMenuAccess("obus-user-create"),
+  async (req, res) => {
+    try {
+      const template = await getObusBulkUserTemplateByIdForUser(req.params.id, req.session.user?.id || null);
+      if (!template) {
+        return res.status(404).json({
+          ok: false,
+          error: "Şablon bulunamadı."
+        });
+      }
+
+      return res.json({
+        ok: true,
+        item: buildObusBulkUserTemplateResponseItem(template, { includeEntries: true })
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: `Şablon okunamadı: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
+
+app.post("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
+  try {
+    const rawEntries = extractObusBulkUserTemplateEntriesSource(req.body?.entries);
+    if (rawEntries.length > OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT) {
+      return res.status(400).json({
+        ok: false,
+        error: `En fazla ${OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT} kullanıcı satırı kaydedebilirsiniz.`
+      });
+    }
+
+    const saveResult = await saveObusBulkUserTemplateForUser({
+      templateId: req.body?.templateId,
+      name: req.body?.name,
+      entries: rawEntries,
+      userId: req.session.user?.id || null
+    });
+
+    return res.json({
+      ok: true,
+      action: saveResult.action,
+      item: saveResult.item
+    });
+  } catch (err) {
+    const normalizedCode = String(err?.code || "").trim().toLowerCase();
+    const normalizedMessage = String(err?.message || "").trim();
+    const statusCode =
+      normalizedCode === "template_name_exists"
+        ? 409
+        : [
+              "Şablon adı zorunludur.",
+              "Geçersiz kullanıcı.",
+              "Kaydetmek için en az bir kullanıcı satırı doldurulmalıdır."
+            ].includes(normalizedMessage)
+          ? 400
+          : 500;
+    return res.status(statusCode).json({
+      ok: false,
+      error: normalizedMessage || "Şablon kaydedilemedi."
+    });
+  }
+});
+
+app.delete(
+  "/api/obus-user-create/templates/:id",
+  requireAuth,
+  requireMenuAccess("obus-user-create"),
+  async (req, res) => {
+    try {
+      const deleted = await deleteObusBulkUserTemplateForUser(req.params.id, req.session.user?.id || null);
+      if (!deleted) {
+        return res.status(404).json({
+          ok: false,
+          error: "Şablon bulunamadı."
+        });
+      }
+
+      return res.json({
+        ok: true
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: `Şablon silinemedi: ${err?.message || "Bilinmeyen hata"}`
+      });
+    }
+  }
+);
 
 app.get("/general/obus-rule-define", requireAuth, requireMenuAccess("obus-rule-define"), async (req, res) => {
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
