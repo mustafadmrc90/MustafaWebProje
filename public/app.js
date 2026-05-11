@@ -3203,12 +3203,26 @@
     const saveUrl = String(root.getAttribute("data-obus-user-create-template-save-url") || "").trim();
     const detailBaseUrl = String(root.getAttribute("data-obus-user-create-template-detail-base-url") || "").trim();
     const deleteBaseUrl = String(root.getAttribute("data-obus-user-create-template-delete-base-url") || "").trim();
+    const submitUrl = String(root.getAttribute("data-obus-user-create-submit-url") || "").trim();
+    const companyCountRaw = Number.parseInt(String(root.getAttribute("data-obus-user-create-company-count") || "0"), 10);
+    const companyCount = Number.isFinite(companyCountRaw) && companyCountRaw > 0 ? companyCountRaw : 0;
+    const samplePartnerIdRaw = Number.parseInt(
+      String(root.getAttribute("data-obus-user-create-sample-partner-id") || "0"),
+      10
+    );
+    const sampleBranchIdRaw = Number.parseInt(
+      String(root.getAttribute("data-obus-user-create-sample-branch-id") || "0"),
+      10
+    );
+    const samplePartnerId = Number.isFinite(samplePartnerIdRaw) && samplePartnerIdRaw > 0 ? samplePartnerIdRaw : 0;
+    const sampleBranchId = Number.isFinite(sampleBranchIdRaw) && sampleBranchIdRaw > 0 ? sampleBranchIdRaw : 0;
     const rowsContainer = root.querySelector("[data-obus-user-create-rows='1']");
     const rowTemplate = root.querySelector("#obus-user-create-row-template");
     const templateNameInput = root.querySelector("[data-obus-user-create-template-name='1']");
     const templateSelect = root.querySelector("[data-obus-user-create-template-select='1']");
     const addRowButton = root.querySelector("[data-obus-user-create-add-row='1']");
     const clearRowsButton = root.querySelector("[data-obus-user-create-clear-rows='1']");
+    const createUsersButton = root.querySelector("[data-obus-user-create-submit='1']");
     const saveTemplateButton = root.querySelector("[data-obus-user-create-save-template='1']");
     const refreshTemplatesButton = root.querySelector("[data-obus-user-create-refresh-templates='1']");
     const loadTemplateButton = root.querySelector("[data-obus-user-create-load-template='1']");
@@ -3223,12 +3237,14 @@
       !saveUrl ||
       !detailBaseUrl ||
       !deleteBaseUrl ||
+      !submitUrl ||
       !rowsContainer ||
       !rowTemplate ||
       !templateNameInput ||
       !templateSelect ||
       !addRowButton ||
       !clearRowsButton ||
+      !createUsersButton ||
       !saveTemplateButton ||
       !refreshTemplatesButton ||
       !loadTemplateButton ||
@@ -3244,6 +3260,35 @@
     let currentTemplateId = null;
     let templates = [];
     let pendingRequests = 0;
+    let createJobRunning = false;
+    let activeJobId = "";
+    let activeJobCursor = 0;
+    let activeJobPollTimerId = 0;
+    let activeJobEvents = [];
+    let activeJobFailureCount = 0;
+
+    const permissionTypes = [
+      "CanSeePassengerInformation",
+      "CanSeeAgentName",
+      "CanSearchTickets",
+      "CanViewExpiredJourney",
+      "CanViewJourneyActivity",
+      "CanViewCancelledJourney",
+      "CanRefundOpenTicket",
+      "CanMatchSidelinedTicketToJourney",
+      "IgnoreMaximumSalesParameters",
+      "CanTransferAtOtherBranch",
+      "CanEditOnlineTicket",
+      "CanRefundOnlineTicket",
+      "AllowRefundOptionExpiredTicketsForTransfer",
+      "AllowRefundOptionExpiredTickets",
+      "CanRefundOtherSalesAtOwnBranch",
+      "CanRefundOwnSalesAtOwnBranch",
+      "CanTransferAtOwnBranch",
+      "CanRefundObiletTicket",
+      "CanRefundWebTicket",
+      "PermittedAllBranchStations"
+    ];
 
     const createEmptyEntry = () => ({
       fullName: "",
@@ -3260,7 +3305,7 @@
     const normalizeEntryText = (value) => String(value || "").trim().slice(0, 160);
     const normalizeEntryPassword = (value) => String(value || "").slice(0, 160);
 
-    const isBusy = () => pendingRequests > 0;
+    const isBusy = () => pendingRequests > 0 || createJobRunning;
 
     const getRows = () => Array.from(rowsContainer.querySelectorAll("[data-obus-user-create-row='1']"));
 
@@ -3284,12 +3329,95 @@
       }
     };
 
+    const buildPermissionList = (branchIdValue) =>
+      permissionTypes.map((type) => ({
+        "branch-id": branchIdValue,
+        type,
+        "is-deleted": false,
+        "user-id": 0
+      }));
+
+    const buildSampleRequestBody = (entry) => ({
+      data: {
+        "full-name": String(entry?.fullName || "").trim(),
+        "is-active": true,
+        "day-for-can-view-expired-journey": null,
+        email: null,
+        notes: null,
+        password: String(entry?.password || ""),
+        phone: null,
+        username: String(entry?.username || "").trim(),
+        "ignore-password-check": false,
+        id: 0,
+        "is-system-user": false,
+        "user-modules": [
+          {
+            "module-id": "Obus",
+            "partner-id": samplePartnerId || 0,
+            "user-id": 0
+          }
+        ],
+        branches: [sampleBranchId || 0],
+        "time-to-change-password": 0,
+        "is-mac-address-check": false,
+        permissions: buildPermissionList(sampleBranchId || 0),
+        "report-permissions": [],
+        "branch-station-permission": [],
+        "user-branch-profile": []
+      },
+      "device-session": {
+        "session-id": "{{sessionId}}",
+        "device-id": "{{deviceId}}"
+      },
+      language: "tr-TR",
+      token: "{{token}}"
+    });
+
+    const validateEntriesForSubmit = () => {
+      const rows = readEntries();
+      const validEntries = [];
+      const incompleteRows = [];
+
+      rows.forEach((entry, index) => {
+        const hasFullName = Boolean(entry.fullName);
+        const hasUsername = Boolean(entry.username);
+        const hasPassword = Boolean(entry.password);
+        const filledCount = [hasFullName, hasUsername, hasPassword].filter(Boolean).length;
+        if (filledCount === 0) return;
+        if (filledCount < 3) {
+          incompleteRows.push(index + 1);
+          return;
+        }
+        validEntries.push(entry);
+      });
+
+      if (incompleteRows.length > 0) {
+        return {
+          ok: false,
+          error: `Bazı satırlar eksik. Ad Soyad, Kullanıcı Adı ve Şifre alanlarının tamamı doldurulmalıdır. Satır: ${incompleteRows.join(", ")}`
+        };
+      }
+
+      if (!validEntries.length) {
+        return {
+          ok: false,
+          error: "En az bir kullanıcı satırı doldurulmalıdır."
+        };
+      }
+
+      return {
+        ok: true,
+        entries: validEntries
+      };
+    };
+
     const syncActionState = () => {
       const disabled = isBusy();
       templateNameInput.disabled = disabled;
       templateSelect.disabled = disabled;
       addRowButton.disabled = disabled;
       clearRowsButton.disabled = disabled;
+      createUsersButton.disabled = disabled;
       saveTemplateButton.disabled = disabled;
       refreshTemplatesButton.disabled = disabled;
       loadTemplateButton.disabled = disabled || !String(templateSelect.value || "").trim();
@@ -3322,36 +3450,66 @@
       rowCountEl.textContent = `${rows.length} satır / ${filledCount} dolu`;
     };
 
+    const renderJobResponsePreview = (snapshot = null) => {
+      const recentEvents = activeJobEvents.slice(-20).map((event) => ({
+        label: String(event?.label || "").trim(),
+        ok: typeof event?.ok === "boolean" ? event.ok : null,
+        message: String(event?.message || "").trim(),
+        error: String(event?.error || "").trim(),
+        detail: String(event?.detailText || "").trim()
+      }));
+
+      responsePreviewEl.textContent = JSON.stringify(
+        {
+          ok: snapshot ? !snapshot.error && Number(snapshot.failureCount || 0) === 0 : false,
+          jobId: snapshot ? String(snapshot.jobId || activeJobId || "").trim() : activeJobId,
+          done: snapshot ? Boolean(snapshot.done) : false,
+          processedCount: snapshot ? Number(snapshot.processedCount || 0) : 0,
+          totalCount: snapshot ? Number(snapshot.totalCount || 0) : 0,
+          successCount: snapshot ? Number(snapshot.successCount || 0) : 0,
+          failureCount: snapshot ? Number(snapshot.failureCount || 0) : 0,
+          summary: snapshot?.summary || null,
+          recentResults: recentEvents
+        },
+        null,
+        2
+      );
+    };
+
     const renderPreview = () => {
-      const filledEntries = readFilledEntries();
+      const validation = validateEntriesForSubmit();
+      const filledEntries = validation.ok ? validation.entries : readFilledEntries();
+      const sampleEntry = filledEntries[0] || createEmptyEntry();
+      const targetCount = companyCount > 0 ? companyCount * filledEntries.length : 0;
+
       previewEl.textContent = JSON.stringify(
         {
-          data: {
-            user: filledEntries.map((entry) => ({
-              "full-name": entry.fullName,
-              username: entry.username,
-              password: entry.password
-            }))
-          },
+          "sample-request": buildSampleRequestBody(sampleEntry),
           meta: {
             templateId: currentTemplateId,
             templateName: normalizeTemplateName(templateNameInput.value || ""),
-            requestReady: false,
+            requestReady: validation.ok && companyCount > 0,
+            companyCount,
             entryCount: filledEntries.length,
-            note: "İstek detayları henüz tanımlanmadı."
+            targetCount,
+            samplePartnerId: samplePartnerId || 0,
+            sampleBranchId: sampleBranchId || 0,
+            validationError: validation.ok ? "" : validation.error
           }
         },
         null,
         2
       );
-      responsePreviewEl.textContent = JSON.stringify(
-        {
-          ok: false,
-          message: "İstek detayları henüz tanımlanmadı. Bilgiler geldiğinde bu ekran gönderim için bağlanacak."
-        },
-        null,
-        2
-      );
+      if (!createJobRunning) {
+        responsePreviewEl.textContent = JSON.stringify(
+          {
+            ok: false,
+            message: "Toplu kullanıcı oluşturma henüz başlatılmadı."
+          },
+          null,
+          2
+        );
+      }
       syncRowMeta();
     };
 
@@ -3427,6 +3585,83 @@
 
     const buildDetailUrl = (templateId) => `${detailBaseUrl}/${encodeURIComponent(String(templateId || "").trim())}`;
     const buildDeleteUrl = (templateId) => `${deleteBaseUrl}/${encodeURIComponent(String(templateId || "").trim())}`;
+
+    const stopActiveJob = () => {
+      createJobRunning = false;
+      activeJobId = "";
+      activeJobCursor = 0;
+      activeJobFailureCount = 0;
+      if (activeJobPollTimerId) {
+        window.clearTimeout(activeJobPollTimerId);
+        activeJobPollTimerId = 0;
+      }
+      syncActionState();
+    };
+
+    const scheduleJobPoll = (delayMs = 900) => {
+      if (!activeJobId) return;
+      if (activeJobPollTimerId) {
+        window.clearTimeout(activeJobPollTimerId);
+      }
+      activeJobPollTimerId = window.setTimeout(() => {
+        void pollActiveJob();
+      }, delayMs);
+    };
+
+    const pollActiveJob = async () => {
+      if (!activeJobId) return;
+      try {
+        const response = await fetch(`/api/obus-live/${encodeURIComponent(activeJobId)}?cursor=${activeJobCursor}`, {
+          headers: {
+            Accept: "application/json"
+          },
+          cache: "no-store",
+          credentials: "same-origin"
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Toplu kullanıcı oluşturma durumu okunamadı"));
+        }
+
+        activeJobFailureCount = 0;
+        activeJobCursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : activeJobCursor;
+        if (Array.isArray(data.events) && data.events.length > 0) {
+          activeJobEvents = activeJobEvents.concat(data.events).slice(-200);
+        }
+
+        renderJobResponsePreview(data);
+
+        if (data.error) {
+          setStatus(data.error, "error");
+          stopActiveJob();
+          return;
+        }
+
+        if (data.done) {
+          const finalMessage =
+            Number(data.failureCount || 0) > 0
+              ? `Toplu kullanıcı oluşturma tamamlandı. Başarılı: ${Number(data.successCount || 0)} | Hatalı: ${Number(data.failureCount || 0)}`
+              : `Toplu kullanıcı oluşturma tamamlandı. ${Number(data.successCount || 0)} istek başarılı.`;
+          setStatus(finalMessage, Number(data.failureCount || 0) > 0 ? "error" : "success");
+          stopActiveJob();
+          return;
+        }
+
+        setStatus(
+          `Toplu kullanıcı oluşturma sürüyor. İşlenen: ${Number(data.processedCount || 0)}/${Number(data.totalCount || 0)} | Başarılı: ${Number(data.successCount || 0)} | Hatalı: ${Number(data.failureCount || 0)}`,
+          "muted"
+        );
+        scheduleJobPoll(900);
+      } catch (err) {
+        activeJobFailureCount += 1;
+        if (activeJobFailureCount >= 3) {
+          setStatus(err?.message || "Toplu kullanıcı oluşturma durumu okunamadı.", "error");
+          stopActiveJob();
+          return;
+        }
+        scheduleJobPoll(1400);
+      }
+    };
 
     const loadTemplates = async ({ selectedId = currentTemplateId, announceSuccess = false } = {}) => {
       setBusy(true);
@@ -3618,6 +3853,75 @@
       void deleteTemplate();
     });
 
+    createUsersButton.addEventListener("click", () => {
+      void (async () => {
+        if (isBusy()) return;
+        const validation = validateEntriesForSubmit();
+        if (!validation.ok) {
+          setStatus(validation.error, "error");
+          renderPreview();
+          return;
+        }
+        if (companyCount <= 0) {
+          setStatus("Tüm Firmalar listesi boş. Önce firma listesini güncelleyin.", "error");
+          return;
+        }
+
+        const targetCount = validation.entries.length * companyCount;
+        const confirmed = window.confirm(
+          `${validation.entries.length} kullanıcı satırı, ${companyCount} firmaya gönderilecek. Toplam ${targetCount} createuser isteği başlatılsın mı?`
+        );
+        if (!confirmed) return;
+
+        setBusy(true);
+        try {
+          const response = await fetch(submitUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            body: JSON.stringify({
+              entries: validation.entries
+            })
+          });
+          const data = await parseJsonResponse(response);
+          if (!response.ok || !data?.ok || !data?.jobId) {
+            throw new Error(getApiErrorMessage(response, data, "Toplu kullanıcı oluşturma başlatılamadı"));
+          }
+
+          createJobRunning = true;
+          activeJobId = String(data.jobId || "").trim();
+          activeJobCursor = 0;
+          activeJobEvents = [];
+          activeJobFailureCount = 0;
+          syncActionState();
+          responsePreviewEl.textContent = JSON.stringify(
+            {
+              ok: true,
+              jobId: activeJobId,
+              started: true,
+              companyCount: Number(data.companyCount || companyCount),
+              userCount: Number(data.userCount || validation.entries.length),
+              totalCount: Number(data.totalCount || targetCount),
+              message: "Toplu kullanıcı oluşturma işi başlatıldı."
+            },
+            null,
+            2
+          );
+          setStatus(
+            `Toplu kullanıcı oluşturma başlatıldı. Hedef istek: ${Number(data.totalCount || targetCount)}`,
+            "success"
+          );
+          scheduleJobPoll(300);
+        } catch (err) {
+          setStatus(err?.message || "Toplu kullanıcı oluşturma başlatılamadı.", "error");
+        } finally {
+          setBusy(false);
+        }
+      })();
+    });
+
     templateSelect.addEventListener("change", () => {
       syncActionState();
     });
@@ -3627,7 +3931,12 @@
     });
 
     renderRows([createEmptyEntry()]);
-    setStatus("Kullanıcı satırlarını hazırlayın ve isterseniz şablon olarak kaydedin.", "muted");
+    setStatus(
+      companyCount > 0
+        ? `Kullanıcı satırlarını hazırlayın. Girilen kullanıcılar ${companyCount} firmaya gönderilecek.`
+        : "Tüm Firmalar listesi boş görünüyor. Önce firma listesini güncelleyin.",
+      companyCount > 0 ? "muted" : "error"
+    );
     void loadTemplates();
   };
 

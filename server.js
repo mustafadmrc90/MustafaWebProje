@@ -382,6 +382,17 @@ const OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
 const OBUS_PARTNER_RULE_CREATE_CONCURRENCY =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_CREATE_CONCURRENCY || "4", 10) || 4;
+const OBUS_USER_CREATE_API_URL =
+  process.env.OBUS_USER_CREATE_API_URL ||
+  "https://api-coreprod-cluster3.obus.com.tr/api/membership/createuser";
+const OBUS_USER_CREATE_API_AUTH =
+  process.env.OBUS_USER_CREATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const OBUS_USER_CREATE_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_USER_CREATE_TIMEOUT_MS || "90000", 10) || 90000;
+const OBUS_USER_CREATE_LOGIN_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_USER_CREATE_LOGIN_CONCURRENCY || "6", 10) || 6;
+const OBUS_USER_CREATE_REQUEST_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_USER_CREATE_REQUEST_CONCURRENCY || "10", 10) || 10;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
@@ -719,6 +730,28 @@ const stationPassengerWebStationsCache = new Map();
 const OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH = 120;
 const OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH = 160;
 const OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT = 250;
+const OBUS_USER_CREATE_PERMISSION_TYPES = [
+  "CanSeePassengerInformation",
+  "CanSeeAgentName",
+  "CanSearchTickets",
+  "CanViewExpiredJourney",
+  "CanViewJourneyActivity",
+  "CanViewCancelledJourney",
+  "CanRefundOpenTicket",
+  "CanMatchSidelinedTicketToJourney",
+  "IgnoreMaximumSalesParameters",
+  "CanTransferAtOtherBranch",
+  "CanEditOnlineTicket",
+  "CanRefundOnlineTicket",
+  "AllowRefundOptionExpiredTicketsForTransfer",
+  "AllowRefundOptionExpiredTickets",
+  "CanRefundOtherSalesAtOwnBranch",
+  "CanRefundOwnSalesAtOwnBranch",
+  "CanTransferAtOwnBranch",
+  "CanRefundObiletTicket",
+  "CanRefundWebTicket",
+  "PermittedAllBranchStations"
+];
 const obusJobsAutoState = {
   timerId: null,
   isRunning: false
@@ -4558,7 +4591,10 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
   partnerId,
   username,
   password,
-  fallbackBranchId
+  fallbackBranchId,
+  authorization = PARTNERS_API_AUTH,
+  timeoutMs = 90000,
+  sessionCache = null
 }) {
   const initialResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl,
@@ -4567,7 +4603,10 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     partnerId,
     username,
     password,
-    fallbackBranchId
+    fallbackBranchId,
+    authorization,
+    timeoutMs,
+    sessionCache
   });
   const initialToken = String(initialResult?.token || "").trim();
   const retryBranchCandidates = buildUniqueLoginBranchCandidates(
@@ -4591,7 +4630,10 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
       username,
       password,
       fallbackBranchId,
-      loginBranchId: branchCandidate
+      loginBranchId: branchCandidate,
+      authorization,
+      timeoutMs,
+      sessionCache
     });
     retryResults.push(retryResult);
     const retryToken = String(retryResult?.token || "").trim();
@@ -17282,6 +17324,535 @@ async function deleteObusBulkUserTemplateForUser(templateId, userId) {
   return result.rowCount > 0;
 }
 
+function normalizeObusUserCreateEntriesInput(input) {
+  return extractObusBulkUserTemplateEntriesSource(input)
+    .slice(0, OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT)
+    .map((entry) => normalizeObusBulkUserTemplateEntry(entry));
+}
+
+function validateObusUserCreateEntries(input) {
+  const normalizedEntries = normalizeObusUserCreateEntriesInput(input);
+  const readyEntries = [];
+  const incompleteRows = [];
+
+  normalizedEntries.forEach((entry, index) => {
+    const hasFullName = Boolean(String(entry?.fullName || "").trim());
+    const hasUsername = Boolean(String(entry?.username || "").trim());
+    const hasPassword = Boolean(String(entry?.password || ""));
+    const filledFieldCount = [hasFullName, hasUsername, hasPassword].filter(Boolean).length;
+    if (filledFieldCount === 0) return;
+    if (filledFieldCount < 3) {
+      incompleteRows.push(index + 1);
+      return;
+    }
+    readyEntries.push({
+      fullName: String(entry.fullName || "").trim(),
+      username: String(entry.username || "").trim(),
+      password: String(entry.password || "")
+    });
+  });
+
+  if (incompleteRows.length > 0) {
+    return {
+      ok: false,
+      error: `Bazı satırlar eksik. Ad Soyad, Kullanıcı Adı ve Şifre alanlarının tamamı doldurulmalıdır. Satır: ${incompleteRows.join(", ")}`
+    };
+  }
+
+  if (readyEntries.length === 0) {
+    return {
+      ok: false,
+      error: "En az bir kullanıcı satırı doldurulmalıdır."
+    };
+  }
+
+  return {
+    ok: true,
+    entries: readyEntries
+  };
+}
+
+function buildObusUserCreatePermissions(branchIdValue) {
+  return OBUS_USER_CREATE_PERMISSION_TYPES.map((type) => ({
+    "branch-id": Number(branchIdValue),
+    type,
+    "is-deleted": false,
+    "user-id": 0
+  }));
+}
+
+function buildObusMembershipCreateUserRequestBody({
+  entry,
+  partnerIdValue,
+  branchIdValue,
+  sessionId = "",
+  deviceId = "",
+  token = "",
+  usePlaceholders = false
+}) {
+  const normalizedEntry = normalizeObusBulkUserTemplateEntry(entry);
+  const normalizedPartnerId =
+    Number.isInteger(Number(partnerIdValue)) && Number(partnerIdValue) > 0 ? Number(partnerIdValue) : 0;
+  const normalizedBranchId =
+    Number.isInteger(Number(branchIdValue)) && Number(branchIdValue) > 0 ? Number(branchIdValue) : 0;
+
+  return {
+    data: {
+      "full-name": String(normalizedEntry.fullName || "").trim(),
+      "is-active": true,
+      "day-for-can-view-expired-journey": null,
+      email: null,
+      notes: null,
+      password: String(normalizedEntry.password || ""),
+      phone: null,
+      username: String(normalizedEntry.username || "").trim(),
+      "ignore-password-check": false,
+      id: 0,
+      "is-system-user": false,
+      "user-modules": [
+        {
+          "module-id": "Obus",
+          "partner-id": normalizedPartnerId,
+          "user-id": 0
+        }
+      ],
+      branches: [normalizedBranchId],
+      "time-to-change-password": 0,
+      "is-mac-address-check": false,
+      permissions: buildObusUserCreatePermissions(normalizedBranchId),
+      "report-permissions": [],
+      "branch-station-permission": [],
+      "user-branch-profile": []
+    },
+    "device-session": {
+      "session-id": usePlaceholders ? "{{sessionId}}" : String(sessionId || "").trim(),
+      "device-id": usePlaceholders ? "{{deviceId}}" : String(deviceId || "").trim()
+    },
+    language: "tr-TR",
+    token: usePlaceholders ? "{{token}}" : String(token || "").trim()
+  };
+}
+
+function extractObusUserCreateApiMessage(payload, fallback = "") {
+  if (!payload || typeof payload !== "object") {
+    return String(fallback || "").trim();
+  }
+  return (
+    String(
+      payload["user-message"] ||
+        payload.message ||
+        payload.error ||
+        payload?.data?.message ||
+        payload?.data?.error ||
+        fallback ||
+        ""
+    ).trim()
+  );
+}
+
+async function prepareObusUserCreateCompanyTarget(company, options = {}) {
+  const loginCredentials = options && typeof options === "object" ? options.loginCredentials || {} : {};
+  const sessionCache = options && typeof options === "object" ? options.sessionCache || null : null;
+  const companyCode = String(company?.code || "").trim();
+  const companyIdRaw = String(company?.id || "").trim();
+  const branchIdRaw = String(company?.branchId || company?.id || "").trim();
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_CREATE_API_URL)) ||
+    "cluster3";
+  const fallbackBaseUrl =
+    normalizeTargetUrl(company?.url || "") ||
+    normalizeTargetUrl(buildUrlForCluster(OBUS_USER_CREATE_API_URL, clusterLabel)) ||
+    normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, clusterLabel));
+  const createUserUrl = buildMembershipCreateUserUrl(fallbackBaseUrl || OBUS_USER_CREATE_API_URL, clusterLabel);
+  const companyLabel = `${companyCode || "Firma"} - ${companyIdRaw || "N/A"} - ${clusterLabel}`;
+  const partnerIdValue = normalizeObusPartnerIdValue(companyIdRaw);
+  const branchIdValue = normalizeObusPartnerIdValue(branchIdRaw);
+
+  if (!companyCode) {
+    return {
+      ok: false,
+      companyCode: "",
+      companyLabel,
+      clusterLabel,
+      requestUrl: createUserUrl,
+      error: "Firma kodu bulunamadı.",
+      errorDetail: ""
+    };
+  }
+
+  if (!createUserUrl) {
+    return {
+      ok: false,
+      companyCode,
+      companyLabel,
+      clusterLabel,
+      requestUrl: "",
+      error: "CreateUser URL oluşturulamadı.",
+      errorDetail: ""
+    };
+  }
+
+  if (!Number.isInteger(partnerIdValue) || partnerIdValue <= 0) {
+    return {
+      ok: false,
+      companyCode,
+      companyLabel,
+      clusterLabel,
+      requestUrl: createUserUrl,
+      error: "Partner ID bulunamadı.",
+      errorDetail: `Firma ID: ${companyIdRaw || "-"}`
+    };
+  }
+
+  if (!Number.isInteger(branchIdValue) || branchIdValue <= 0) {
+    return {
+      ok: false,
+      companyCode,
+      companyLabel,
+      clusterLabel,
+      requestUrl: createUserUrl,
+      error: "ObusMerkezSubeID bulunamadı.",
+      errorDetail: `Branch ID: ${branchIdRaw || "-"}`
+    };
+  }
+
+  const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
+    endpointUrl: createUserUrl,
+    companyUrl: fallbackBaseUrl || createUserUrl,
+    partnerCode: companyCode,
+    partnerId: companyIdRaw,
+    username: String(loginCredentials?.username || "").trim(),
+    password: typeof loginCredentials?.password === "string" ? loginCredentials.password : "",
+    fallbackBranchId: branchIdRaw,
+    authorization: OBUS_USER_CREATE_API_AUTH,
+    timeoutMs: OBUS_USER_CREATE_TIMEOUT_MS,
+    sessionCache
+  });
+
+  if (!loginResult.ok) {
+    return {
+      ok: false,
+      companyCode,
+      companyLabel,
+      clusterLabel,
+      requestUrl: createUserUrl,
+      error: String(loginResult.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
+      errorDetail: String(loginResult.errorDetail || loginResult.tokenMissingDetail || "").trim()
+    };
+  }
+
+  const token = String(loginResult.token || "").trim();
+  if (!token) {
+    return {
+      ok: false,
+      companyCode,
+      companyLabel,
+      clusterLabel,
+      requestUrl: createUserUrl,
+      error: "UserLogin token bulunamadı.",
+      errorDetail: String(loginResult.tokenMissingDetail || loginResult.errorDetail || "").trim()
+    };
+  }
+
+  return {
+    ok: true,
+    companyCode,
+    companyLabel,
+    clusterLabel,
+    requestUrl: createUserUrl,
+    partnerIdValue,
+    branchIdValue,
+    sessionId: String(loginResult.sessionId || "").trim(),
+    deviceId: String(loginResult.deviceId || "").trim(),
+    token
+  };
+}
+
+async function createObusUserForCompanyTarget({ companyTarget, entry }) {
+  const requestBodyObject = buildObusMembershipCreateUserRequestBody({
+    entry,
+    partnerIdValue: companyTarget?.partnerIdValue,
+    branchIdValue: companyTarget?.branchIdValue,
+    sessionId: companyTarget?.sessionId,
+    deviceId: companyTarget?.deviceId,
+    token: companyTarget?.token
+  });
+  const requestBodyText = JSON.stringify(requestBodyObject, null, 2);
+  const requestUrl = String(companyTarget?.requestUrl || "").trim();
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    toBoundedInt(OBUS_USER_CREATE_TIMEOUT_MS, 90000, 5000, 180000)
+  );
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_USER_CREATE_API_AUTH
+      },
+      body: JSON.stringify(requestBodyObject),
+      signal: controller.signal
+    });
+
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+    const responseBodyText =
+      parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+    const apiMessage =
+      extractObusUserCreateApiMessage(parsed, response.statusText || "Bilinmeyen hata") || "Bilinmeyen hata";
+    const hasExplicitStatusField =
+      parsed &&
+      typeof parsed === "object" &&
+      ("status" in parsed || "success" in parsed || "status-code" in parsed);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        requestUrl,
+        requestBody: requestBodyText,
+        responseBody: responseBodyText,
+        message: "",
+        error: `HTTP ${response.status}: ${apiMessage}`,
+        errorDetail: ""
+      };
+    }
+
+    if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
+      return {
+        ok: false,
+        status: response.status,
+        requestUrl,
+        requestBody: requestBodyText,
+        responseBody: responseBodyText,
+        message: "",
+        error: apiMessage || "CreateUser isteği başarısız döndü.",
+        errorDetail: ""
+      };
+    }
+
+    return {
+      ok: true,
+      status: response.status,
+      requestUrl,
+      requestBody: requestBodyText,
+      responseBody: responseBodyText,
+      message: apiMessage || "Kullanıcı oluşturuldu.",
+      error: "",
+      errorDetail: ""
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      requestUrl,
+      requestBody: requestBodyText,
+      responseBody: "",
+      message: "",
+      error: err?.name === "AbortError" ? "CreateUser isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.",
+      errorDetail: ""
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function pushObusUserCreateSample(list, item, limit = 8) {
+  const target = Array.isArray(list) ? list : [];
+  if (target.length >= limit) return;
+  target.push(item);
+}
+
+async function runObusBulkUserCreateJob(job, { entries, partnerItems }) {
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    finishObusLiveJob(
+      job,
+      buildMissingMacOsKeychainSecretsMessage([
+        "OBUS_USER_CREATE_LOGIN_USERNAME",
+        "OBUS_USER_CREATE_LOGIN_PASSWORD"
+      ])
+    );
+    return;
+  }
+
+  const validatedEntries = validateObusUserCreateEntries(entries);
+  if (!validatedEntries.ok) {
+    finishObusLiveJob(job, validatedEntries.error);
+    return;
+  }
+
+  const normalizedCompanies = Array.isArray(partnerItems) ? partnerItems : [];
+  if (normalizedCompanies.length === 0) {
+    finishObusLiveJob(
+      job,
+      "Firma listesi SQL'de boş. Önce Tüm Firmalar ekranında firma listesini güncelleyin."
+    );
+    return;
+  }
+
+  const sessionCache = new Map();
+  const successSamples = [];
+  const failureSamples = [];
+  const readyEntries = validatedEntries.entries;
+  const totalTargetCount = normalizedCompanies.length * readyEntries.length;
+  job.totalCount = totalTargetCount;
+
+  const preparedTargetsRaw = await runWithConcurrency(
+    normalizedCompanies,
+    OBUS_USER_CREATE_LOGIN_CONCURRENCY,
+    async (company) => prepareObusUserCreateCompanyTarget(company, { loginCredentials, sessionCache })
+  );
+
+  const preparedTargets = preparedTargetsRaw.map((item, index) => {
+    if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "ok")) {
+      return item;
+    }
+
+    const fallbackCompany = normalizedCompanies[index] || {};
+    const fallbackCode = String(fallbackCompany?.code || "").trim() || "Firma";
+    const fallbackCluster =
+      normalizeObusClusterLabel(fallbackCompany?.cluster || "") ||
+      normalizeObusClusterLabel(extractClusterLabel(fallbackCompany?.url || "")) ||
+      "cluster";
+
+    return {
+      ok: false,
+      companyCode: fallbackCode,
+      companyLabel: `${fallbackCode} - ${String(fallbackCompany?.id || "").trim() || "N/A"} - ${fallbackCluster}`,
+      clusterLabel: fallbackCluster,
+      requestUrl: "",
+      error: String(item?.error?.message || item?.error || "Firma oturumu hazırlanamadı.").trim(),
+      errorDetail: ""
+    };
+  });
+
+  const readyCompanies = preparedTargets.filter((item) => item?.ok === true);
+  const failedCompanies = preparedTargets.filter((item) => item?.ok !== true);
+  const sampleRequestBody = JSON.stringify(
+    buildObusMembershipCreateUserRequestBody({
+      entry: readyEntries[0],
+      partnerIdValue: readyCompanies[0]?.partnerIdValue || 0,
+      branchIdValue: readyCompanies[0]?.branchIdValue || 0,
+      usePlaceholders: true
+    }),
+    null,
+    2
+  );
+
+  setObusLiveJobSummary(job, {
+    companyCount: normalizedCompanies.length,
+    userCount: readyEntries.length,
+    targetCount: totalTargetCount,
+    readyCompanyCount: readyCompanies.length,
+    failedCompanyCount: failedCompanies.length,
+    sampleRequestBody
+  });
+
+  failedCompanies.forEach((companyTarget) => {
+    readyEntries.forEach((entry) => {
+      pushObusLiveJobEvent(job, {
+        key: `${String(companyTarget?.companyCode || "").trim()}|||${String(entry?.username || "").trim()}`,
+        label: `${String(companyTarget?.companyCode || "Firma").trim()} / ${String(entry?.username || "").trim()}`,
+        ok: false,
+        error: String(companyTarget?.error || "Firma oturumu hazırlanamadı.").trim(),
+        errorDetail: String(companyTarget?.errorDetail || "").trim(),
+        detailText: [
+          String(companyTarget?.clusterLabel || "").trim() ? `cluster=${String(companyTarget.clusterLabel).trim()}` : "",
+          String(companyTarget?.requestUrl || "").trim()
+            ? `url=${truncateObusDebugText(String(companyTarget.requestUrl || "").trim(), 120)}`
+            : ""
+        ]
+          .filter(Boolean)
+          .join(" | ")
+      });
+      pushObusUserCreateSample(failureSamples, {
+        company: String(companyTarget?.companyCode || "Firma").trim(),
+        username: String(entry?.username || "").trim(),
+        error: String(companyTarget?.error || "Firma oturumu hazırlanamadı.").trim()
+      });
+    });
+  });
+
+  const tasks = readyCompanies.flatMap((companyTarget) =>
+    readyEntries.map((entry) => ({
+      companyTarget,
+      entry
+    }))
+  );
+
+  await runWithConcurrency(tasks, OBUS_USER_CREATE_REQUEST_CONCURRENCY, async (task) => {
+    const companyTarget = task?.companyTarget || {};
+    const entry = task?.entry || {};
+    const result = await createObusUserForCompanyTarget({
+      companyTarget,
+      entry
+    });
+    pushObusLiveJobEvent(job, {
+      key: `${String(companyTarget?.companyCode || "").trim()}|||${String(entry?.username || "").trim()}`,
+      label: `${String(companyTarget?.companyCode || "Firma").trim()} / ${String(entry?.username || "").trim()}`,
+      ok: result.ok === true,
+      message: result.ok ? String(result.message || "Kullanıcı oluşturuldu.").trim() : "",
+      error: result.ok ? "" : String(result.error || "CreateUser başarısız.").trim(),
+      errorDetail: result.ok ? "" : String(result.errorDetail || "").trim(),
+      detailText: [
+        String(companyTarget?.clusterLabel || "").trim() ? `cluster=${String(companyTarget.clusterLabel).trim()}` : "",
+        Number.isInteger(Number(companyTarget?.partnerIdValue)) ? `partnerId=${Number(companyTarget.partnerIdValue)}` : "",
+        Number.isInteger(Number(companyTarget?.branchIdValue)) ? `branchId=${Number(companyTarget.branchIdValue)}` : "",
+        Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+        String(result?.requestUrl || "").trim()
+          ? `url=${truncateObusDebugText(String(result.requestUrl || "").trim(), 120)}`
+          : ""
+      ]
+        .filter(Boolean)
+        .join(" | "),
+      logLines:
+        result.ok === true
+          ? []
+          : [
+              String(result?.responseBody || "").trim()
+                ? truncateObusDebugText(String(result.responseBody || "").trim(), 260)
+                : ""
+            ].filter(Boolean)
+    });
+
+    if (result.ok === true) {
+      pushObusUserCreateSample(successSamples, {
+        company: String(companyTarget?.companyCode || "Firma").trim(),
+        username: String(entry?.username || "").trim(),
+        message: String(result.message || "Kullanıcı oluşturuldu.").trim()
+      });
+    } else {
+      pushObusUserCreateSample(failureSamples, {
+        company: String(companyTarget?.companyCode || "Firma").trim(),
+        username: String(entry?.username || "").trim(),
+        error: String(result.error || "CreateUser başarısız.").trim()
+      });
+    }
+  });
+
+  setObusLiveJobSummary(job, {
+    companyCount: normalizedCompanies.length,
+    userCount: readyEntries.length,
+    targetCount: totalTargetCount,
+    readyCompanyCount: readyCompanies.length,
+    failedCompanyCount: failedCompanies.length,
+    processedCount: Number(job.processedCount || 0),
+    successCount: Number(job.successCount || 0),
+    failureCount: Number(job.failureCount || 0),
+    successSamples,
+    failureSamples,
+    sampleRequestBody
+  });
+
+  finishObusLiveJob(job);
+}
+
 app.get("/", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -18337,10 +18908,16 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
   });
 });
 
-app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), (req, res) => {
+app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const sampleCompany = Array.isArray(partnerItems) && partnerItems.length > 0 ? partnerItems[0] : null;
   res.render("general-obus-user-create", {
     user: req.session.user,
-    active: "obus-user-create"
+    active: "obus-user-create",
+    partnerError,
+    companyCount: Array.isArray(partnerItems) ? partnerItems.length : 0,
+    samplePartnerId: sampleCompany?.id || "",
+    sampleBranchId: sampleCompany?.branchId || ""
   });
 });
 
@@ -18424,6 +19001,74 @@ app.post("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus
     return res.status(statusCode).json({
       ok: false,
       error: normalizedMessage || "Şablon kaydedilemedi."
+    });
+  }
+});
+
+app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
+  try {
+    const entryValidation = validateObusUserCreateEntries(req.body?.entries);
+    if (!entryValidation.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: entryValidation.error
+      });
+    }
+
+    const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+    if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: partnerError
+      });
+    }
+
+    if (!Array.isArray(partnerItems) || partnerItems.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Tüm Firmalar SQL kaydı boş. Önce firma listesini güncelleyin."
+      });
+    }
+
+    const loginCredentials = getObusUserCreateLoginCredentials();
+    if (!loginCredentials.username || !loginCredentials.password) {
+      return res.status(400).json({
+        ok: false,
+        error: buildMissingMacOsKeychainSecretsMessage([
+          "OBUS_USER_CREATE_LOGIN_USERNAME",
+          "OBUS_USER_CREATE_LOGIN_PASSWORD"
+        ])
+      });
+    }
+
+    const totalCount = entryValidation.entries.length * partnerItems.length;
+    const ownerUserId = Number(req.session?.user?.id || 0);
+    const job = createObusLiveJob({
+      type: "obus-user-create",
+      ownerUserId,
+      totalCount
+    });
+
+    setImmediate(() => {
+      runObusBulkUserCreateJob(job, {
+        entries: entryValidation.entries,
+        partnerItems
+      }).catch((err) => {
+        finishObusLiveJob(job, `Toplu kullanıcı oluşturma tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
+      });
+    });
+
+    return res.json({
+      ok: true,
+      jobId: job.id,
+      companyCount: partnerItems.length,
+      userCount: entryValidation.entries.length,
+      totalCount
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: `Toplu kullanıcı oluşturma başlatılamadı: ${err?.message || "Bilinmeyen hata"}`
     });
   }
 });
