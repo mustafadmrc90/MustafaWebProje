@@ -4171,6 +4171,21 @@
     const allStationsStatusEl = page.querySelector("[data-station-passenger-all-stations-status]");
     const allStationsListEl = page.querySelector("[data-station-passenger-all-stations-list]");
     const allStationsCountEl = page.querySelector("[data-station-passenger-all-stations-count]");
+    const stationDetailScreenEl = page.querySelector("[data-station-passenger-station-detail-screen]");
+    const stationDetailBackButtonEl = page.querySelector("[data-station-passenger-station-detail-back]");
+    const stationDetailTripIdEl = page.querySelector("[data-station-passenger-station-detail-trip-id]");
+    const stationDetailSectionEl = page.querySelector("[data-station-passenger-station-detail-section]");
+    const stationDetailCardEl = page.querySelector("[data-station-passenger-station-detail-card]");
+    const stationDetailOrderEl = page.querySelector("[data-station-passenger-station-detail-order]");
+    const stationDetailStationEl = page.querySelector("[data-station-passenger-station-detail-station]");
+    const stationDetailDepartureEl = page.querySelector("[data-station-passenger-station-detail-departure]");
+    const stationDetailPassengerSectionEl = page.querySelector("[data-station-passenger-station-detail-passenger-section]");
+    const stationDetailPassengerStatusEl = page.querySelector("[data-station-passenger-station-detail-passenger-status]");
+    const stationDetailPassengerStateEl = page.querySelector("[data-station-passenger-station-detail-passenger-state]");
+    const stationDetailBoardingListEl = page.querySelector("[data-station-passenger-station-detail-boarding-list]");
+    const stationDetailBoardingCountEl = page.querySelector("[data-station-passenger-station-detail-boarding-count]");
+    const stationDetailDropoffListEl = page.querySelector("[data-station-passenger-station-detail-dropoff-list]");
+    const stationDetailDropoffCountEl = page.querySelector("[data-station-passenger-station-detail-dropoff-count]");
     const nextStopSectionEl = page.querySelector("[data-station-passenger-next-stop-section]");
     const nextStopCardEl = page.querySelector("[data-station-passenger-next-stop]");
     const nextStopOrderEl = page.querySelector("[data-station-passenger-next-stop-order]");
@@ -4197,6 +4212,21 @@
       !allStationsStatusEl ||
       !allStationsListEl ||
       !allStationsCountEl ||
+      !stationDetailScreenEl ||
+      !stationDetailBackButtonEl ||
+      !stationDetailTripIdEl ||
+      !stationDetailSectionEl ||
+      !stationDetailCardEl ||
+      !stationDetailOrderEl ||
+      !stationDetailStationEl ||
+      !stationDetailDepartureEl ||
+      !stationDetailPassengerSectionEl ||
+      !stationDetailPassengerStatusEl ||
+      !stationDetailPassengerStateEl ||
+      !stationDetailBoardingListEl ||
+      !stationDetailBoardingCountEl ||
+      !stationDetailDropoffListEl ||
+      !stationDetailDropoffCountEl ||
       !nextStopSectionEl ||
       !nextStopCardEl ||
       !nextStopOrderEl ||
@@ -4227,6 +4257,9 @@
     page.stationPassengerSelectedNextStation = null;
     page.stationPassengerSelectedPassengerState = null;
     page.stationPassengerSelectedAllStations = [];
+    page.stationPassengerSelectedAllStationsStation = null;
+    page.stationPassengerSelectedAllStationsStationIdentity = "";
+    page.stationPassengerSelectedAllStationsPassengerState = null;
 
     const readStoredSearchMode = () => {
       try {
@@ -4263,8 +4296,10 @@
       if (selectedSearchMode === "all-stations") {
         renderNextStation(null, "", "");
         resetPassengerState();
+        resetAllStationsStationDetail();
       } else {
         resetAllStationsJourneyStations();
+        resetAllStationsStationDetail();
         scrollScreenIntoView(mainScreenEl);
       }
 
@@ -4279,6 +4314,38 @@
         .replace(/[^0-9A-Z]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+
+    const formatStationPassengerDateTime = (value) => {
+      const text = String(value || "").trim();
+      if (!text) return "-";
+
+      const isoLikeMatch = text.match(
+        /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/
+      );
+      if (isoLikeMatch) {
+        const [, year, month, day, hour = "", minute = "", second = ""] = isoLikeMatch;
+        const datePart = `${day}.${month}.${year}`;
+        if (hour && minute) {
+          return second ? `${datePart} ${hour}:${minute}:${second}` : `${datePart} ${hour}:${minute}`;
+        }
+        return datePart;
+      }
+
+      const parsedDate = new Date(text);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        return new Intl.DateTimeFormat("tr-TR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        })
+          .format(parsedDate)
+          .replace(",", "");
+      }
+
+      return text.replace("T", " ");
+    };
 
     const setStatus = (message, kind = "muted") => {
       statusEl.textContent = String(message || "").trim();
@@ -4324,6 +4391,21 @@
       allStationsStatusEl.className = "station-passenger-results-status muted";
     };
 
+    const setStationDetailPassengerStatus = (message, kind = "muted", { hidden = false } = {}) => {
+      stationDetailPassengerStatusEl.hidden = hidden;
+      stationDetailPassengerStatusEl.textContent = String(message || "").trim();
+      if (hidden) return;
+      if (kind === "error") {
+        stationDetailPassengerStatusEl.className = "station-passenger-results-status alert inline-alert";
+        return;
+      }
+      if (kind === "success") {
+        stationDetailPassengerStatusEl.className = "station-passenger-results-status inline-success";
+        return;
+      }
+      stationDetailPassengerStatusEl.className = "station-passenger-results-status muted";
+    };
+
     const createPassengerListItem = (item) => {
       const rowEl = document.createElement("div");
       rowEl.className = "station-passenger-passenger-item";
@@ -4366,9 +4448,29 @@
       containerEl.appendChild(fragment);
     };
 
-    const createAllStationsListItem = (item) => {
-      const rowEl = document.createElement("article");
+    const buildJourneyStationIdentity = (item) => {
+      if (!item || typeof item !== "object") return "";
+      const order = Number.isFinite(Number(item?.order)) ? String(Number(item.order)) : "";
+      const stationId = String(item?.stationId || item?.["station-id"] || "").trim();
+      const departureTime = String(item?.departureTime || item?.["departure-time"] || "").trim();
+      return [order, stationId, departureTime].join("|||").toLocaleLowerCase("tr");
+    };
+
+    const syncSelectedAllStationsItemState = () => {
+      const selectedIdentity = String(page.stationPassengerSelectedAllStationsStationIdentity || "").trim();
+      allStationsListEl.querySelectorAll("[data-station-passenger-all-stations-item='1']").forEach((buttonEl) => {
+        const itemIdentity = String(buttonEl.dataset.stationPassengerAllStationsIdentity || "").trim();
+        buttonEl.classList.toggle("is-selected", Boolean(selectedIdentity) && itemIdentity === selectedIdentity);
+      });
+    };
+
+    const createAllStationsListItem = (item, index) => {
+      const rowEl = document.createElement("button");
+      rowEl.type = "button";
       rowEl.className = "station-passenger-all-stations-item";
+      rowEl.dataset.stationPassengerAllStationsItem = "1";
+      rowEl.dataset.stationPassengerAllStationsIndex = String(index);
+      rowEl.dataset.stationPassengerAllStationsIdentity = buildJourneyStationIdentity(item);
 
       const headEl = document.createElement("div");
       headEl.className = "station-passenger-all-stations-item-head";
@@ -4378,24 +4480,22 @@
       orderEl.textContent = `#${Number.isFinite(Number(item?.order)) ? Number(item.order) : "-"}`;
 
       const titleEl = document.createElement("strong");
-      const stationId = String(item?.stationId || item?.["station-id"] || "").trim() || "-";
-      const stationName = String(item?.stationName || item?.["station-name"] || "").trim() || "Durak adı bulunamadı";
-      titleEl.textContent = `${stationName} (${stationId})`;
+      const stationId = String(item?.stationId || item?.["station-id"] || "").trim();
+      const stationName = String(item?.stationName || item?.["station-name"] || "").trim();
+      titleEl.textContent = stationName || stationId || "Durak adı bulunamadı";
 
       headEl.appendChild(orderEl);
       headEl.appendChild(titleEl);
 
       const metaEl = document.createElement("div");
       metaEl.className = "station-passenger-all-stations-item-meta";
-      [
-        `Order No: ${Number.isFinite(Number(item?.order)) ? Number(item.order) : "-"}`,
-        `StationID: ${stationId}`,
-        `DepartureTime: ${String(item?.departureTime || item?.["departure-time"] || "").trim() || "-"}`
-      ].forEach((text) => {
-        const metaItemEl = document.createElement("span");
-        metaItemEl.textContent = text;
-        metaEl.appendChild(metaItemEl);
-      });
+
+      const departureEl = document.createElement("span");
+      departureEl.className = "station-passenger-all-stations-item-time";
+      departureEl.textContent = `Hareket Saati: ${formatStationPassengerDateTime(
+        item?.departureTime || item?.["departure-time"] || ""
+      )}`;
+      metaEl.appendChild(departureEl);
 
       rowEl.appendChild(headEl);
       rowEl.appendChild(metaEl);
@@ -4411,6 +4511,115 @@
           inline: "start"
         });
       });
+    };
+
+    const resetAllStationsStationDetail = ({
+      hideScreen = true,
+      tripId = "",
+      statusMessage = "Bir durak seçin."
+    } = {}) => {
+      stationDetailScreenEl.hidden = hideScreen;
+      stationDetailTripIdEl.textContent = `SeferID: ${String(tripId || "").trim() || "-"}`;
+      stationDetailSectionEl.hidden = true;
+      stationDetailCardEl.hidden = true;
+      stationDetailOrderEl.textContent = "-";
+      stationDetailStationEl.textContent = "-";
+      stationDetailDepartureEl.textContent = "-";
+      stationDetailPassengerSectionEl.hidden = true;
+      stationDetailPassengerStateEl.hidden = true;
+      stationDetailBoardingListEl.innerHTML = "";
+      stationDetailDropoffListEl.innerHTML = "";
+      setPassengerCount(stationDetailBoardingCountEl, 0);
+      setPassengerCount(stationDetailDropoffCountEl, 0);
+      setStationDetailPassengerStatus(statusMessage, "muted", { hidden: false });
+      page.stationPassengerSelectedAllStationsStation = null;
+      page.stationPassengerSelectedAllStationsStationIdentity = "";
+      page.stationPassengerSelectedAllStationsPassengerState = null;
+      syncSelectedAllStationsItemState();
+    };
+
+    const renderAllStationsStationDetailHeader = ({ tripId = "", stationItem = null } = {}) => {
+      const normalizedItem = stationItem && typeof stationItem === "object" ? stationItem : null;
+      const stationId = String(normalizedItem?.stationId || normalizedItem?.["station-id"] || "").trim();
+      const stationName = String(normalizedItem?.stationName || normalizedItem?.["station-name"] || "").trim();
+      const stationDisplay = stationName || stationId || "Durak adı bulunamadı";
+      const orderText = Number.isFinite(Number(normalizedItem?.order)) ? `#${Number(normalizedItem.order)}` : "-";
+
+      stationDetailScreenEl.hidden = false;
+      stationDetailTripIdEl.textContent = `SeferID: ${String(tripId || "").trim() || "-"}`;
+      stationDetailOrderEl.textContent = orderText;
+      stationDetailStationEl.textContent = stationDisplay;
+      stationDetailDepartureEl.textContent = `Hareket Saati: ${formatStationPassengerDateTime(
+        normalizedItem?.departureTime || normalizedItem?.["departure-time"] || ""
+      )}`;
+      stationDetailSectionEl.hidden = false;
+      stationDetailCardEl.hidden = false;
+      page.stationPassengerSelectedAllStationsStation = normalizedItem;
+      page.stationPassengerSelectedAllStationsStationIdentity = buildJourneyStationIdentity(normalizedItem);
+      syncSelectedAllStationsItemState();
+    };
+
+    const renderAllStationsStationDetailLoading = ({ tripId = "", stationItem = null } = {}) => {
+      renderAllStationsStationDetailHeader({ tripId, stationItem });
+      stationDetailPassengerSectionEl.hidden = false;
+      stationDetailPassengerStateEl.hidden = true;
+      stationDetailBoardingListEl.innerHTML = "";
+      stationDetailDropoffListEl.innerHTML = "";
+      setPassengerCount(stationDetailBoardingCountEl, 0);
+      setPassengerCount(stationDetailDropoffCountEl, 0);
+      setStationDetailPassengerStatus("Yolcu bilgisi yükleniyor...", "muted", { hidden: false });
+      page.stationPassengerSelectedAllStationsPassengerState = null;
+      scrollScreenIntoView(stationDetailScreenEl);
+    };
+
+    const renderAllStationsStationDetailError = ({
+      tripId = "",
+      stationItem = null,
+      message = "Yolcu bilgisi alınamadı."
+    } = {}) => {
+      renderAllStationsStationDetailHeader({ tripId, stationItem });
+      stationDetailPassengerSectionEl.hidden = false;
+      stationDetailPassengerStateEl.hidden = true;
+      stationDetailBoardingListEl.innerHTML = "";
+      stationDetailDropoffListEl.innerHTML = "";
+      setPassengerCount(stationDetailBoardingCountEl, 0);
+      setPassengerCount(stationDetailDropoffCountEl, 0);
+      setStationDetailPassengerStatus(message, "error", { hidden: false });
+      page.stationPassengerSelectedAllStationsPassengerState = null;
+      scrollScreenIntoView(stationDetailScreenEl);
+    };
+
+    const renderAllStationsStationPassengerState = ({
+      tripId = "",
+      stationItem = null,
+      stationId = "",
+      boardingPassengers = [],
+      dropoffPassengers = []
+    } = {}) => {
+      const normalizedStationId = String(stationId || "").trim();
+      if (!normalizedStationId) {
+        renderAllStationsStationDetailError({
+          tripId,
+          stationItem,
+          message: "Durak bilgisi bulunamadı."
+        });
+        return;
+      }
+
+      renderAllStationsStationDetailHeader({ tripId, stationItem });
+      renderPassengerList(stationDetailBoardingListEl, boardingPassengers, "Bu durakta binecek yolcu yok.");
+      renderPassengerList(stationDetailDropoffListEl, dropoffPassengers, "Bu durakta inecek yolcu yok.");
+      setPassengerCount(stationDetailBoardingCountEl, boardingPassengers.length);
+      setPassengerCount(stationDetailDropoffCountEl, dropoffPassengers.length);
+      stationDetailPassengerSectionEl.hidden = false;
+      stationDetailPassengerStateEl.hidden = false;
+      setStationDetailPassengerStatus("", "muted", { hidden: true });
+      page.stationPassengerSelectedAllStationsPassengerState = {
+        stationId: normalizedStationId,
+        boardingPassengers,
+        dropoffPassengers
+      };
+      scrollScreenIntoView(stationDetailScreenEl);
     };
 
     const resetAllStationsJourneyStations = ({
@@ -4467,10 +4676,11 @@
         allStationsListEl.appendChild(emptyEl);
       } else {
         const fragment = document.createDocumentFragment();
-        normalizedItems.forEach((item) => {
-          fragment.appendChild(createAllStationsListItem(item));
+        normalizedItems.forEach((item, index) => {
+          fragment.appendChild(createAllStationsListItem(item, index));
         });
         allStationsListEl.appendChild(fragment);
+        syncSelectedAllStationsItemState();
       }
 
       page.stationPassengerSelectedAllStations = normalizedItems;
@@ -4633,6 +4843,9 @@
         if (selectedSearchMode === "all-stations") {
           renderNextStation(null, "", "");
           resetPassengerState();
+          resetAllStationsStationDetail({
+            tripId: selectedTripId
+          });
           renderAllStationsJourneyStations({
             tripId: selectedTripId,
             items: cachedResult?.items,
@@ -4640,6 +4853,7 @@
           });
         } else {
           resetAllStationsJourneyStations();
+          resetAllStationsStationDetail();
           renderNextStation(
             cachedResult?.nextStation,
             cachedResult?.requestDate,
@@ -4665,6 +4879,7 @@
         renderNextStation(null, "", "");
         resetPassengerState();
         resetAllStationsJourneyStations();
+        resetAllStationsStationDetail();
       }
     };
 
@@ -4697,6 +4912,7 @@
       page.stationPassengerSelectedJourneyStations = [];
       renderNextStation(null, "", "");
       resetPassengerState();
+      resetAllStationsStationDetail();
       setCount(0);
       setSelectedResultIndex(-1);
     };
@@ -4779,13 +4995,77 @@
       }
     };
 
-    const loadPassengerStateHistory = async ({ tripId, stationId, item, index }) => {
+    const loadPassengerStateHistory = async ({
+      tripId,
+      stationId,
+      item,
+      index,
+      renderMode = "realtime",
+      stationItem = null
+    }) => {
       const normalizedTripId = String(tripId || "").trim();
       const normalizedStationId = String(stationId || "").trim();
-      if (!normalizedTripId || !normalizedStationId) {
-        if (selectedTripId === normalizedTripId) {
+      const normalizedRenderMode = String(renderMode || "").trim() === "all-stations" ? "all-stations" : "realtime";
+      const stationIdentity = buildJourneyStationIdentity(stationItem);
+      const shouldRenderRealtimeState = () => {
+        const selectedStationId = String(
+          page.stationPassengerSelectedNextStation?.stationId ||
+            page.stationPassengerSelectedNextStation?.["station-id"] ||
+            ""
+        ).trim();
+        return (
+          normalizedRenderMode === "realtime" &&
+          selectedSearchMode === "realtime" &&
+          selectedTripId === normalizedTripId &&
+          selectedStationId === normalizedStationId
+        );
+      };
+      const shouldRenderAllStationsState = () =>
+        normalizedRenderMode === "all-stations" &&
+        selectedSearchMode === "all-stations" &&
+        selectedTripId === normalizedTripId &&
+        Boolean(stationIdentity) &&
+        String(page.stationPassengerSelectedAllStationsStationIdentity || "").trim() === stationIdentity;
+
+      const renderResponseForActiveSelection = (responseData) => {
+        if (shouldRenderAllStationsState()) {
+          renderAllStationsStationPassengerState({
+            tripId: normalizedTripId,
+            stationItem,
+            stationId: normalizedStationId,
+            boardingPassengers: Array.isArray(responseData?.boardingPassengers) ? responseData.boardingPassengers : [],
+            dropoffPassengers: Array.isArray(responseData?.dropoffPassengers) ? responseData.dropoffPassengers : []
+          });
+          return;
+        }
+
+        if (shouldRenderRealtimeState()) {
+          renderPassengerState({
+            stationId: normalizedStationId,
+            boardingPassengers: responseData?.boardingPassengers,
+            dropoffPassengers: responseData?.dropoffPassengers
+          });
+        }
+      };
+
+      const renderErrorForActiveSelection = (message) => {
+        const normalizedMessage = String(message || "GetPassengerStateHistory başarısız.").trim();
+        if (shouldRenderAllStationsState()) {
+          renderAllStationsStationDetailError({
+            tripId: normalizedTripId,
+            stationItem,
+            message: normalizedMessage
+          });
+          return;
+        }
+
+        if (shouldRenderRealtimeState()) {
           resetPassengerState();
         }
+      };
+
+      if (!normalizedTripId || !normalizedStationId) {
+        renderErrorForActiveSelection("journey-id ve station-id zorunludur.");
         window.dispatchEvent(
           new CustomEvent("station-passenger-passenger-state-error", {
             detail: {
@@ -4803,18 +5083,7 @@
       const cacheKey = buildPassengerStateCacheKey(normalizedTripId, normalizedStationId);
       if (passengerStateCache.has(cacheKey)) {
         const cachedResponse = passengerStateCache.get(cacheKey);
-        const selectedStationId = String(
-          page.stationPassengerSelectedNextStation?.stationId ||
-            page.stationPassengerSelectedNextStation?.["station-id"] ||
-            ""
-        ).trim();
-        if (selectedTripId === normalizedTripId && selectedStationId === normalizedStationId) {
-          renderPassengerState({
-            stationId: normalizedStationId,
-            boardingPassengers: cachedResponse?.boardingPassengers,
-            dropoffPassengers: cachedResponse?.dropoffPassengers
-          });
-        }
+        renderResponseForActiveSelection(cachedResponse);
         window.dispatchEvent(
           new CustomEvent("station-passenger-passenger-state-loaded", {
             detail: {
@@ -4859,19 +5128,7 @@
             dropoffPassengers: Array.isArray(data?.dropoffPassengers) ? data.dropoffPassengers : []
           };
           passengerStateCache.set(cacheKey, normalizedResponse);
-
-          const selectedStationId = String(
-            page.stationPassengerSelectedNextStation?.stationId ||
-              page.stationPassengerSelectedNextStation?.["station-id"] ||
-              ""
-          ).trim();
-          if (selectedTripId === normalizedTripId && selectedStationId === normalizedStationId) {
-            renderPassengerState({
-              stationId: normalizedStationId,
-              boardingPassengers: normalizedResponse.boardingPassengers,
-              dropoffPassengers: normalizedResponse.dropoffPassengers
-            });
-          }
+          renderResponseForActiveSelection(normalizedResponse);
 
           window.dispatchEvent(
             new CustomEvent("station-passenger-passenger-state-loaded", {
@@ -4887,14 +5144,7 @@
           );
           return normalizedResponse;
         } catch (err) {
-          const selectedStationId = String(
-            page.stationPassengerSelectedNextStation?.stationId ||
-              page.stationPassengerSelectedNextStation?.["station-id"] ||
-              ""
-          ).trim();
-          if (selectedTripId === normalizedTripId && selectedStationId === normalizedStationId) {
-            resetPassengerState();
-          }
+          renderErrorForActiveSelection(err?.message || "GetPassengerStateHistory başarısız.");
           window.dispatchEvent(
             new CustomEvent("station-passenger-passenger-state-error", {
               detail: {
@@ -4943,12 +5193,16 @@
           if (selectedSearchMode === "all-stations") {
             renderNextStation(null, "", "");
             resetPassengerState();
+            resetAllStationsStationDetail({
+              tripId: normalizedTripId
+            });
             renderAllStationsJourneyStations({
               tripId: normalizedTripId,
               items: cachedResponse?.items
             });
           } else {
             resetAllStationsJourneyStations();
+            resetAllStationsStationDetail();
             renderNextStation(
               cachedResponse?.nextStation,
               cachedResponse?.requestDate,
@@ -5020,12 +5274,16 @@
             if (selectedSearchMode === "all-stations") {
               renderNextStation(null, "", "");
               resetPassengerState();
+              resetAllStationsStationDetail({
+                tripId: normalizedTripId
+              });
               renderAllStationsJourneyStations({
                 tripId: normalizedTripId,
                 items: normalizedItems
               });
             } else {
               resetAllStationsJourneyStations();
+              resetAllStationsStationDetail();
               renderNextStation(
                 normalizedResponse?.nextStation,
                 normalizedResponse?.requestDate,
@@ -5062,6 +5320,9 @@
             renderNextStation(null, "", "");
             resetPassengerState();
             if (selectedSearchMode === "all-stations") {
+              resetAllStationsStationDetail({
+                tripId: normalizedTripId
+              });
               resetAllStationsJourneyStations({
                 hideScreen: false,
                 tripId: normalizedTripId,
@@ -5072,6 +5333,7 @@
               scrollScreenIntoView(allStationsScreenEl);
             } else {
               resetAllStationsJourneyStations();
+              resetAllStationsStationDetail();
             }
           }
           window.dispatchEvent(
@@ -5162,12 +5424,16 @@
 
     const handleRealtimeJourneySelection = async ({ tripId, item, index }) => {
       resetAllStationsJourneyStations();
+      resetAllStationsStationDetail();
       return loadJourneyStations({ tripId, item, index });
     };
 
     const handleAllStationsJourneySelection = async ({ tripId, item, index }) => {
       renderNextStation(null, "", "");
       resetPassengerState();
+      resetAllStationsStationDetail({
+        tripId
+      });
       resetAllStationsJourneyStations({
         hideScreen: false,
         tripId,
@@ -5207,6 +5473,41 @@
 
     allStationsBackButtonEl.addEventListener("click", () => {
       scrollScreenIntoView(mainScreenEl);
+    });
+
+    stationDetailBackButtonEl.addEventListener("click", () => {
+      scrollScreenIntoView(allStationsScreenEl);
+    });
+
+    allStationsListEl.addEventListener("click", (event) => {
+      const stationButton = event.target.closest("[data-station-passenger-all-stations-item='1']");
+      if (!stationButton) return;
+      const stationIndex = Number.parseInt(stationButton.dataset.stationPassengerAllStationsIndex || "-1", 10);
+      const stationItem = Number.isInteger(stationIndex) ? page.stationPassengerSelectedAllStations[stationIndex] : null;
+      if (!selectedTripId || !stationItem) return;
+
+      const stationId = String(stationItem?.stationId || stationItem?.["station-id"] || "").trim();
+      if (!stationId) {
+        renderAllStationsStationDetailError({
+          tripId: selectedTripId,
+          stationItem,
+          message: "station-id bulunamadı."
+        });
+        return;
+      }
+
+      renderAllStationsStationDetailLoading({
+        tripId: selectedTripId,
+        stationItem
+      });
+      void loadPassengerStateHistory({
+        tripId: selectedTripId,
+        stationId,
+        item: stationItem,
+        index: stationIndex,
+        renderMode: "all-stations",
+        stationItem
+      }).catch(() => {});
     });
 
     resultsListEl.addEventListener("click", (event) => {

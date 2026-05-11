@@ -166,6 +166,74 @@
             </div>
           </section>
         </section>
+
+        <section
+          class="station-passenger-mobile-screen station-passenger-mobile-screen--secondary"
+          data-station-passenger-station-detail-screen
+          hidden
+        >
+          <header class="station-passenger-secondary-head">
+            <button
+              type="button"
+              class="ghost station-passenger-secondary-back"
+              data-station-passenger-station-detail-back
+            >
+              Duraklara Dön
+            </button>
+            <div class="station-passenger-secondary-title">
+              <strong>Durak Yolcu Bilgisi</strong>
+              <span data-station-passenger-station-detail-trip-id>SeferID: -</span>
+            </div>
+          </header>
+
+          <section class="table-card panel-card station-passenger-next-stop-card" data-station-passenger-station-detail-section hidden>
+            <div class="station-passenger-results-head">
+              <h2>Seçilen Durak</h2>
+            </div>
+            <div class="station-passenger-next-stop" data-station-passenger-station-detail-card>
+              <div class="station-passenger-next-stop-head">
+                <span class="station-passenger-next-stop-badge" data-station-passenger-station-detail-order>-</span>
+                <div class="station-passenger-next-stop-meta">
+                  <strong data-station-passenger-station-detail-station>-</strong>
+                </div>
+              </div>
+              <div class="station-passenger-next-stop-time" data-station-passenger-station-detail-departure>-</div>
+            </div>
+          </section>
+
+          <section
+            class="table-card panel-card station-passenger-passenger-card"
+            data-station-passenger-station-detail-passenger-section
+            hidden
+          >
+            <div class="station-passenger-results-head">
+              <h2>Yolcular</h2>
+            </div>
+            <div
+              class="station-passenger-results-status muted"
+              data-station-passenger-station-detail-passenger-status
+            >
+              Bir durak seçin.
+            </div>
+            <div class="station-passenger-passenger-state" data-station-passenger-station-detail-passenger-state hidden>
+              <section class="station-passenger-passenger-group">
+                <div class="station-passenger-passenger-group-head">
+                  <h3>İnecek Yolcular</h3>
+                  <span class="pill muted" data-station-passenger-station-detail-dropoff-count>0</span>
+                </div>
+                <div class="station-passenger-passenger-list" data-station-passenger-station-detail-dropoff-list></div>
+              </section>
+
+              <section class="station-passenger-passenger-group">
+                <div class="station-passenger-passenger-group-head">
+                  <h3>Binecek Yolcular</h3>
+                  <span class="pill muted" data-station-passenger-station-detail-boarding-count>0</span>
+                </div>
+                <div class="station-passenger-passenger-list" data-station-passenger-station-detail-boarding-list></div>
+              </section>
+            </div>
+          </section>
+        </section>
       </div>
     </section>
     <script src="/public/app.js" defer></script>
