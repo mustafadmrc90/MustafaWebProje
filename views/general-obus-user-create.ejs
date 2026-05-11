@@ -135,10 +135,12 @@
 }</pre>
 
             <div class="journey-search-card-head">
-              <h3>Durum</h3>
+              <h3>Canlı Özet</h3>
               <span class="pill muted">Canlı</span>
             </div>
-            <div class="obus-user-create-response-list" data-obus-user-create-response-list="1"></div>
+            <div class="obus-user-create-live-summary" data-obus-user-create-response-summary="1">
+              Firma bazlı canlı akış alttaki tabloda gösterilir.
+            </div>
           </article>
 
           <template id="obus-user-create-row-template">
@@ -169,6 +171,24 @@
             </div>
           </template>
         </div>
+
+        <section class="obus-user-create-live-panel">
+          <div class="journey-search-card-head">
+            <h3>Firma Bazlı Canlı Durum</h3>
+            <span class="pill">Alt Panel</span>
+          </div>
+
+          <div class="obus-user-create-live-table-head" aria-hidden="true">
+            <span>Satır</span>
+            <span>Firma</span>
+            <span>Kullanıcı</span>
+            <span>Durum</span>
+            <span>Mesaj</span>
+            <span>Log Detayı</span>
+          </div>
+
+          <div class="obus-user-create-live-table" data-obus-user-create-response-list="1"></div>
+        </section>
       </section>
     </section>
 

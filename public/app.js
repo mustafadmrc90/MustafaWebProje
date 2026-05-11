@@ -3230,7 +3230,10 @@
     const statusEl = root.querySelector("[data-obus-user-create-status='1']");
     const rowCountEl = root.querySelector("[data-obus-user-create-row-count='1']");
     const previewEl = root.querySelector("[data-obus-user-create-preview='1']");
-    const responseListEl = root.querySelector("[data-obus-user-create-response-list='1']");
+    const responseSummaryEl = root.querySelector("[data-obus-user-create-response-summary='1']");
+    const responseListEl =
+      root.parentElement?.querySelector("[data-obus-user-create-response-list='1']") ||
+      document.querySelector("[data-obus-user-create-response-list='1']");
 
     if (
       !listUrl ||
@@ -3252,6 +3255,7 @@
       !statusEl ||
       !rowCountEl ||
       !previewEl ||
+      !responseSummaryEl ||
       !responseListEl
     ) {
       return;
@@ -3480,9 +3484,55 @@
       return Array.from(eventMap.values());
     };
 
+    const parseLiveEventMeta = (event = null) => {
+      const keyParts = String(event?.key || "").split("|||");
+      const rowToken = String(keyParts[keyParts.length - 1] || "").trim();
+      const rowMatch = rowToken.match(/row-(\d+)/i);
+      return {
+        rowNumber: rowMatch ? Number(rowMatch[1]) : null,
+        companyCode: String(keyParts[0] || "").trim() || "-",
+        clusterLabel: String(keyParts[1] || "").trim(),
+        username: String(keyParts[2] || "").trim() || "-"
+      };
+    };
+
+    const setLiveSummary = (rows) => {
+      const list = Array.isArray(rows) ? rows : [];
+      if (list.length === 0) {
+        responseSummaryEl.textContent = createJobRunning
+          ? "İş başlatıldı. Firma bazlı satırlar alttaki tabloda hazırlanıyor."
+          : "Firma bazlı canlı akış alttaki tabloda gösterilir.";
+        return;
+      }
+
+      const successCount = list.filter((event) => buildLiveEventTone(event) === "success").length;
+      const errorCount = list.filter((event) => buildLiveEventTone(event) === "error").length;
+      const pendingCount = Math.max(0, list.length - successCount - errorCount);
+      responseSummaryEl.textContent = `Toplam ${list.length} firma/kullanıcı satırı izleniyor. Başarılı: ${successCount} | Hatalı: ${errorCount} | Bekleyen: ${pendingCount}`;
+    };
+
+    const appendLiveCell = (rowEl, label, value, extraClass = "") => {
+      const cell = document.createElement("div");
+      cell.className = "obus-user-create-live-cell";
+
+      const cellLabel = document.createElement("span");
+      cellLabel.className = "obus-user-create-live-cell-label";
+      cellLabel.textContent = label;
+
+      const cellValue = document.createElement("div");
+      cellValue.className = `obus-user-create-live-cell-value${extraClass ? ` ${extraClass}` : ""}`;
+      cellValue.textContent = value;
+
+      cell.appendChild(cellLabel);
+      cell.appendChild(cellValue);
+      rowEl.appendChild(cell);
+      return cellValue;
+    };
+
     const renderJobResponseList = () => {
       responseListEl.innerHTML = "";
       const rows = buildLiveEventRows();
+      setLiveSummary(rows);
       if (rows.length === 0) {
         const emptyState = document.createElement("div");
         emptyState.className = "obus-user-create-live-empty";
@@ -3495,36 +3545,47 @@
 
       rows.forEach((event) => {
         const tone = buildLiveEventTone(event);
-        const card = document.createElement("article");
-        card.className = `obus-user-create-live-row is-${tone}`;
+        const meta = parseLiveEventMeta(event);
+        const row = document.createElement("article");
+        row.className = `obus-user-create-live-table-row is-${tone}`;
 
-        const head = document.createElement("div");
-        head.className = "obus-user-create-live-row-head";
+        appendLiveCell(row, "Satır", meta.rowNumber ? `Satır ${meta.rowNumber}` : "-", "is-muted");
 
-        const title = document.createElement("strong");
-        title.className = "obus-user-create-live-row-title";
-        title.textContent = String(event?.label || "").trim() || "Firma isteği";
+        const companyCell = appendLiveCell(row, "Firma", meta.companyCode || "-");
+        if (meta.clusterLabel) {
+          companyCell.innerHTML = "";
+          const stack = document.createElement("div");
+          stack.className = "obus-user-create-live-cell-stack";
+          const primary = document.createElement("strong");
+          primary.textContent = meta.companyCode || "-";
+          const secondary = document.createElement("span");
+          secondary.className = "obus-user-create-live-cell-value is-muted";
+          secondary.textContent = meta.clusterLabel;
+          stack.appendChild(primary);
+          stack.appendChild(secondary);
+          companyCell.appendChild(stack);
+        }
 
+        appendLiveCell(row, "Kullanıcı", meta.username || "-");
+
+        const statusCell = document.createElement("div");
+        statusCell.className = "obus-user-create-live-cell";
+        const statusLabel = document.createElement("span");
+        statusLabel.className = "obus-user-create-live-cell-label";
+        statusLabel.textContent = "Durum";
         const state = document.createElement("span");
         const stateToneClass = tone === "error" ? "danger" : tone === "success" ? "success" : "";
         state.className = `pill obus-user-create-live-row-state${stateToneClass ? ` ${stateToneClass}` : ""}`;
         state.textContent = buildLiveEventStateText(event);
-
-        head.appendChild(title);
-        head.appendChild(state);
-        card.appendChild(head);
+        statusCell.appendChild(statusLabel);
+        statusCell.appendChild(state);
+        row.appendChild(statusCell);
 
         const messageText =
           String(event?.message || "").trim() ||
           String(event?.error || "").trim() ||
           (tone === "pending" ? "İstek akışı devam ediyor." : "");
-
-        if (messageText) {
-          const message = document.createElement("p");
-          message.className = "obus-user-create-live-message";
-          message.textContent = messageText;
-          card.appendChild(message);
-        }
+        appendLiveCell(row, "Mesaj", messageText || "-", !messageText ? "is-muted" : "");
 
         const detailLines = Array.from(
           new Set(
@@ -3535,15 +3596,8 @@
             ].filter(Boolean)
           )
         );
-
-        if (detailLines.length > 0) {
-          const detail = document.createElement("pre");
-          detail.className = "obus-user-create-live-details";
-          detail.textContent = detailLines.join("\n");
-          card.appendChild(detail);
-        }
-
-        responseListEl.appendChild(card);
+        appendLiveCell(row, "Log Detayı", detailLines.join("\n") || "-", detailLines.length > 0 ? "is-log" : "is-muted");
+        responseListEl.appendChild(row);
       });
     };
 

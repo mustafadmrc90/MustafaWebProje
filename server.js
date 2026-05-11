@@ -17478,6 +17478,22 @@ function extractObusUserCreateApiMessage(payload, fallback = "") {
   );
 }
 
+function buildObusUserCreateClusterBaseUrl(company, clusterLabel = "") {
+  const normalizedCluster =
+    normalizeObusClusterLabel(clusterLabel) ||
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_CREATE_API_URL)) ||
+    "cluster3";
+
+  return (
+    normalizeTargetUrl(buildUrlForCluster(OBUS_USER_CREATE_API_URL, normalizedCluster)) ||
+    normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, normalizedCluster)) ||
+    normalizeTargetUrl(company?.url || "") ||
+    normalizeTargetUrl(OBUS_USER_CREATE_API_URL)
+  );
+}
+
 async function prepareObusUserCreateCompanyTarget(company, options = {}) {
   const loginCredentials = options && typeof options === "object" ? options.loginCredentials || {} : {};
   const sessionCache = options && typeof options === "object" ? options.sessionCache || null : null;
@@ -17489,11 +17505,8 @@ async function prepareObusUserCreateCompanyTarget(company, options = {}) {
     normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
     normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_CREATE_API_URL)) ||
     "cluster3";
-  const fallbackBaseUrl =
-    normalizeTargetUrl(company?.url || "") ||
-    normalizeTargetUrl(buildUrlForCluster(OBUS_USER_CREATE_API_URL, clusterLabel)) ||
-    normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, clusterLabel));
-  const createUserUrl = buildMembershipCreateUserUrl(fallbackBaseUrl || OBUS_USER_CREATE_API_URL, clusterLabel);
+  const clusterBaseUrl = buildObusUserCreateClusterBaseUrl(company, clusterLabel);
+  const createUserUrl = buildMembershipCreateUserUrl(clusterBaseUrl || OBUS_USER_CREATE_API_URL, clusterLabel);
   const companyLabel = `${companyCode || "Firma"} - ${companyIdRaw || "N/A"} - ${clusterLabel}`;
   const partnerIdValue = normalizeObusPartnerIdValue(companyIdRaw);
   const branchIdValue = normalizeObusPartnerIdValue(branchIdRaw);
@@ -17539,7 +17552,7 @@ async function prepareObusUserCreateCompanyTarget(company, options = {}) {
 
   const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
     endpointUrl: createUserUrl,
-    companyUrl: fallbackBaseUrl || createUserUrl,
+    companyUrl: clusterBaseUrl || createUserUrl,
     partnerCode: companyCode,
     partnerId: companyIdRaw,
     username: String(loginCredentials?.username || "").trim(),
@@ -17752,11 +17765,8 @@ async function runObusBulkUserCreateJob(job, { entries, partnerItems }) {
       normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
       normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_CREATE_API_URL)) ||
       "cluster3";
-    const fallbackBaseUrl =
-      normalizeTargetUrl(company?.url || "") ||
-      normalizeTargetUrl(buildUrlForCluster(OBUS_USER_CREATE_API_URL, clusterLabel)) ||
-      normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, clusterLabel));
-    const requestUrl = buildMembershipCreateUserUrl(fallbackBaseUrl || OBUS_USER_CREATE_API_URL, clusterLabel);
+    const clusterBaseUrl = buildObusUserCreateClusterBaseUrl(company, clusterLabel);
+    const requestUrl = buildMembershipCreateUserUrl(clusterBaseUrl || OBUS_USER_CREATE_API_URL, clusterLabel);
 
     readyEntries.forEach((entry, entryIndex) => {
       pushObusLiveJobEvent(job, {
