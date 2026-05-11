@@ -4752,15 +4752,22 @@ button.ghost {
 }
 
 .station-passenger-mobile-shell {
-  width: min(100%, 520px);
+  width: min(100%, 920px);
   display: grid;
-  gap: 0;
+  grid-auto-flow: column;
+  grid-auto-columns: 430px;
+  justify-content: center;
+  gap: 18px;
+  overflow-x: auto;
+  padding: 2px 2px 12px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
 }
 
 .station-passenger-mobile-screen {
-  width: min(100%, 430px);
+  width: 430px;
   min-height: min(820px, calc(100dvh - 48px));
-  margin: 0 auto;
+  margin: 0;
   display: grid;
   align-content: start;
   gap: 14px;
@@ -4775,6 +4782,7 @@ button.ghost {
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
   position: relative;
   overflow: hidden;
+  scroll-snap-align: start;
 }
 
 .station-passenger-mobile-screen::before {
@@ -4787,6 +4795,39 @@ button.ghost {
   height: 5px;
   border-radius: 999px;
   background: #cad5e4;
+}
+
+.station-passenger-mobile-screen--secondary {
+  align-content: start;
+}
+
+.station-passenger-secondary-head {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.station-passenger-secondary-back {
+  min-height: 38px;
+  justify-self: flex-start;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+
+.station-passenger-secondary-title {
+  display: grid;
+  gap: 4px;
+}
+
+.station-passenger-secondary-title strong {
+  font-size: 20px;
+  color: #1f2735;
+}
+
+.station-passenger-secondary-title span {
+  font-size: 12px;
+  color: #6f8195;
+  word-break: break-word;
 }
 
 .station-passenger-info-page .page-header {
@@ -5035,6 +5076,65 @@ button.ghost {
 .station-passenger-passenger-card {
   display: grid;
   gap: 12px;
+}
+
+.station-passenger-all-stations-card {
+  display: grid;
+  gap: 12px;
+}
+
+.station-passenger-all-stations-list {
+  display: grid;
+  gap: 10px;
+}
+
+.station-passenger-all-stations-item {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d7e1ef;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(244, 249, 255, 0.98) 0%, rgba(255, 255, 255, 1) 100%);
+}
+
+.station-passenger-all-stations-item-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.station-passenger-all-stations-item-head strong {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.3;
+  color: #1f2735;
+  word-break: break-word;
+}
+
+.station-passenger-all-stations-item-order {
+  min-width: 48px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: #0f6bdc;
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.station-passenger-all-stations-item-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.station-passenger-all-stations-item-meta span {
+  font-size: 11px;
+  color: #5d6f83;
+  word-break: break-word;
 }
 
 .station-passenger-passenger-state {
@@ -5749,8 +5849,13 @@ button.ghost {
     padding: 14px 12px 28px;
   }
 
-  .station-passenger-mobile-screen {
+  .station-passenger-mobile-shell {
     width: 100%;
+    justify-content: flex-start;
+  }
+
+  .station-passenger-mobile-screen {
+    width: min(100vw - 32px, 430px);
   }
 
   .station-passenger-mobile-screen {
@@ -5866,6 +5971,11 @@ button.ghost {
     font-size: 11px;
   }
 
+  .station-passenger-mobile-shell {
+    grid-auto-columns: calc(100vw - 28px);
+    gap: 12px;
+  }
+
   .station-passenger-field-row {
     grid-template-columns: 1fr;
   }
@@ -5891,5 +6001,14 @@ button.ghost {
     min-width: 52px;
     padding: 6px 7px;
     font-size: 11px;
+  }
+
+  .station-passenger-all-stations-item-head {
+    grid-template-columns: 1fr;
+  }
+
+  .station-passenger-all-stations-item-order,
+  .station-passenger-secondary-back {
+    justify-self: flex-start;
   }
 }

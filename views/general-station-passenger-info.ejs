@@ -12,7 +12,7 @@
 
     <section class="content">
       <div class="station-passenger-mobile-shell" data-station-passenger-page="1" data-station-passenger-search-mode="realtime">
-        <section class="station-passenger-mobile-screen">
+        <section class="station-passenger-mobile-screen" data-station-passenger-main-screen>
           <header class="page-header">
             <div class="page-title">
               <h1>
@@ -130,6 +130,39 @@
                 </div>
                 <div class="station-passenger-passenger-list" data-station-passenger-boarding-list></div>
               </section>
+            </div>
+          </section>
+        </section>
+
+        <section
+          class="station-passenger-mobile-screen station-passenger-mobile-screen--secondary"
+          data-station-passenger-all-stations-screen
+          hidden
+        >
+          <header class="station-passenger-secondary-head">
+            <button
+              type="button"
+              class="ghost station-passenger-secondary-back"
+              data-station-passenger-all-stations-back
+            >
+              Seferlere Dön
+            </button>
+            <div class="station-passenger-secondary-title">
+              <strong>Tüm Duraklar</strong>
+              <span data-station-passenger-all-stations-trip-id>SeferID: -</span>
+            </div>
+          </header>
+
+          <section class="table-card panel-card station-passenger-all-stations-card">
+            <div class="station-passenger-results-head">
+              <h2>Duraklar</h2>
+              <span class="pill muted" data-station-passenger-all-stations-count>0</span>
+            </div>
+            <div class="station-passenger-results-status muted" data-station-passenger-all-stations-status>
+              Tüm duraklar burada listelenecek.
+            </div>
+            <div class="station-passenger-all-stations-list" data-station-passenger-all-stations-list>
+              <div class="station-passenger-results-empty">Henüz listelenecek durak yok.</div>
             </div>
           </section>
         </section>

@@ -6840,6 +6840,52 @@ function findStationPassengerStationCatalogItem(items, stationId = "") {
   );
 }
 
+function applyStationPassengerJourneyStationNames(items, stationCatalogItems = []) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const stationNameMap = new Map();
+
+  (Array.isArray(stationCatalogItems) ? stationCatalogItems : []).forEach((item) => {
+    const stationId = String(item?.id || item?.value || "").trim();
+    const stationName = String(item?.name || item?.label || "").trim();
+    if (!stationId || !stationName || stationNameMap.has(stationId)) return;
+    stationNameMap.set(stationId, stationName);
+  });
+
+  return normalizedItems.map((item) => {
+    const stationId = String(item?.stationId || item?.["station-id"] || "").trim();
+    const existingStationName = String(item?.stationName || item?.["station-name"] || "").trim();
+    const resolvedStationName = existingStationName || stationNameMap.get(stationId) || "";
+    if (!resolvedStationName) return item;
+    return {
+      ...item,
+      stationName: resolvedStationName,
+      "station-name": resolvedStationName
+    };
+  });
+}
+
+function findStationPassengerJourneyStationByIdentity(items, candidate) {
+  if (!candidate || typeof candidate !== "object") return null;
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const candidateOrder = Number.isFinite(Number(candidate?.order)) ? Number(candidate.order) : null;
+  const candidateStationId = String(candidate?.stationId || candidate?.["station-id"] || "").trim();
+  const candidateDepartureTime = String(candidate?.departureTime || candidate?.["departure-time"] || "").trim();
+
+  return (
+    normalizedItems.find((item) => {
+      const itemOrder = Number.isFinite(Number(item?.order)) ? Number(item.order) : null;
+      const itemStationId = String(item?.stationId || item?.["station-id"] || "").trim();
+      const itemDepartureTime = String(item?.departureTime || item?.["departure-time"] || "").trim();
+      return itemOrder === candidateOrder && itemStationId === candidateStationId && itemDepartureTime === candidateDepartureTime;
+    }) ||
+    normalizedItems.find((item) => {
+      const itemStationId = String(item?.stationId || item?.["station-id"] || "").trim();
+      return candidateStationId && itemStationId === candidateStationId;
+    }) ||
+    null
+  );
+}
+
 async function fetchStationPassengerWebStations({
   endpointUrl,
   sessionId,
@@ -19669,25 +19715,32 @@ app.post(
         });
       }
 
+      let resolvedItems = Array.isArray(fetchResult.items) ? fetchResult.items : [];
       let nextStation = fetchResult.nextStation || null;
       const nextStationId = String(nextStation?.stationId || nextStation?.["station-id"] || "").trim();
-      if (nextStation && nextStationId) {
+      if (resolvedItems.length > 0 || (nextStation && nextStationId)) {
         const stationsResult = await fetchStationPassengerWebStations({
           endpointUrl: STATION_PASSENGER_INFO_WEB_STATIONS_API_URL,
           sessionId: authContext.sessionId,
           deviceId: authContext.deviceId,
           authorization: STATION_PASSENGER_INFO_WEB_STATIONS_API_AUTH,
-          partnerCode: STATION_PASSENGER_INFO_TARGET_COMPANY_CODE
+          partnerCode: authContext.companyCode || STATION_PASSENGER_INFO_TARGET_COMPANY_CODE
         });
         if (stationsResult.ok) {
-          const matchedStation = findStationPassengerStationCatalogItem(stationsResult.items, nextStationId);
-          const resolvedStationName = String(matchedStation?.name || matchedStation?.label || "").trim();
-          if (resolvedStationName) {
-            nextStation = {
-              ...nextStation,
-              stationName: resolvedStationName,
-              "station-name": resolvedStationName
-            };
+          resolvedItems = applyStationPassengerJourneyStationNames(resolvedItems, stationsResult.items);
+          const resolvedNextStation = findStationPassengerJourneyStationByIdentity(resolvedItems, nextStation);
+          if (resolvedNextStation) {
+            nextStation = resolvedNextStation;
+          } else if (nextStation && nextStationId) {
+            const matchedStation = findStationPassengerStationCatalogItem(stationsResult.items, nextStationId);
+            const resolvedStationName = String(matchedStation?.name || matchedStation?.label || "").trim();
+            if (resolvedStationName) {
+              nextStation = {
+                ...nextStation,
+                stationName: resolvedStationName,
+                "station-name": resolvedStationName
+              };
+            }
           }
         }
       }
@@ -19696,8 +19749,8 @@ app.post(
         ok: true,
         tripId,
         requestUrl: fetchResult.requestUrl || STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL,
-        items: Array.isArray(fetchResult.items) ? fetchResult.items : [],
-        totalCount: Array.isArray(fetchResult.items) ? fetchResult.items.length : 0,
+        items: resolvedItems,
+        totalCount: resolvedItems.length,
         requestDate: String(fetchResult.requestDate || "").trim(),
         nextStation,
         usedCachedAuth,
