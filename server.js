@@ -3642,7 +3642,18 @@ function normalizeObusClusterLabel(value) {
   return /^cluster\d+$/.test(normalized) ? normalized : "";
 }
 
-function buildSessionUrlForPartnerUrl(partnerUrl) {
+function buildSessionUrlForPartnerUrl(partnerUrl, sessionClusterLabel = "") {
+  const normalizedCluster =
+    normalizeObusClusterLabel(sessionClusterLabel) ||
+    normalizeObusClusterLabel(extractClusterLabel(partnerUrl)) ||
+    "";
+  const clusteredSessionUrl = normalizedCluster
+    ? normalizeTargetUrl(buildUrlForCluster(PARTNERS_SESSION_API_URL, normalizedCluster))
+    : "";
+  if (clusteredSessionUrl) {
+    return clusteredSessionUrl;
+  }
+
   try {
     const parsed = new URL(String(partnerUrl || ""));
     parsed.pathname = "/api/client/getsession";
@@ -4592,6 +4603,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
   username,
   password,
   fallbackBranchId,
+  sessionClusterLabel = "",
   authorization = PARTNERS_API_AUTH,
   timeoutMs = 90000,
   sessionCache = null
@@ -4604,6 +4616,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     username,
     password,
     fallbackBranchId,
+    sessionClusterLabel,
     authorization,
     timeoutMs,
     sessionCache
@@ -4631,6 +4644,7 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
       password,
       fallbackBranchId,
       loginBranchId: branchCandidate,
+      sessionClusterLabel,
       authorization,
       timeoutMs,
       sessionCache
@@ -15433,6 +15447,7 @@ async function fetchAuthorizedLinesLoginInfo({
   authorization = PARTNERS_API_AUTH,
   allowEmptyPartnerCode = false,
   loginBranchId = "",
+  sessionClusterLabel = "",
   sessionCache = null
 }) {
   const loginBaseUrls = buildUserLoginBaseUrlsWithOverrides({
@@ -15496,7 +15511,7 @@ async function fetchAuthorizedLinesLoginInfo({
     let lastFailedServiceLog = null;
 
     for (const baseUrl of loginBaseUrls) {
-      const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl);
+      const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl, sessionClusterLabel);
       const loginUrl = buildMembershipUserLoginUrl(baseUrl);
       if (!loginUrl) {
         lastError = "Membership UserLogin URL oluşturulamadı.";
@@ -15518,7 +15533,7 @@ async function fetchAuthorizedLinesLoginInfo({
         allServiceLogs.push(sessionResult.debug);
       }
       if (sessionResult.error) {
-        lastError = `${sessionResult.error} (URL: ${loginUrl})`;
+        lastError = `${sessionResult.error} (Session URL: ${sessionUrl})`;
         lastErrorDetail = "";
         lastFailedServiceLog = sessionResult?.debug || lastFailedServiceLog;
         continue;
@@ -16116,7 +16131,10 @@ async function executeAuthorizedLinesScreenAction({
     partnerId,
     username: filters.username,
     password: filters.password,
-    fallbackBranchId: loginBranchId
+    fallbackBranchId: loginBranchId,
+    sessionClusterLabel:
+      normalizeObusClusterLabel(selectedCompanyMeta?.cluster || "") ||
+      normalizeObusClusterLabel(extractClusterLabel(String(selectedCompanyMeta?.url || "").trim()))
   });
   report.sessionId = loginResult.sessionId || "";
   report.deviceId = loginResult.deviceId || "";
@@ -16213,7 +16231,8 @@ async function fetchObusJobsClusterReport({
       partnerId,
       username,
       password,
-      fallbackBranchId
+      fallbackBranchId,
+      sessionClusterLabel: normalizedClusterLabel
     });
     if (loginResult?.ok) {
       break;
@@ -17526,6 +17545,7 @@ async function prepareObusUserCreateCompanyTarget(company, options = {}) {
     username: String(loginCredentials?.username || "").trim(),
     password: typeof loginCredentials?.password === "string" ? loginCredentials.password : "",
     fallbackBranchId: branchIdRaw,
+    sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_CREATE_API_AUTH,
     timeoutMs: OBUS_USER_CREATE_TIMEOUT_MS,
     sessionCache
