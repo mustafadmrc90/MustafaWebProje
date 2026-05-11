@@ -4576,8 +4576,13 @@
         routeValueEl.className = "station-passenger-result-route-value";
         routeValueEl.textContent = String(item?.routeInfo || "").trim() || "-";
 
+        const routeMetaEl = document.createElement("span");
+        routeMetaEl.className = "station-passenger-result-route-meta";
+        routeMetaEl.textContent = `SeferID: ${String(item?.tripId || "").trim() || "-"}`;
+
         routeWrapEl.appendChild(routeLabelEl);
         routeWrapEl.appendChild(routeValueEl);
+        routeWrapEl.appendChild(routeMetaEl);
         rowButton.appendChild(timeEl);
         rowButton.appendChild(routeWrapEl);
         fragment.appendChild(rowButton);

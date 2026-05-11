@@ -5181,6 +5181,12 @@ button.ghost {
   white-space: nowrap;
 }
 
+.station-passenger-result-route-meta {
+  font-size: 11px;
+  line-height: 1.2;
+  color: #5d6f83;
+}
+
 
 .slack-analysis-summary-table {
   min-width: 620px;
