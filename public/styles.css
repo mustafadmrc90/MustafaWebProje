@@ -5122,7 +5122,7 @@ button.ghost {
 
 .station-passenger-all-stations-item-head {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
@@ -5147,6 +5147,26 @@ button.ghost {
   font-size: 13px;
   font-weight: 700;
   text-align: center;
+}
+
+.station-passenger-all-stations-item-stats {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  align-self: start;
+  text-align: right;
+}
+
+.station-passenger-all-stations-item-stat {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #6f8195;
+  white-space: nowrap;
+}
+
+.station-passenger-all-stations-item.is-passenger-count-loading .station-passenger-all-stations-item-stat {
+  color: #91a0b0;
 }
 
 .station-passenger-all-stations-item-meta {
@@ -6029,10 +6049,6 @@ button.ghost {
     min-width: 52px;
     padding: 6px 7px;
     font-size: 11px;
-  }
-
-  .station-passenger-all-stations-item-head {
-    grid-template-columns: 1fr;
   }
 
   .station-passenger-all-stations-item-order,

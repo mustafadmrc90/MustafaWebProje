@@ -4260,6 +4260,8 @@
     page.stationPassengerSelectedAllStationsStation = null;
     page.stationPassengerSelectedAllStationsStationIdentity = "";
     page.stationPassengerSelectedAllStationsPassengerState = null;
+    const allStationsItemElementMap = new Map();
+    let allStationsPassengerCountRenderToken = 0;
 
     const readStoredSearchMode = () => {
       try {
@@ -4464,13 +4466,122 @@
       });
     };
 
-    const createAllStationsListItem = (item, index) => {
+    const formatAllStationsPassengerCountValue = (value, { loading = false } = {}) => {
+      if (loading) return "...";
+      return Number.isFinite(Number(value)) ? String(Math.max(0, Number(value))) : "-";
+    };
+
+    const setAllStationsItemPassengerCounts = ({
+      stationItem = null,
+      boardingCount = null,
+      dropoffCount = null,
+      loading = false
+    } = {}) => {
+      const identity = buildJourneyStationIdentity(stationItem);
+      if (!identity) return;
+      const rowEl = allStationsItemElementMap.get(identity);
+      if (!rowEl) return;
+
+      const boardingEl = rowEl.querySelector("[data-station-passenger-all-stations-boarding='1']");
+      const dropoffEl = rowEl.querySelector("[data-station-passenger-all-stations-dropoff='1']");
+      if (dropoffEl) {
+        dropoffEl.textContent = `İnen: ${formatAllStationsPassengerCountValue(dropoffCount, { loading })}`;
+      }
+      if (boardingEl) {
+        boardingEl.textContent = `Binen: ${formatAllStationsPassengerCountValue(boardingCount, { loading })}`;
+      }
+      rowEl.classList.toggle("is-passenger-count-loading", Boolean(loading));
+    };
+
+    const hydrateAllStationsPassengerCounts = async ({ tripId = "", items = [], renderToken = 0 } = {}) => {
+      const normalizedTripId = String(tripId || "").trim();
+      const normalizedItems = Array.isArray(items) ? items : [];
+      if (!normalizedTripId || normalizedItems.length === 0) return;
+
+      const queue = normalizedItems
+        .map((item, index) => {
+          const stationId = String(item?.stationId || item?.["station-id"] || "").trim();
+          return {
+            item,
+            index,
+            stationId
+          };
+        })
+        .filter((entry) => entry.stationId);
+
+      queue.forEach((entry) => {
+        const cacheKey = buildPassengerStateCacheKey(normalizedTripId, entry.stationId);
+        const cachedResponse = passengerStateCache.get(cacheKey);
+        if (cachedResponse) {
+          setAllStationsItemPassengerCounts({
+            stationItem: entry.item,
+            boardingCount: Array.isArray(cachedResponse?.boardingPassengers) ? cachedResponse.boardingPassengers.length : 0,
+            dropoffCount: Array.isArray(cachedResponse?.dropoffPassengers) ? cachedResponse.dropoffPassengers.length : 0
+          });
+          return;
+        }
+
+        setAllStationsItemPassengerCounts({
+          stationItem: entry.item,
+          loading: true
+        });
+      });
+
+      let queueCursor = 0;
+      const workerCount = Math.min(4, queue.length);
+      const runWorker = async () => {
+        while (queueCursor < queue.length) {
+          const currentIndex = queueCursor;
+          queueCursor += 1;
+          const entry = queue[currentIndex];
+          if (!entry || renderToken !== allStationsPassengerCountRenderToken) return;
+
+          const cacheKey = buildPassengerStateCacheKey(normalizedTripId, entry.stationId);
+          if (passengerStateCache.has(cacheKey)) {
+            const cachedResponse = passengerStateCache.get(cacheKey);
+            setAllStationsItemPassengerCounts({
+              stationItem: entry.item,
+              boardingCount: Array.isArray(cachedResponse?.boardingPassengers) ? cachedResponse.boardingPassengers.length : 0,
+              dropoffCount: Array.isArray(cachedResponse?.dropoffPassengers) ? cachedResponse.dropoffPassengers.length : 0
+            });
+            continue;
+          }
+
+          try {
+            const responseData = await loadPassengerStateHistory({
+              tripId: normalizedTripId,
+              stationId: entry.stationId,
+              item: entry.item,
+              index: entry.index,
+              renderMode: "silent",
+              stationItem: entry.item
+            });
+            if (renderToken !== allStationsPassengerCountRenderToken) return;
+            setAllStationsItemPassengerCounts({
+              stationItem: entry.item,
+              boardingCount: Array.isArray(responseData?.boardingPassengers) ? responseData.boardingPassengers.length : 0,
+              dropoffCount: Array.isArray(responseData?.dropoffPassengers) ? responseData.dropoffPassengers.length : 0
+            });
+          } catch (err) {
+            if (renderToken !== allStationsPassengerCountRenderToken) return;
+            setAllStationsItemPassengerCounts({
+              stationItem: entry.item
+            });
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+    };
+
+    const createAllStationsListItem = (item, index, tripId = "") => {
       const rowEl = document.createElement("button");
       rowEl.type = "button";
       rowEl.className = "station-passenger-all-stations-item";
+      const itemIdentity = buildJourneyStationIdentity(item);
       rowEl.dataset.stationPassengerAllStationsItem = "1";
       rowEl.dataset.stationPassengerAllStationsIndex = String(index);
-      rowEl.dataset.stationPassengerAllStationsIdentity = buildJourneyStationIdentity(item);
+      rowEl.dataset.stationPassengerAllStationsIdentity = itemIdentity;
 
       const headEl = document.createElement("div");
       headEl.className = "station-passenger-all-stations-item-head";
@@ -4484,8 +4595,33 @@
       const stationName = String(item?.stationName || item?.["station-name"] || "").trim();
       titleEl.textContent = stationName || stationId || "Durak adı bulunamadı";
 
+      const cachedPassengerState =
+        tripId && stationId ? passengerStateCache.get(buildPassengerStateCacheKey(tripId, stationId)) : null;
+      const statsEl = document.createElement("div");
+      statsEl.className = "station-passenger-all-stations-item-stats";
+
+      const dropoffCountEl = document.createElement("span");
+      dropoffCountEl.className = "station-passenger-all-stations-item-stat";
+      dropoffCountEl.dataset.stationPassengerAllStationsDropoff = "1";
+      dropoffCountEl.textContent = `İnen: ${formatAllStationsPassengerCountValue(
+        Array.isArray(cachedPassengerState?.dropoffPassengers) ? cachedPassengerState.dropoffPassengers.length : null,
+        { loading: !cachedPassengerState && Boolean(stationId) }
+      )}`;
+
+      const boardingCountEl = document.createElement("span");
+      boardingCountEl.className = "station-passenger-all-stations-item-stat";
+      boardingCountEl.dataset.stationPassengerAllStationsBoarding = "1";
+      boardingCountEl.textContent = `Binen: ${formatAllStationsPassengerCountValue(
+        Array.isArray(cachedPassengerState?.boardingPassengers) ? cachedPassengerState.boardingPassengers.length : null,
+        { loading: !cachedPassengerState && Boolean(stationId) }
+      )}`;
+
+      statsEl.appendChild(dropoffCountEl);
+      statsEl.appendChild(boardingCountEl);
+
       headEl.appendChild(orderEl);
       headEl.appendChild(titleEl);
+      headEl.appendChild(statsEl);
 
       const metaEl = document.createElement("div");
       metaEl.className = "station-passenger-all-stations-item-meta";
@@ -4499,6 +4635,10 @@
 
       rowEl.appendChild(headEl);
       rowEl.appendChild(metaEl);
+      rowEl.classList.toggle("is-passenger-count-loading", !cachedPassengerState && Boolean(stationId));
+      if (itemIdentity) {
+        allStationsItemElementMap.set(itemIdentity, rowEl);
+      }
       return rowEl;
     };
 
@@ -4628,6 +4768,8 @@
       statusMessage = "Tüm duraklar burada listelenecek.",
       listMessage = "Henüz listelenecek durak yok."
     } = {}) => {
+      allStationsPassengerCountRenderToken += 1;
+      allStationsItemElementMap.clear();
       allStationsScreenEl.hidden = hideScreen;
       allStationsTripIdEl.textContent = `SeferID: ${String(tripId || "").trim() || "-"}`;
       setAllStationsStatus(statusMessage, "muted");
@@ -4643,6 +4785,7 @@
     const renderAllStationsJourneyStations = ({ tripId = "", items = [], autoScroll = true } = {}) => {
       const normalizedTripId = String(tripId || "").trim();
       const normalizedItems = Array.isArray(items) ? items.slice() : [];
+      const passengerCountRenderToken = ++allStationsPassengerCountRenderToken;
       normalizedItems.sort((left, right) => {
         const leftOrder = Number.isFinite(Number(left?.order)) ? Number(left.order) : Number.MAX_SAFE_INTEGER;
         const rightOrder = Number.isFinite(Number(right?.order)) ? Number(right.order) : Number.MAX_SAFE_INTEGER;
@@ -4662,11 +4805,10 @@
       allStationsTripIdEl.textContent = `SeferID: ${normalizedTripId || "-"}`;
       setAllStationsCount(normalizedItems.length);
       setAllStationsStatus(
-        normalizedItems.length > 0
-          ? `${normalizedItems.length} durak artan Order No sırasıyla listelendi.`
-          : "Bu sefer için durak bulunamadı.",
+        normalizedItems.length > 0 ? `${normalizedItems.length} durak listelendi.` : "Bu sefer için durak bulunamadı.",
         normalizedItems.length > 0 ? "success" : "muted"
       );
+      allStationsItemElementMap.clear();
       allStationsListEl.innerHTML = "";
 
       if (normalizedItems.length === 0) {
@@ -4677,10 +4819,15 @@
       } else {
         const fragment = document.createDocumentFragment();
         normalizedItems.forEach((item, index) => {
-          fragment.appendChild(createAllStationsListItem(item, index));
+          fragment.appendChild(createAllStationsListItem(item, index, normalizedTripId));
         });
         allStationsListEl.appendChild(fragment);
         syncSelectedAllStationsItemState();
+        void hydrateAllStationsPassengerCounts({
+          tripId: normalizedTripId,
+          items: normalizedItems,
+          renderToken: passengerCountRenderToken
+        });
       }
 
       page.stationPassengerSelectedAllStations = normalizedItems;
@@ -5005,8 +5152,22 @@
     }) => {
       const normalizedTripId = String(tripId || "").trim();
       const normalizedStationId = String(stationId || "").trim();
-      const normalizedRenderMode = String(renderMode || "").trim() === "all-stations" ? "all-stations" : "realtime";
+      const normalizedRenderMode = (() => {
+        const renderModeText = String(renderMode || "").trim();
+        if (renderModeText === "all-stations") return "all-stations";
+        if (renderModeText === "silent") return "silent";
+        return "realtime";
+      })();
       const stationIdentity = buildJourneyStationIdentity(stationItem);
+      const syncAllStationsCountState = (responseData, { loading = false } = {}) => {
+        if (!stationItem) return;
+        setAllStationsItemPassengerCounts({
+          stationItem,
+          boardingCount: Array.isArray(responseData?.boardingPassengers) ? responseData.boardingPassengers.length : null,
+          dropoffCount: Array.isArray(responseData?.dropoffPassengers) ? responseData.dropoffPassengers.length : null,
+          loading
+        });
+      };
       const shouldRenderRealtimeState = () => {
         const selectedStationId = String(
           page.stationPassengerSelectedNextStation?.stationId ||
@@ -5083,6 +5244,7 @@
       const cacheKey = buildPassengerStateCacheKey(normalizedTripId, normalizedStationId);
       if (passengerStateCache.has(cacheKey)) {
         const cachedResponse = passengerStateCache.get(cacheKey);
+        syncAllStationsCountState(cachedResponse);
         renderResponseForActiveSelection(cachedResponse);
         window.dispatchEvent(
           new CustomEvent("station-passenger-passenger-state-loaded", {
@@ -5128,6 +5290,7 @@
             dropoffPassengers: Array.isArray(data?.dropoffPassengers) ? data.dropoffPassengers : []
           };
           passengerStateCache.set(cacheKey, normalizedResponse);
+          syncAllStationsCountState(normalizedResponse);
           renderResponseForActiveSelection(normalizedResponse);
 
           window.dispatchEvent(
@@ -5144,6 +5307,7 @@
           );
           return normalizedResponse;
         } catch (err) {
+          syncAllStationsCountState(null);
           renderErrorForActiveSelection(err?.message || "GetPassengerStateHistory başarısız.");
           window.dispatchEvent(
             new CustomEvent("station-passenger-passenger-state-error", {
