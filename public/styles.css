@@ -1731,6 +1731,11 @@ th {
   color: #1f6b3c;
 }
 
+.pill.danger {
+  background: #fde9e7;
+  color: #b42318;
+}
+
 .pill.muted {
   background: #f2e8e8;
   color: #a24a4a;
@@ -3684,6 +3689,85 @@ button.ghost {
 .obus-user-create-preview-card .allowed-lines-debug-pre {
   min-height: 220px;
   max-height: 420px;
+}
+
+.obus-user-create-response-list {
+  min-height: 220px;
+  max-height: 420px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.obus-user-create-live-empty,
+.obus-user-create-live-row {
+  border: 1px solid #d7e0ec;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+}
+
+.obus-user-create-live-empty {
+  color: #5f6b7a;
+  line-height: 1.45;
+}
+
+.obus-user-create-live-row {
+  display: grid;
+  gap: 10px;
+}
+
+.obus-user-create-live-row.is-pending {
+  border-color: #c7d7ea;
+  background: #f8fbff;
+}
+
+.obus-user-create-live-row.is-success {
+  border-color: #b7dfc9;
+  background: #f4fbf7;
+}
+
+.obus-user-create-live-row.is-error {
+  border-color: #efc1bb;
+  background: #fff7f6;
+}
+
+.obus-user-create-live-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.obus-user-create-live-row-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2735;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.obus-user-create-live-row-state {
+  flex-shrink: 0;
+}
+
+.obus-user-create-live-message {
+  margin: 0;
+  color: #1f2735;
+  line-height: 1.45;
+}
+
+.obus-user-create-live-details {
+  margin: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.04);
+  padding: 10px;
+  color: #425466;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 .jira-board-page .content {

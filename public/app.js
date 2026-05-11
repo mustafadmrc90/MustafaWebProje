@@ -3230,7 +3230,7 @@
     const statusEl = root.querySelector("[data-obus-user-create-status='1']");
     const rowCountEl = root.querySelector("[data-obus-user-create-row-count='1']");
     const previewEl = root.querySelector("[data-obus-user-create-preview='1']");
-    const responsePreviewEl = root.querySelector("[data-obus-user-create-response-preview='1']");
+    const responseListEl = root.querySelector("[data-obus-user-create-response-list='1']");
 
     if (
       !listUrl ||
@@ -3252,7 +3252,7 @@
       !statusEl ||
       !rowCountEl ||
       !previewEl ||
-      !responsePreviewEl
+      !responseListEl
     ) {
       return;
     }
@@ -3450,30 +3450,101 @@
       rowCountEl.textContent = `${rows.length} satır / ${filledCount} dolu`;
     };
 
-    const renderJobResponsePreview = (snapshot = null) => {
-      const recentEvents = activeJobEvents.slice(-20).map((event) => ({
-        label: String(event?.label || "").trim(),
-        ok: typeof event?.ok === "boolean" ? event.ok : null,
-        message: String(event?.message || "").trim(),
-        error: String(event?.error || "").trim(),
-        detail: String(event?.detailText || "").trim()
-      }));
+    const buildLiveEventTone = (event = null) => {
+      const statusKind = String(event?.statusKind || "")
+        .trim()
+        .toLocaleLowerCase("tr");
+      if (statusKind === "failure" || event?.ok === false) return "error";
+      if (statusKind === "success" || event?.ok === true) return "success";
+      return "pending";
+    };
 
-      responsePreviewEl.textContent = JSON.stringify(
-        {
-          ok: snapshot ? !snapshot.error && Number(snapshot.failureCount || 0) === 0 : false,
-          jobId: snapshot ? String(snapshot.jobId || activeJobId || "").trim() : activeJobId,
-          done: snapshot ? Boolean(snapshot.done) : false,
-          processedCount: snapshot ? Number(snapshot.processedCount || 0) : 0,
-          totalCount: snapshot ? Number(snapshot.totalCount || 0) : 0,
-          successCount: snapshot ? Number(snapshot.successCount || 0) : 0,
-          failureCount: snapshot ? Number(snapshot.failureCount || 0) : 0,
-          summary: snapshot?.summary || null,
-          recentResults: recentEvents
-        },
-        null,
-        2
-      );
+    const buildLiveEventStateText = (event = null) => {
+      const statusKind = String(event?.statusKind || "")
+        .trim()
+        .toLocaleLowerCase("tr");
+      if (statusKind === "failure" || event?.ok === false) return "Hatalı";
+      if (statusKind === "success" || event?.ok === true) return "Başarılı";
+      if (statusKind === "pending") return "Hazırlanıyor";
+      if (statusKind === "progress") return "İşleniyor";
+      if (statusKind === "info") return "Bilgi";
+      return "Beklemede";
+    };
+
+    const buildLiveEventRows = () => {
+      const eventMap = new Map();
+      activeJobEvents.forEach((event) => {
+        const key = String(event?.key || "").trim() || `event-${Number(event?.seq || 0)}`;
+        eventMap.set(key, event);
+      });
+      return Array.from(eventMap.values());
+    };
+
+    const renderJobResponseList = () => {
+      responseListEl.innerHTML = "";
+      const rows = buildLiveEventRows();
+      if (rows.length === 0) {
+        const emptyState = document.createElement("div");
+        emptyState.className = "obus-user-create-live-empty";
+        emptyState.textContent = createJobRunning
+          ? "Canlı durum hazırlanıyor. Firma bazlı satırlar birazdan burada görünecek."
+          : "Toplu kullanıcı oluşturma henüz başlatılmadı.";
+        responseListEl.appendChild(emptyState);
+        return;
+      }
+
+      rows.forEach((event) => {
+        const tone = buildLiveEventTone(event);
+        const card = document.createElement("article");
+        card.className = `obus-user-create-live-row is-${tone}`;
+
+        const head = document.createElement("div");
+        head.className = "obus-user-create-live-row-head";
+
+        const title = document.createElement("strong");
+        title.className = "obus-user-create-live-row-title";
+        title.textContent = String(event?.label || "").trim() || "Firma isteği";
+
+        const state = document.createElement("span");
+        const stateToneClass = tone === "error" ? "danger" : tone === "success" ? "success" : "";
+        state.className = `pill obus-user-create-live-row-state${stateToneClass ? ` ${stateToneClass}` : ""}`;
+        state.textContent = buildLiveEventStateText(event);
+
+        head.appendChild(title);
+        head.appendChild(state);
+        card.appendChild(head);
+
+        const messageText =
+          String(event?.message || "").trim() ||
+          String(event?.error || "").trim() ||
+          (tone === "pending" ? "İstek akışı devam ediyor." : "");
+
+        if (messageText) {
+          const message = document.createElement("p");
+          message.className = "obus-user-create-live-message";
+          message.textContent = messageText;
+          card.appendChild(message);
+        }
+
+        const detailLines = Array.from(
+          new Set(
+            [
+              String(event?.errorDetail || "").trim(),
+              String(event?.detailText || "").trim(),
+              ...(Array.isArray(event?.logLines) ? event.logLines : []).map((item) => String(item || "").trim())
+            ].filter(Boolean)
+          )
+        );
+
+        if (detailLines.length > 0) {
+          const detail = document.createElement("pre");
+          detail.className = "obus-user-create-live-details";
+          detail.textContent = detailLines.join("\n");
+          card.appendChild(detail);
+        }
+
+        responseListEl.appendChild(card);
+      });
     };
 
     const renderPreview = () => {
@@ -3500,16 +3571,7 @@
         null,
         2
       );
-      if (!createJobRunning) {
-        responsePreviewEl.textContent = JSON.stringify(
-          {
-            ok: false,
-            message: "Toplu kullanıcı oluşturma henüz başlatılmadı."
-          },
-          null,
-          2
-        );
-      }
+      if (!createJobRunning) renderJobResponseList();
       syncRowMeta();
     };
 
@@ -3626,10 +3688,10 @@
         activeJobFailureCount = 0;
         activeJobCursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : activeJobCursor;
         if (Array.isArray(data.events) && data.events.length > 0) {
-          activeJobEvents = activeJobEvents.concat(data.events).slice(-200);
+          activeJobEvents = activeJobEvents.concat(data.events);
         }
 
-        renderJobResponsePreview(data);
+        renderJobResponseList();
 
         if (data.error) {
           setStatus(data.error, "error");
@@ -3896,19 +3958,7 @@
           activeJobEvents = [];
           activeJobFailureCount = 0;
           syncActionState();
-          responsePreviewEl.textContent = JSON.stringify(
-            {
-              ok: true,
-              jobId: activeJobId,
-              started: true,
-              companyCount: Number(data.companyCount || companyCount),
-              userCount: Number(data.userCount || validation.entries.length),
-              totalCount: Number(data.totalCount || targetCount),
-              message: "Toplu kullanıcı oluşturma işi başlatıldı."
-            },
-            null,
-            2
-          );
+          renderJobResponseList();
           setStatus(
             `Toplu kullanıcı oluşturma başlatıldı. Hedef istek: ${Number(data.totalCount || targetCount)}`,
             "success"
