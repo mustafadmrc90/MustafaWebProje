@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Product</title>
+    <link rel="icon" href="/public/favicon.png" />
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body class="dashboard layout">
+    <%- include("partials/sidebar", { active }) %>
+
+    <section class="content">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>
+            <span class="page-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="10" cy="8" r="4"></circle>
+                <path d="M16 11h6"></path>
+              </svg>
+            </span>
+            <span>Obus Kullanıcı Pasife Al</span>
+          </h1>
+          <p>Kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
+        </div>
+        <div class="page-actions">
+          <div class="user-pill"><%= user.displayName %></div>
+        </div>
+      </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
+
+      <% if (partnerError) { %>
+        <div class="alert inline-alert"><%= partnerError %></div>
+      <% } %>
+
+      <section class="table-card panel-card allowed-lines-section">
+        <div class="table-head">
+          <h2>Kullanıcı Sorgusu</h2>
+        </div>
+
+        <form class="allowed-lines-form" method="post" action="/general/obus-user-deactivate">
+          <div class="allowed-lines-grid obus-user-deactivate-grid">
+            <label class="allowed-lines-field">
+              <span>Kullanıcı Adı</span>
+              <input type="text" name="username" value="<%= filters.username || '' %>" autocomplete="off" required />
+            </label>
+          </div>
+
+          <div class="allowed-lines-actions">
+            <button
+              type="submit"
+              data-default-label="Kullanıcıyı Sorgula"
+              data-loading-label="Sorgulanıyor..."
+            >
+              Kullanıcıyı Sorgula
+            </button>
+          </div>
+
+          <div class="allowed-lines-loading-message" hidden>Kullanıcı listesi sorgulanıyor...</div>
+        </form>
+
+        <% if (report.requested && report.error) { %>
+          <div class="alert inline-alert"><%= report.error %></div>
+          <% if (report.errorDetail) { %>
+            <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
+          <% } %>
+        <% } else if (report.requested && report.userMessage) { %>
+          <div class="inline-success"><%= report.userMessage %></div>
+        <% } %>
+      </section>
+
+      <section class="table-card panel-card allowed-lines-response">
+        <div class="table-head">
+          <h2>Sonuçlar</h2>
+          <div class="table-actions">
+            <% if (report.requested) { %>
+              <span class="pill"><%= report.status ? `HTTP ${report.status}` : "HTTP -" %></span>
+              <span class="pill"><%= report.totalUserCount || 0 %> Tarandı</span>
+              <span class="pill"><%= report.activeUserCount || 0 %> Aktif</span>
+              <span class="pill"><%= report.matchedUserCount || 0 %> Eşleşti</span>
+              <% if (report.loginCompanyCode) { %>
+                <span class="pill"><%= report.loginCompanyCode %> / <%= report.loginCluster || 'cluster4' %></span>
+              <% } %>
+            <% } else { %>
+              <span class="pill muted">Henüz sorgu yapılmadı</span>
+            <% } %>
+          </div>
+        </div>
+
+        <% if (report.requested && report.rows.length > 0) { %>
+          <div class="table-scroll">
+            <table class="partners-raw-table">
+              <thead>
+                <tr>
+                  <th>Data Anahtarı</th>
+                  <th>ID</th>
+                  <th>Kullanıcı Adı</th>
+                  <th>Ad Soyad</th>
+                  <th>is-active</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% report.rows.forEach((row) => { %>
+                  <tr>
+                    <td><%= row.dataKey || '-' %></td>
+                    <td><%= row.id || '-' %></td>
+                    <td><%= row.username || '-' %></td>
+                    <td><%= row.fullName || '-' %></td>
+                    <td><%= row.isActiveText || '-' %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } else if (report.requested && !report.error) { %>
+          <div class="pill muted">Listeleme için uygun kayıt bulunamadı.</div>
+        <% } else { %>
+          <div class="pill muted">Sonuç listesi burada gösterilecek.</div>
+        <% } %>
+      </section>
+    </section>
+
+    <script src="/public/app.js" defer></script>
+  </body>
+</html>

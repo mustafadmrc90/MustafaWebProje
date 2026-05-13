@@ -2832,6 +2832,10 @@ button.ghost {
   align-items: end;
 }
 
+.obus-user-deactivate-grid {
+  grid-template-columns: minmax(260px, 360px);
+}
+
 .allowed-lines-field-url {
   grid-column: 1 / -1;
 }
