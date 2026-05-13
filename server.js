@@ -18887,6 +18887,13 @@ function requestWantsJson(req) {
   return accept.includes("application/json");
 }
 
+function parseCheckboxBooleanValue(value, { truthy = "1" } = {}) {
+  if (Array.isArray(value)) {
+    return value.some((item) => String(item || "").trim() === truthy);
+  }
+  return String(value || "").trim() === truthy;
+}
+
 function renderLoginFailure(req, res, statusCode, errorMessage) {
   const normalizedStatusCode = Number.isInteger(statusCode) ? statusCode : 500;
   const normalizedMessage = String(errorMessage || "Hatalı giriş.").trim() || "Hatalı giriş.";
@@ -22466,7 +22473,7 @@ app.post("/users/:userId/login-lock", requireAuth, requireMenuAccess("users"), a
     return res.redirect("/users?err=invalid_user");
   }
 
-  const enabled = String(req.body?.enabled || "").trim() === "1";
+  const enabled = parseCheckboxBooleanValue(req.body?.enabled);
 
   try {
     const result = await pool.query(
@@ -22496,7 +22503,7 @@ app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("user
     return res.redirect("/users?err=invalid_user");
   }
 
-  const enabled = String(req.body?.enabled || "").trim() === "1";
+  const enabled = parseCheckboxBooleanValue(req.body?.enabled);
 
   try {
     const result = await pool.query(
@@ -22541,8 +22548,8 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
     }
 
-    const ipEnabled = Boolean(deviceRow.ipAddress) && String(req.body?.ipEnabled || "").trim() === "1";
-    const macEnabled = Boolean(deviceRow.macAddress) && String(req.body?.macEnabled || "").trim() === "1";
+    const ipEnabled = Boolean(deviceRow.ipAddress) && parseCheckboxBooleanValue(req.body?.ipEnabled);
+    const macEnabled = Boolean(deviceRow.macAddress) && parseCheckboxBooleanValue(req.body?.macEnabled);
 
     const updateResult = await pool.query(
       `
