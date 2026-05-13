@@ -400,6 +400,8 @@ const OBUS_USER_DEACTIVATE_API_AUTH =
   process.env.OBUS_USER_DEACTIVATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "45000", 10) || 45000;
+const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "6", 10) || 6;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
   String(process.env.OBUS_USER_DEACTIVATE_REQUEST_DATE || "2026-05-13 08:30:02").trim() || "2026-05-13 08:30:02";
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
@@ -15494,12 +15496,12 @@ function buildObusUserDeactivateReportModel() {
     requestBody: "{}",
     responseBody: "",
     rows: [],
+    scannedCompanyCount: 0,
+    successCompanyCount: 0,
+    failureCompanyCount: 0,
     totalUserCount: 0,
     activeUserCount: 0,
-    matchedUserCount: 0,
-    loginCompanyCode: "",
-    loginCompanyId: "",
-    loginCluster: "cluster4"
+    matchedUserCount: 0
   };
 }
 
@@ -15606,18 +15608,22 @@ function extractObusUserDeactivateRows(payload) {
     ).trim();
     if (!username) return;
 
-    const idValue = formatPartnerCellValue(
+    const userIdValue = formatPartnerCellValue(
       readPartnerRawValueByAliases(node, ["id", "user-id", "user_id", "userId", "userid"])
+    ).trim();
+    const partnerIdValue = formatPartnerCellValue(
+      readPartnerRawValueByAliases(node, ["partner-id", "partner_id", "partnerid", "partnerId", "partnerID"])
     ).trim();
     const fullName = formatPartnerCellValue(
       readPartnerRawValueByAliases(node, ["full-name", "full_name", "fullName", "fullname", "name"])
     ).trim();
     const activeRaw = readPartnerRawValueByAliases(node, ["is-active", "is_active", "isactive", "isActive"]);
     const isActive = parseAllCompaniesBooleanValue(activeRaw);
-    const id = idValue || dataKey || username;
+    const userId = userIdValue || dataKey || username;
     const row = {
-      dataKey: dataKey || id,
-      id,
+      dataKey: dataKey || userId,
+      userId,
+      partnerId: partnerIdValue,
       username,
       fullName,
       isActive,
@@ -15625,7 +15631,8 @@ function extractObusUserDeactivateRows(payload) {
     };
     const dedupeKey = [
       normalizeObusUserDeactivateUsername(row.username),
-      String(row.id || "").trim(),
+      String(row.userId || "").trim(),
+      String(row.partnerId || "").trim(),
       String(row.dataKey || "").trim()
     ].join("|||");
     if (!deduped.has(dedupeKey)) {
@@ -15636,137 +15643,108 @@ function extractObusUserDeactivateRows(payload) {
   return Array.from(deduped.values()).sort((a, b) => {
     const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
     if (byUsername !== 0) return byUsername;
-    const byFullName = String(a.fullName || "").localeCompare(String(b.fullName || ""), "tr");
-    if (byFullName !== 0) return byFullName;
-    return String(a.id || "").localeCompare(String(b.id || ""), "tr");
+    const byPartnerId = String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
+    if (byPartnerId !== 0) return byPartnerId;
+    return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
   });
 }
 
-async function resolveObusUserDeactivateLoginContext({ partnerItems = [], username = "", password = "" }) {
-  const endpointUrl = normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL);
-  if (!endpointUrl) {
-    return {
-      ok: false,
-      error: "GetUsersWithoutPermissions URL oluşturulamadı.",
-      errorDetail: ""
-    };
-  }
+function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") {
+  const normalizedCluster =
+    normalizeObusClusterLabel(clusterLabel) ||
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
+    "cluster4";
 
-  const companyCandidates = shuffleArray(buildClusterCompanyCandidates(partnerItems).get("cluster4") || []).filter((item) =>
-    Boolean(String(item?.code || "").trim())
+  return (
+    normalizeTargetUrl(buildUrlForCluster(String(company?.url || "").trim(), normalizedCluster)) ||
+    normalizeTargetUrl(buildUrlForCluster(OBUS_USER_DEACTIVATE_API_URL, normalizedCluster)) ||
+    normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, normalizedCluster)) ||
+    normalizeTargetUrl(company?.url || "") ||
+    normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL)
+  );
+}
+
+async function fetchObusUserDeactivateCompanyResult({
+  company,
+  searchUsername = "",
+  loginCredentials = {},
+  sessionCache = null
+}) {
+  const companyCode = String(company?.code || "").trim();
+  const partnerId = String(company?.id || "").trim();
+  const branchId = String(company?.branchId || company?.id || "").trim();
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
+    "cluster4";
+  const companyBaseUrl = buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel);
+  const requestUrl = normalizeTargetUrl(
+    buildMembershipGetUsersWithoutPermissionsUrl(companyBaseUrl || OBUS_USER_DEACTIVATE_API_URL, clusterLabel)
   );
 
-  if (companyCandidates.length === 0) {
-    return {
-      ok: false,
-      error: "cluster4 için kullanılabilir firma bulunamadı.",
-      errorDetail: "Önce Tüm Firmalar ekranındaki SQL verilerini güncelleyin."
-    };
-  }
-
-  let lastError = "UserLogin başarısız.";
-  let lastErrorDetail = "";
-
-  for (const candidate of companyCandidates) {
-    const partnerCode = String(candidate.code || "").trim();
-    const partnerId = String(candidate.id || "").trim();
-    const fallbackBranchId = String(candidate.branchId || candidate.id || "").trim();
-    const companyUrl =
-      buildUrlForCluster(String(candidate.url || endpointUrl).trim() || endpointUrl, "cluster4") || endpointUrl;
-
-    const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
-      endpointUrl,
-      companyUrl,
-      partnerCode,
-      partnerId,
-      username,
-      password,
-      fallbackBranchId,
-      sessionClusterLabel: "cluster4",
-      authorization: OBUS_USER_DEACTIVATE_API_AUTH,
-      timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS
-    });
-
-    if (loginResult?.ok === true && String(loginResult.token || "").trim()) {
-      return {
-        ok: true,
-        companyCode: partnerCode,
-        companyId: partnerId,
-        clusterLabel: "cluster4",
-        sessionId: String(loginResult.sessionId || "").trim(),
-        deviceId: String(loginResult.deviceId || "").trim(),
-        token: String(loginResult.token || "").trim()
-      };
-    }
-
-    lastError =
-      String(loginResult?.error || "").trim() ||
-      (loginResult?.ok === true ? "UserLogin token bulunamadı." : "") ||
-      lastError;
-    lastErrorDetail =
-      String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim() ||
-      (String(loginResult?.rawLoginBody || "").trim()
-        ? `UserLogin ham yanıtı: ${truncateObusDebugText(loginResult.rawLoginBody, 260)}`
-        : "") ||
-      lastErrorDetail;
-  }
-
-  return {
+  const buildFailure = (error = "", errorDetail = "", status = null, responseBody = "") => ({
     ok: false,
-    error: lastError || "UserLogin başarısız.",
-    errorDetail: lastErrorDetail
-  };
-}
-
-async function fetchObusUserDeactivateSearchReport({ username = "", partnerItems = [] }) {
-  const report = buildObusUserDeactivateReportModel();
-  report.requested = true;
-
-  const normalizedSearchUsername = String(username || "").trim();
-  if (!normalizedSearchUsername) {
-    report.error = "Kullanıcı adı zorunludur.";
-    return report;
-  }
-
-  const loginCredentials = getObusUserCreateLoginCredentials();
-  if (!loginCredentials.username || !loginCredentials.password) {
-    report.error = buildMissingMacOsKeychainSecretsMessage([
-      "OBUS_USER_CREATE_LOGIN_USERNAME",
-      "OBUS_USER_CREATE_LOGIN_PASSWORD"
-    ]);
-    return report;
-  }
-
-  const loginContext = await resolveObusUserDeactivateLoginContext({
-    partnerItems,
-    username: loginCredentials.username,
-    password: loginCredentials.password
+    code: companyCode,
+    partnerId,
+    clusterLabel,
+    requestUrl,
+    status: Number.isFinite(Number(status)) ? Number(status) : null,
+    error: String(error || "").trim() || "İstek gönderilemedi.",
+    errorDetail: String(errorDetail || "").trim(),
+    responseBody: String(responseBody || "").trim()
   });
 
-  report.loginCompanyCode = String(loginContext?.companyCode || "").trim();
-  report.loginCompanyId = String(loginContext?.companyId || "").trim();
-  report.loginCluster = String(loginContext?.clusterLabel || "cluster4").trim() || "cluster4";
-
-  if (!loginContext.ok) {
-    report.error = String(loginContext.error || "UserLogin başarısız.").trim();
-    report.errorDetail = String(loginContext.errorDetail || "").trim();
-    return report;
+  if (!companyCode) {
+    return buildFailure("Firma code bulunamadı.");
+  }
+  if (!partnerId) {
+    return buildFailure("Firma partner-id bulunamadı.");
+  }
+  if (!requestUrl) {
+    return buildFailure("GetUsersWithoutPermissions URL oluşturulamadı.");
   }
 
-  const requestUrl = normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL);
-  if (!requestUrl) {
-    report.error = "GetUsersWithoutPermissions URL oluşturulamadı.";
-    return report;
+  const loginResult = await resolveAuthorizedLinesLoginResultWithBranchFallback({
+    endpointUrl: requestUrl,
+    companyUrl: companyBaseUrl || requestUrl,
+    partnerCode: companyCode,
+    partnerId,
+    username: String(loginCredentials?.username || "").trim(),
+    password: typeof loginCredentials?.password === "string" ? loginCredentials.password : "",
+    fallbackBranchId: branchId,
+    sessionClusterLabel: clusterLabel,
+    authorization: OBUS_USER_DEACTIVATE_API_AUTH,
+    timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+    sessionCache
+  });
+
+  if (!loginResult?.ok) {
+    return buildFailure(
+      String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
+      String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim(),
+      null,
+      String(loginResult?.rawLoginBody || "").trim()
+    );
+  }
+
+  const token = String(loginResult?.token || "").trim();
+  if (!token) {
+    return buildFailure(
+      "UserLogin token bulunamadı.",
+      String(loginResult?.tokenMissingDetail || loginResult?.errorDetail || "").trim(),
+      null,
+      String(loginResult?.rawLoginBody || "").trim()
+    );
   }
 
   const requestBodyObject = buildObusUserDeactivateRequestBody({
-    sessionId: loginContext.sessionId,
-    deviceId: loginContext.deviceId,
-    token: loginContext.token
+    sessionId: String(loginResult?.sessionId || "").trim(),
+    deviceId: String(loginResult?.deviceId || "").trim(),
+    token
   });
-  const requestBody = JSON.stringify(requestBodyObject, null, 2);
-  report.requestUrl = requestUrl;
-  report.requestBody = requestBody;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
@@ -15785,60 +15763,194 @@ async function fetchObusUserDeactivateSearchReport({ username = "", partnerItems
 
     const raw = await response.text();
     const parsed = parseJsonSafe(raw);
-    report.status = response.status;
-    report.responseBody =
+    const responseBody =
       parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+    const reason =
+      (parsed &&
+        typeof parsed === "object" &&
+        String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+      response.statusText ||
+      "Bilinmeyen hata";
 
     if (!response.ok) {
-      const reason =
-        (parsed &&
-          typeof parsed === "object" &&
-          String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
-        response.statusText ||
-        "Bilinmeyen hata";
-      report.error = `HTTP ${response.status}: ${reason}`;
-      report.errorDetail = report.responseBody || "";
-      return report;
+      return buildFailure(`HTTP ${response.status}: ${reason}`, responseBody, response.status, responseBody);
     }
 
     if (!parsed || typeof parsed !== "object") {
-      report.error = "Servis yanıtı okunamadı.";
-      report.errorDetail = String(raw || "").trim();
-      return report;
+      return buildFailure("Servis yanıtı okunamadı.", String(raw || "").trim(), response.status, String(raw || "").trim());
     }
 
     const hasExplicitStatusField =
       "status" in parsed || "success" in parsed || "status-code" in parsed;
     if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
-      report.error =
-        String(parsed["user-message"] || parsed.message || parsed.error || "").trim() || "İşlem başarısız döndü.";
-      report.errorDetail = report.responseBody || "";
-      return report;
+      return buildFailure(reason || "İşlem başarısız döndü.", responseBody, response.status, responseBody);
     }
 
     const allRows = extractObusUserDeactivateRows(parsed);
     const activeRows = allRows.filter((row) => row.isActive === true);
-    const matchedRows = activeRows.filter(
-      (row) => normalizeObusUserDeactivateUsername(row.username) === normalizeObusUserDeactivateUsername(normalizedSearchUsername)
-    );
+    const matchedRows = activeRows
+      .filter(
+        (row) => normalizeObusUserDeactivateUsername(row.username) === normalizeObusUserDeactivateUsername(searchUsername)
+      )
+      .map((row) => ({
+        userId: String(row.userId || "").trim(),
+        partnerId: String(row.partnerId || "").trim() || partnerId,
+        code: companyCode,
+        username: String(row.username || "").trim(),
+        isActive: row.isActive,
+        isActiveText: row.isActiveText
+      }));
 
-    report.rows = matchedRows;
-    report.totalUserCount = allRows.length;
-    report.activeUserCount = activeRows.length;
-    report.matchedUserCount = matchedRows.length;
-    report.userMessage =
-      matchedRows.length > 0
-        ? `${matchedRows.length} aktif kullanıcı bulundu.`
-        : "Eşit kullanıcı adı ve aktif durumu true olan kayıt bulunamadı.";
-
-    return report;
+    return {
+      ok: true,
+      code: companyCode,
+      partnerId,
+      clusterLabel,
+      requestUrl,
+      status: response.status,
+      totalUserCount: allRows.length,
+      activeUserCount: activeRows.length,
+      matchedRows,
+      responseBody
+    };
   } catch (err) {
-    report.error = err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi.";
-    report.errorDetail = "";
-    return report;
+    return buildFailure(
+      err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+    );
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchObusUserDeactivateSearchReport({ username = "", partnerItems = [] }) {
+  const report = buildObusUserDeactivateReportModel();
+  report.requested = true;
+
+  const normalizedSearchUsername = String(username || "").trim();
+  if (!normalizedSearchUsername) {
+    report.error = "Kullanıcı adı zorunludur.";
+    return report;
+  }
+  if (!Array.isArray(partnerItems) || partnerItems.length === 0) {
+    report.error = "Sorgulanacak firma listesi bulunamadı.";
+    return report;
+  }
+
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    report.error = buildMissingMacOsKeychainSecretsMessage([
+      "OBUS_USER_CREATE_LOGIN_USERNAME",
+      "OBUS_USER_CREATE_LOGIN_PASSWORD"
+    ]);
+    return report;
+  }
+
+  const sessionCache = new Map();
+  const companyResults = await runWithConcurrency(
+    partnerItems,
+    OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
+    async (company) =>
+      fetchObusUserDeactivateCompanyResult({
+        company,
+        searchUsername: normalizedSearchUsername,
+        loginCredentials,
+        sessionCache
+      })
+  );
+
+  const normalizedResults = companyResults.map((result, index) => {
+    if (result && typeof result === "object" && (result.ok === true || result.ok === false)) {
+      return result;
+    }
+    const company = partnerItems[index] || {};
+    return {
+      ok: false,
+      code: String(company?.code || "").trim(),
+      partnerId: String(company?.id || "").trim(),
+      clusterLabel: String(company?.cluster || "").trim(),
+      requestUrl: "",
+      status: null,
+      error: String(result?.error?.message || result?.error || "Firma sonucu alınamadı.").trim() || "Firma sonucu alınamadı.",
+      errorDetail: ""
+    };
+  });
+
+  const successResults = normalizedResults.filter((item) => item.ok === true);
+  const failureResults = normalizedResults.filter((item) => item.ok !== true);
+  const matchedRows = successResults
+    .flatMap((item) => (Array.isArray(item.matchedRows) ? item.matchedRows : []))
+    .sort((a, b) => {
+      const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+      if (byCode !== 0) return byCode;
+      const byPartnerId = String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
+      if (byPartnerId !== 0) return byPartnerId;
+      return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
+    });
+
+  report.scannedCompanyCount = normalizedResults.length;
+  report.successCompanyCount = successResults.length;
+  report.failureCompanyCount = failureResults.length;
+  report.totalUserCount = successResults.reduce((sum, item) => sum + Number(item.totalUserCount || 0), 0);
+  report.activeUserCount = successResults.reduce((sum, item) => sum + Number(item.activeUserCount || 0), 0);
+  report.matchedUserCount = matchedRows.length;
+  report.rows = matchedRows;
+  report.requestUrl = normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL);
+  report.requestBody = JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2);
+  report.responseBody = JSON.stringify(
+    {
+      scannedCompanyCount: report.scannedCompanyCount,
+      successCompanyCount: report.successCompanyCount,
+      failureCompanyCount: report.failureCompanyCount,
+      matchedUserCount: report.matchedUserCount,
+      failures: failureResults.slice(0, 20).map((item) => ({
+        code: item.code,
+        "partner-id": item.partnerId,
+        cluster: item.clusterLabel,
+        status: item.status,
+        error: item.error
+      }))
+    },
+    null,
+    2
+  );
+
+  if (successResults.length === 0) {
+    report.status =
+      Number(failureResults.find((item) => Number(item.status) > 0)?.status || 0) || null;
+    report.error = failureResults[0]?.error || "Hiçbir firma için sonuç alınamadı.";
+    report.errorDetail = failureResults
+      .map((item) =>
+        [String(item.code || "").trim(), String(item.partnerId || "").trim(), String(item.clusterLabel || "").trim(), String(item.error || "").trim()]
+          .filter(Boolean)
+          .join(" / ")
+      )
+      .filter(Boolean)
+      .join("\n");
+    return report;
+  }
+
+  report.status = failureResults.length > 0 ? 207 : 200;
+  report.userMessage =
+    matchedRows.length > 0
+      ? `${matchedRows.length} aktif kullanıcı bulundu.`
+      : "Eşit kullanıcı adı ve aktif durumu true olan kayıt bulunamadı.";
+
+  if (failureResults.length > 0) {
+    report.error = `${failureResults.length} firma sorgusunda hata oluştu.`;
+    report.errorDetail = failureResults
+      .slice(0, 10)
+      .map((item) =>
+        [
+          String(item.code || "").trim() || "-",
+          String(item.partnerId || "").trim() || "-",
+          String(item.clusterLabel || "").trim() || "-",
+          String(item.error || "").trim() || "Hata"
+        ].join(" / ")
+      )
+      .join("\n");
+  }
+
+  return report;
 }
 
 function buildUetdsPricesRequestBody({ taskData = "", sessionId = "", deviceId = "", token = "" } = {}) {

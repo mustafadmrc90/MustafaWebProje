@@ -23,7 +23,7 @@
             </span>
             <span>Obus Kullanıcı Pasife Al</span>
           </h1>
-          <p>Kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
+          <p>Tüm firmalar ayrı ayrı sorgulanır; kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -66,7 +66,8 @@
           <% if (report.errorDetail) { %>
             <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
           <% } %>
-        <% } else if (report.requested && report.userMessage) { %>
+        <% } %>
+        <% if (report.requested && report.userMessage) { %>
           <div class="inline-success"><%= report.userMessage %></div>
         <% } %>
       </section>
@@ -77,12 +78,12 @@
           <div class="table-actions">
             <% if (report.requested) { %>
               <span class="pill"><%= report.status ? `HTTP ${report.status}` : "HTTP -" %></span>
-              <span class="pill"><%= report.totalUserCount || 0 %> Tarandı</span>
+              <span class="pill"><%= report.scannedCompanyCount || 0 %> Firma</span>
+              <span class="pill"><%= report.successCompanyCount || 0 %> Başarılı</span>
+              <span class="pill"><%= report.failureCompanyCount || 0 %> Hatalı</span>
+              <span class="pill"><%= report.totalUserCount || 0 %> Kullanıcı</span>
               <span class="pill"><%= report.activeUserCount || 0 %> Aktif</span>
               <span class="pill"><%= report.matchedUserCount || 0 %> Eşleşti</span>
-              <% if (report.loginCompanyCode) { %>
-                <span class="pill"><%= report.loginCompanyCode %> / <%= report.loginCluster || 'cluster4' %></span>
-              <% } %>
             <% } else { %>
               <span class="pill muted">Henüz sorgu yapılmadı</span>
             <% } %>
@@ -94,20 +95,20 @@
             <table class="partners-raw-table">
               <thead>
                 <tr>
-                  <th>Data Anahtarı</th>
-                  <th>ID</th>
+                  <th>userid</th>
+                  <th>partner-id</th>
+                  <th>code</th>
                   <th>Kullanıcı Adı</th>
-                  <th>Ad Soyad</th>
                   <th>is-active</th>
                 </tr>
               </thead>
               <tbody>
                 <% report.rows.forEach((row) => { %>
                   <tr>
-                    <td><%= row.dataKey || '-' %></td>
-                    <td><%= row.id || '-' %></td>
+                    <td><%= row.userId || '-' %></td>
+                    <td><%= row.partnerId || '-' %></td>
+                    <td><%= row.code || '-' %></td>
                     <td><%= row.username || '-' %></td>
-                    <td><%= row.fullName || '-' %></td>
                     <td><%= row.isActiveText || '-' %></td>
                   </tr>
                 <% }) %>
