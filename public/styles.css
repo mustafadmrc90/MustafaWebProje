@@ -5699,6 +5699,123 @@ button.ghost {
   margin: 0;
 }
 
+.user-login-lock-toggle.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.user-device-row {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  border-style: dashed;
+  background: #fbfcff;
+}
+
+.user-device-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.user-device-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-device-panel-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.user-device-empty {
+  padding: 12px 14px;
+  border: 1px dashed #d6dde7;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.user-device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.user-device-item {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9e1eb;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.user-device-item-main {
+  display: grid;
+  gap: 8px;
+}
+
+.user-device-item-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.user-device-item-values span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.user-device-item-values code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #f3f6fa;
+  color: var(--text);
+}
+
+.user-device-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.user-device-item-agent {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.user-device-result-pill.is-success {
+  background: #e5f7ec;
+  color: #1d7a46;
+}
+
+.user-device-result-pill.is-blocked {
+  background: #fff1f0;
+  color: #b63a2b;
+}
+
+.user-device-result-pill.is-pending {
+  background: #eef2f7;
+  color: #5c6b7c;
+}
+
+.user-device-permission-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .user-edit-row {
   grid-template-columns: 1fr;
   align-items: stretch;
@@ -5937,6 +6054,17 @@ button.ghost {
 
   .user-edit-fields {
     grid-template-columns: 1fr;
+  }
+
+  .user-device-panel-head {
+    flex-direction: column;
+  }
+
+  .user-device-item-values,
+  .user-device-item-meta,
+  .user-device-permission-grid {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .span-2 {

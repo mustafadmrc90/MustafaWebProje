@@ -71,6 +71,8 @@
               <span>İşlemler</span>
             </div>
             <% users.forEach((u) => { %>
+              <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
+              <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
               <div class="row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
@@ -88,6 +90,28 @@
                       <span>Login Sabitle</span>
                     </label>
                   </form>
+                  <form class="user-login-lock-form" method="post" action="/users/<%= u.id %>/allowed-computer">
+                    <input type="hidden" name="enabled" value="0" />
+                    <label class="user-login-lock-toggle">
+                      <input
+                        type="checkbox"
+                        name="enabled"
+                        value="1"
+                        data-user-allowed-computer-toggle="1"
+                        <%= u.allowed_computer_enabled ? 'checked' : '' %>
+                      />
+                      <span>İzinli Bilgisayar</span>
+                    </label>
+                  </form>
+                  <button
+                    type="button"
+                    class="button-link ghost"
+                    data-user-device-panel-toggle="1"
+                    data-user-device-panel-target="<%= u.id %>"
+                    aria-expanded="<%= isDevicesExpanded ? 'true' : 'false' %>"
+                  >
+                    Cihazlar (<%= deviceItems.length %>)
+                  </button>
                   <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
                   <% if (editingUserId === u.id) { %>
                     <a class="button-link ghost" href="/users">Vazgeç</a>
@@ -95,6 +119,82 @@
                     <a class="button-link ghost" href="/users?edit=<%= u.id %>">Düzenle</a>
                   <% } %>
                 </span>
+              </div>
+
+              <div
+                class="row user-device-row"
+                data-user-device-panel="<%= u.id %>"
+                <%= isDevicesExpanded ? '' : 'hidden' %>
+              >
+                <div class="user-device-panel">
+                  <div class="user-device-panel-head">
+                    <div>
+                      <strong>İzinli Bilgisayar Listesi</strong>
+                      <p>Bu kullanıcı için giriş deneyen cihazların IP ve MAC kayıtları.</p>
+                    </div>
+                    <span class="pill muted"><%= deviceItems.length %> cihaz</span>
+                  </div>
+
+                  <% if (deviceItems.length === 0) { %>
+                    <div class="user-device-empty">
+                      Henüz bu kullanıcı için kayıtlı giriş denemesi yok.
+                    </div>
+                  <% } else { %>
+                    <div class="user-device-list">
+                      <% deviceItems.forEach((device) => { %>
+                        <form
+                          class="user-device-item"
+                          method="post"
+                          action="/users/<%= u.id %>/login-devices/<%= device.id %>/update"
+                        >
+                          <div class="user-device-item-main">
+                            <div class="user-device-item-values">
+                              <span><strong>IP</strong><code><%= device.ipAddress || '-' %></code></span>
+                              <span><strong>MAC</strong><code><%= device.macAddress || '-' %></code></span>
+                            </div>
+                            <div class="user-device-item-meta">
+                              <span class="pill user-device-result-pill is-<%= device.lastLoginResult %>">
+                                <%= device.lastLoginResultText %>
+                              </span>
+                              <span>Son Deneme: <%= device.lastAttemptAtText %></span>
+                            </div>
+                            <% if (device.lastUserAgent) { %>
+                              <div class="user-device-item-agent"><%= device.lastUserAgent %></div>
+                            <% } %>
+                          </div>
+
+                          <div class="user-device-permission-grid">
+                            <input type="hidden" name="ipEnabled" value="0" />
+                            <label class="user-login-lock-toggle <%= device.ipAddress ? '' : 'is-disabled' %>">
+                              <input
+                                type="checkbox"
+                                name="ipEnabled"
+                                value="1"
+                                data-user-device-permission-toggle="1"
+                                <%= device.ipEnabled ? 'checked' : '' %>
+                                <%= device.ipAddress ? '' : 'disabled' %>
+                              />
+                              <span>IP Aktif</span>
+                            </label>
+
+                            <input type="hidden" name="macEnabled" value="0" />
+                            <label class="user-login-lock-toggle <%= device.macAddress ? '' : 'is-disabled' %>">
+                              <input
+                                type="checkbox"
+                                name="macEnabled"
+                                value="1"
+                                data-user-device-permission-toggle="1"
+                                <%= device.macEnabled ? 'checked' : '' %>
+                                <%= device.macAddress ? '' : 'disabled' %>
+                              />
+                              <span>MAC Aktif</span>
+                            </label>
+                          </div>
+                        </form>
+                      <% }) %>
+                    </div>
+                  <% } %>
+                </div>
               </div>
 
               <% if (editingUserId === u.id) { %>

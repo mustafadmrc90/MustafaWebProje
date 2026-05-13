@@ -1,4 +1,6 @@
 const path = require("path");
+const os = require("os");
+const net = require("net");
 const fsSync = require("fs");
 const fs = require("fs/promises");
 const { execFileSync } = require("child_process");
@@ -964,6 +966,7 @@ async function initDb() {
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       display_name TEXT NOT NULL,
+      allowed_computer_enabled BOOLEAN NOT NULL DEFAULT false,
       login_input_lock_enabled BOOLEAN NOT NULL DEFAULT false,
       login_input_lock_version INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -972,8 +975,44 @@ async function initDb() {
 
   await pool.query(`
     ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS allowed_computer_enabled BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS login_input_lock_enabled BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS login_input_lock_version INTEGER NOT NULL DEFAULT 1
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_login_devices (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ip_address TEXT,
+      mac_address TEXT,
+      ip_enabled BOOLEAN NOT NULL DEFAULT false,
+      mac_enabled BOOLEAN NOT NULL DEFAULT false,
+      last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_login_result TEXT,
+      last_user_agent TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    ALTER TABLE user_login_devices
+      ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      ADD COLUMN IF NOT EXISTS ip_address TEXT,
+      ADD COLUMN IF NOT EXISTS mac_address TEXT,
+      ADD COLUMN IF NOT EXISTS ip_enabled BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS mac_enabled BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS last_login_result TEXT,
+      ADD COLUMN IF NOT EXISTS last_user_agent TEXT,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_user_login_devices_user_id
+    ON user_login_devices (user_id)
   `);
 
   await pool.query(`
@@ -18860,6 +18899,411 @@ function renderLoginFailure(req, res, statusCode, errorMessage) {
   return res.status(normalizedStatusCode).render("login", { error: normalizedMessage });
 }
 
+const USER_LOGIN_DEVICE_RESULT_LABELS = {
+  success: "Başarılı giriş",
+  blocked: "Cihaz izni bekleniyor",
+  pending: "Beklemede"
+};
+const USER_LOGIN_DEVICE_MAC_CACHE_TTL_MS = 30000;
+const userLoginDeviceMacCache = new Map();
+let localMachineMacAddressCache = null;
+
+function normalizeLoginRequestIp(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  let normalized = raw;
+  const forwardedMatch = normalized.match(/for=(?:"?\[?([^;\],"]+)\]?"?)/i);
+  if (forwardedMatch && forwardedMatch[1]) {
+    normalized = String(forwardedMatch[1] || "").trim();
+  }
+
+  if (normalized.includes(",")) {
+    normalized = normalized
+      .split(",")
+      .map((item) => String(item || "").trim())
+      .find(Boolean) || "";
+  }
+
+  normalized = normalized.replace(/^\[|\]$/g, "");
+  if (normalized.startsWith("::ffff:")) {
+    normalized = normalized.slice(7);
+  }
+
+  const zoneIndex = normalized.indexOf("%");
+  if (zoneIndex >= 0) {
+    normalized = normalized.slice(0, zoneIndex);
+  }
+
+  if (normalized === "::1") return "127.0.0.1";
+  return normalized;
+}
+
+function normalizeLoginRequestMacAddress(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || raw.includes("incomplete")) return "";
+
+  const normalizedHex = raw.replace(/[^0-9a-f]/g, "");
+  if (normalizedHex.length !== 12 || /^0{12}$/.test(normalizedHex)) return "";
+
+  return normalizedHex.match(/.{1,2}/g)?.join(":") || "";
+}
+
+function extractMacAddressFromSystemText(value = "") {
+  const text = String(value || "");
+  if (!text.trim()) return "";
+
+  const directMatch = text.match(/(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}/i);
+  if (directMatch) {
+    return normalizeLoginRequestMacAddress(directMatch[0]);
+  }
+
+  const dottedMatch = text.match(/(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}/i);
+  if (dottedMatch) {
+    return normalizeLoginRequestMacAddress(dottedMatch[0]);
+  }
+
+  return "";
+}
+
+function isPrivateOrLoopbackIpAddress(value = "") {
+  const normalized = normalizeLoginRequestIp(value);
+  const ipVersion = net.isIP(normalized);
+  if (ipVersion === 4) {
+    const [firstOctetRaw, secondOctetRaw] = normalized.split(".");
+    const firstOctet = Number.parseInt(firstOctetRaw, 10);
+    const secondOctet = Number.parseInt(secondOctetRaw, 10);
+    if (firstOctet === 10 || firstOctet === 127) return true;
+    if (firstOctet === 192 && secondOctet === 168) return true;
+    if (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) return true;
+    if (firstOctet === 169 && secondOctet === 254) return true;
+    return false;
+  }
+
+  if (ipVersion === 6) {
+    const lowered = normalized.toLowerCase();
+    return lowered === "::1" || lowered.startsWith("fc") || lowered.startsWith("fd") || lowered.startsWith("fe80:");
+  }
+
+  return false;
+}
+
+function getRequestClientIp(req) {
+  const candidates = [
+    req?.get?.("forwarded"),
+    req?.get?.("cf-connecting-ip"),
+    req?.get?.("x-real-ip"),
+    req?.get?.("x-forwarded-for"),
+    req?.ip,
+    req?.socket?.remoteAddress,
+    req?.connection?.remoteAddress
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeLoginRequestIp(candidate);
+    if (normalized) return normalized;
+  }
+
+  return "";
+}
+
+function getPrimaryLocalMachineMacAddress() {
+  if (localMachineMacAddressCache !== null) {
+    return localMachineMacAddressCache;
+  }
+
+  const networkMap = os.networkInterfaces();
+  const candidates = [];
+  Object.values(networkMap || {}).forEach((items) => {
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item || item.internal) return;
+      const macAddress = normalizeLoginRequestMacAddress(item.mac);
+      if (macAddress) candidates.push(macAddress);
+    });
+  });
+
+  localMachineMacAddressCache = candidates[0] || "";
+  return localMachineMacAddressCache;
+}
+
+function resolveMacAddressFromSystem(ipAddress = "") {
+  const normalizedIpAddress = normalizeLoginRequestIp(ipAddress);
+  if (!normalizedIpAddress || !isPrivateOrLoopbackIpAddress(normalizedIpAddress)) return "";
+
+  if (normalizedIpAddress === "127.0.0.1") {
+    return getPrimaryLocalMachineMacAddress();
+  }
+
+  const commands = [];
+  if (process.platform === "darwin") {
+    commands.push(["/usr/sbin/arp", ["-n", normalizedIpAddress]]);
+  } else if (process.platform === "linux") {
+    commands.push(["/sbin/ip", ["neigh", "show", normalizedIpAddress]]);
+    commands.push(["ip", ["neigh", "show", normalizedIpAddress]]);
+    commands.push(["/usr/sbin/arp", ["-n", normalizedIpAddress]]);
+    commands.push(["arp", ["-n", normalizedIpAddress]]);
+  } else if (process.platform === "win32") {
+    commands.push(["arp", ["-a", normalizedIpAddress]]);
+  } else {
+    commands.push(["arp", ["-n", normalizedIpAddress]]);
+  }
+
+  for (const [command, args] of commands) {
+    try {
+      const rawOutput = execFileSync(command, args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 1500
+      });
+      const macAddress = extractMacAddressFromSystemText(rawOutput);
+      if (macAddress) return macAddress;
+    } catch (err) {
+      continue;
+    }
+  }
+
+  return "";
+}
+
+function resolveRequestMacAddress(ipAddress = "") {
+  const normalizedIpAddress = normalizeLoginRequestIp(ipAddress);
+  if (!normalizedIpAddress) return "";
+
+  const cachedEntry = userLoginDeviceMacCache.get(normalizedIpAddress);
+  if (cachedEntry && Number(cachedEntry.expiresAt || 0) > Date.now()) {
+    return String(cachedEntry.macAddress || "").trim();
+  }
+
+  const macAddress = resolveMacAddressFromSystem(normalizedIpAddress);
+  userLoginDeviceMacCache.set(normalizedIpAddress, {
+    macAddress,
+    expiresAt: Date.now() + USER_LOGIN_DEVICE_MAC_CACHE_TTL_MS
+  });
+  return macAddress;
+}
+
+function resolveRequestLoginDeviceInfo(req) {
+  const ipAddress = getRequestClientIp(req);
+  const macAddress = resolveRequestMacAddress(ipAddress);
+  return {
+    ipAddress,
+    macAddress,
+    userAgent: String(req?.get?.("user-agent") || "").trim()
+  };
+}
+
+function normalizeUserLoginDeviceResult(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "success") return "success";
+  if (normalized === "blocked") return "blocked";
+  return "pending";
+}
+
+function formatUserLoginDeviceTimestamp(value) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString("tr-TR");
+}
+
+function buildUserLoginDeviceResultLabel(value = "") {
+  const normalized = normalizeUserLoginDeviceResult(value);
+  return USER_LOGIN_DEVICE_RESULT_LABELS[normalized] || USER_LOGIN_DEVICE_RESULT_LABELS.pending;
+}
+
+function normalizeUserLoginDeviceRow(row = {}) {
+  const id = Number(row?.id);
+  const userId = Number(row?.user_id ?? row?.userId);
+  const lastAttemptAt = row?.last_attempt_at ?? row?.lastAttemptAt ?? null;
+  const normalizedResult = normalizeUserLoginDeviceResult(row?.last_login_result ?? row?.lastLoginResult);
+  return {
+    id: Number.isInteger(id) ? id : null,
+    userId: Number.isInteger(userId) ? userId : null,
+    ipAddress: normalizeLoginRequestIp(row?.ip_address ?? row?.ipAddress),
+    macAddress: normalizeLoginRequestMacAddress(row?.mac_address ?? row?.macAddress),
+    ipEnabled: Boolean(row?.ip_enabled ?? row?.ipEnabled),
+    macEnabled: Boolean(row?.mac_enabled ?? row?.macEnabled),
+    lastAttemptAt,
+    lastAttemptAtText: formatUserLoginDeviceTimestamp(lastAttemptAt),
+    lastLoginResult: normalizedResult,
+    lastLoginResultText: buildUserLoginDeviceResultLabel(normalizedResult),
+    lastUserAgent: String(row?.last_user_agent ?? row?.lastUserAgent ?? "").trim()
+  };
+}
+
+function buildUserLoginDeviceMatchScore(row, deviceInfo = {}) {
+  const normalizedRow = normalizeUserLoginDeviceRow(row);
+  const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
+  const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
+  let score = 0;
+
+  if (ipAddress && normalizedRow.ipAddress && ipAddress === normalizedRow.ipAddress) {
+    score += 2;
+  }
+  if (macAddress && normalizedRow.macAddress && macAddress === normalizedRow.macAddress) {
+    score += 3;
+  }
+
+  return score;
+}
+
+function findBestMatchingUserLoginDeviceRow(rows, deviceInfo = {}) {
+  let bestRow = null;
+  let bestScore = 0;
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const score = buildUserLoginDeviceMatchScore(row, deviceInfo);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = row;
+    }
+  });
+
+  return bestRow;
+}
+
+async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
+  const normalizedUserId = Number(userId);
+  const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
+  const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
+
+  if (!Number.isInteger(normalizedUserId) || (!ipAddress && !macAddress)) {
+    return {
+      allowed: false,
+      matchedDevice: null
+    };
+  }
+
+  const result = await pool.query(
+    `
+      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      FROM user_login_devices
+      WHERE user_id = $1
+      ORDER BY last_attempt_at DESC, id DESC
+    `,
+    [normalizedUserId]
+  );
+
+  const matchedDevice =
+    (result.rows || [])
+      .map((row) => normalizeUserLoginDeviceRow(row))
+      .find(
+        (row) =>
+          (row.ipEnabled && ipAddress && row.ipAddress === ipAddress) ||
+          (row.macEnabled && macAddress && row.macAddress === macAddress)
+      ) || null;
+
+  return {
+    allowed: Boolean(matchedDevice),
+    matchedDevice
+  };
+}
+
+async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResult = "pending" }) {
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId)) return null;
+
+  const normalizedIpAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
+  const normalizedMacAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
+  const normalizedUserAgent = String(deviceInfo?.userAgent || "").trim() || null;
+  const normalizedLoginResult = normalizeUserLoginDeviceResult(loginResult);
+
+  const existingResult = await pool.query(
+    `
+      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      FROM user_login_devices
+      WHERE user_id = $1
+      ORDER BY last_attempt_at DESC, id DESC
+    `,
+    [normalizedUserId]
+  );
+
+  const matchedRow = findBestMatchingUserLoginDeviceRow(existingResult.rows || [], {
+    ipAddress: normalizedIpAddress,
+    macAddress: normalizedMacAddress
+  });
+
+  if (matchedRow && Number.isInteger(Number(matchedRow.id))) {
+    const normalizedRow = normalizeUserLoginDeviceRow(matchedRow);
+    const nextIpAddress = normalizedRow.ipAddress || normalizedIpAddress || null;
+    const nextMacAddress = normalizedRow.macAddress || normalizedMacAddress || null;
+    await pool.query(
+      `
+        UPDATE user_login_devices
+        SET ip_address = $2,
+            mac_address = $3,
+            last_attempt_at = now(),
+            last_login_result = $4,
+            last_user_agent = $5,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [normalizedRow.id, nextIpAddress, nextMacAddress, normalizedLoginResult, normalizedUserAgent]
+    );
+    return {
+      ...normalizedRow,
+      ipAddress: nextIpAddress || "",
+      macAddress: nextMacAddress || "",
+      lastLoginResult: normalizedLoginResult,
+      lastLoginResultText: buildUserLoginDeviceResultLabel(normalizedLoginResult),
+      lastUserAgent: normalizedUserAgent || ""
+    };
+  }
+
+  await pool.query(
+    `
+      INSERT INTO user_login_devices (
+        user_id,
+        ip_address,
+        mac_address,
+        ip_enabled,
+        mac_enabled,
+        last_attempt_at,
+        last_login_result,
+        last_user_agent,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, false, false, now(), $4, $5, now(), now())
+    `,
+    [normalizedUserId, normalizedIpAddress || null, normalizedMacAddress || null, normalizedLoginResult, normalizedUserAgent]
+  );
+
+  const createdResult = await pool.query(
+    `
+      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      FROM user_login_devices
+      WHERE user_id = $1
+      ORDER BY id DESC
+      OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+    `,
+    [normalizedUserId]
+  );
+  return normalizeUserLoginDeviceRow(createdResult.rows?.[0] || {});
+}
+
+async function listUserLoginDevicesGroupedByUserId() {
+  const result = await pool.query(
+    `
+      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      FROM user_login_devices
+      ORDER BY user_id DESC, last_attempt_at DESC, id DESC
+    `
+  );
+
+  const grouped = new Map();
+  (result.rows || []).forEach((row) => {
+    const normalizedRow = normalizeUserLoginDeviceRow(row);
+    if (!Number.isInteger(normalizedRow.userId)) return;
+    if (!grouped.has(normalizedRow.userId)) {
+      grouped.set(normalizedRow.userId, []);
+    }
+    grouped.get(normalizedRow.userId).push(normalizedRow);
+  });
+
+  return grouped;
+}
+
 app.get("/login", async (req, res) => {
   if (req.session.user) {
     const targetRoute = await resolveInitialRouteForUser(req.session.user);
@@ -18874,6 +19318,7 @@ app.get("/api/login-lock-status", async (req, res) => {
     return res.json({
       ok: true,
       enabled: false,
+      allowedComputerEnabled: false,
       version: null,
       username: ""
     });
@@ -18882,7 +19327,7 @@ app.get("/api/login-lock-status", async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT username, login_input_lock_enabled, login_input_lock_version
+        SELECT username, login_input_lock_enabled, login_input_lock_version, allowed_computer_enabled
         FROM users
         WHERE username = $1
         OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
@@ -18893,6 +19338,7 @@ app.get("/api/login-lock-status", async (req, res) => {
     return res.json({
       ok: true,
       enabled: Boolean(user?.login_input_lock_enabled),
+      allowedComputerEnabled: Boolean(user?.allowed_computer_enabled),
       version: Number.isInteger(Number(user?.login_input_lock_version))
         ? Number(user.login_input_lock_version)
         : null,
@@ -18918,7 +19364,7 @@ app.post("/login", async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT id, username, password_hash, display_name, login_input_lock_enabled, login_input_lock_version
+        SELECT id, username, password_hash, display_name, allowed_computer_enabled, login_input_lock_enabled, login_input_lock_version
         FROM users
         WHERE username = $1
       `,
@@ -18942,6 +19388,25 @@ app.post("/login", async (req, res) => {
     const ok = await bcrypt.compare(password, storedHash);
     if (!ok) {
       return renderLoginFailure(req, res, 401, "Hatalı giriş.");
+    }
+
+    if (Boolean(user.allowed_computer_enabled)) {
+      const deviceInfo = resolveRequestLoginDeviceInfo(req);
+      const devicePermission = await isUserLoginDeviceAllowed(user.id, deviceInfo);
+      await upsertUserLoginDeviceAttempt({
+        userId: user.id,
+        deviceInfo,
+        loginResult: devicePermission.allowed ? "success" : "blocked"
+      });
+
+      if (!devicePermission.allowed) {
+        return renderLoginFailure(
+          req,
+          res,
+          403,
+          "Bu cihaz icin giris izni yok. Yoneticiden kullanici ekranindaki Izinli Bilgisayar listesinden IP veya MAC onayi isteyin."
+        );
+      }
     }
 
     req.session.user = {
@@ -21815,7 +22280,10 @@ app.get("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
     username_exists: "Bu kullanıcı adı zaten kullanılıyor.",
     update_failed: "Kullanıcı güncellenemedi.",
     create_failed: "Kullanıcı oluşturulamadı.",
-    login_lock_failed: "Login sabitleme ayarı güncellenemedi."
+    login_lock_failed: "Login sabitleme ayarı güncellenemedi.",
+    allowed_computer_failed: "İzinli bilgisayar ayarı güncellenemedi.",
+    device_not_found: "Cihaz kaydı bulunamadı.",
+    device_update_failed: "Cihaz izinleri güncellenemedi."
   };
 
   const okValue = String(req.query.ok || "").trim();
@@ -21827,25 +22295,43 @@ app.get("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
         ? "Kullanıcı güncellendi."
         : okValue === "3"
           ? "Login sabitleme ayarı güncellendi."
+          : okValue === "4"
+            ? "İzinli bilgisayar ayarı güncellendi."
+            : okValue === "5"
+              ? "Cihaz izinleri güncellendi."
           : null;
   const error = errorMessages[errValue] || null;
   const editUserId = Number(req.query.edit);
   const editingUserId = Number.isInteger(editUserId) ? editUserId : null;
+  const openDevicesUserId = Number(req.query.devices);
+  const expandedDeviceUserId = Number.isInteger(openDevicesUserId) ? openDevicesUserId : null;
 
   try {
-    const result = await pool.query(
-      `
-        SELECT id, username, display_name, created_at, login_input_lock_enabled, login_input_lock_version
-        FROM users
-        ORDER BY id DESC
-      `
-    );
+    const [result, userLoginDevicesByUserId] = await Promise.all([
+      pool.query(
+        `
+          SELECT
+            id,
+            username,
+            display_name,
+            created_at,
+            allowed_computer_enabled,
+            login_input_lock_enabled,
+            login_input_lock_version
+          FROM users
+          ORDER BY id DESC
+        `
+      ),
+      listUserLoginDevicesGroupedByUserId()
+    ]);
     res.render("users", {
       user: req.session.user,
       users: result.rows,
+      userLoginDevicesByUserId,
       notice,
       error,
       editingUserId,
+      expandedDeviceUserId,
       active: "users"
     });
   } catch (err) {
@@ -22001,6 +22487,82 @@ app.post("/users/:userId/login-lock", requireAuth, requireMenuAccess("users"), a
   } catch (err) {
     console.error(err);
     return res.redirect("/users?err=login_lock_failed");
+  }
+});
+
+app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("users"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId)) {
+    return res.redirect("/users?err=invalid_user");
+  }
+
+  const enabled = String(req.body?.enabled || "").trim() === "1";
+
+  try {
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET allowed_computer_enabled = $1
+        WHERE id = $2
+      `,
+      [enabled, userId]
+    );
+
+    if ((result?.rowCount || 0) === 0) {
+      return res.redirect("/users?err=user_not_found");
+    }
+
+    return res.redirect(`/users?devices=${userId}&ok=4`);
+  } catch (err) {
+    console.error(err);
+    return res.redirect(`/users?devices=${userId}&err=allowed_computer_failed`);
+  }
+});
+
+app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMenuAccess("users"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  const deviceId = Number(req.params.deviceId);
+  if (!Number.isInteger(userId) || !Number.isInteger(deviceId)) {
+    return res.redirect("/users?err=invalid_user");
+  }
+
+  try {
+    const deviceResult = await pool.query(
+      `
+        SELECT id, user_id, ip_address, mac_address
+        FROM user_login_devices
+        WHERE id = $1 AND user_id = $2
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+      `,
+      [deviceId, userId]
+    );
+    const deviceRow = normalizeUserLoginDeviceRow(deviceResult.rows?.[0] || {});
+    if (!Number.isInteger(deviceRow.id) || deviceRow.userId !== userId) {
+      return res.redirect(`/users?devices=${userId}&err=device_not_found`);
+    }
+
+    const ipEnabled = Boolean(deviceRow.ipAddress) && String(req.body?.ipEnabled || "").trim() === "1";
+    const macEnabled = Boolean(deviceRow.macAddress) && String(req.body?.macEnabled || "").trim() === "1";
+
+    const updateResult = await pool.query(
+      `
+        UPDATE user_login_devices
+        SET ip_enabled = $1,
+            mac_enabled = $2,
+            updated_at = now()
+        WHERE id = $3 AND user_id = $4
+      `,
+      [ipEnabled, macEnabled, deviceId, userId]
+    );
+
+    if ((updateResult?.rowCount || 0) === 0) {
+      return res.redirect(`/users?devices=${userId}&err=device_not_found`);
+    }
+
+    return res.redirect(`/users?devices=${userId}&ok=5`);
+  } catch (err) {
+    console.error(err);
+    return res.redirect(`/users?devices=${userId}&err=device_update_failed`);
   }
 });
 
