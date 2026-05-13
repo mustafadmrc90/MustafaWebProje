@@ -2897,6 +2897,13 @@ function extractBranchIdFromHeaders(headers) {
   return "";
 }
 
+function buildObusMerkezPartnerClusterKey(partnerId = "", clusterLabel = "") {
+  const normalizedPartnerId = String(partnerId || "").trim();
+  const normalizedClusterLabel = extractClusterLabel(clusterLabel);
+  if (!normalizedPartnerId || !normalizedClusterLabel) return "";
+  return `${normalizedClusterLabel}|||${normalizedPartnerId}`;
+}
+
 function extractMembershipTokenDataFromPayload(payload) {
   if (!payload || typeof payload !== "object") return "";
 
@@ -7720,9 +7727,10 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
   }
 }
 
-function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "") {
+function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "", clusterLabel = "") {
   const rows = [];
   const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
+  const normalizedClusterLabel = extractClusterLabel(clusterLabel);
   const partnerIdAliases = [
     "partner-id",
     "partner_id",
@@ -7781,7 +7789,8 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "")
         rows.push({
           partnerId,
           name: "OBUSMERKEZ",
-          branchId
+          branchId,
+          cluster: normalizedClusterLabel
         });
       }
     }
@@ -7798,8 +7807,9 @@ function extractObusMerkezBranchMapFromRows(rows) {
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const partnerId = String(row?.partnerId || "").trim();
     const branchId = String(row?.branchId || "").trim();
-    if (!partnerId || !branchId) return;
-    if (!map.has(partnerId)) map.set(partnerId, branchId);
+    const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.cluster);
+    if (!partnerClusterKey || !branchId) return;
+    if (!map.has(partnerClusterKey)) map.set(partnerClusterKey, branchId);
   });
   return map;
 }
@@ -7808,11 +7818,11 @@ function rememberResolvedObusMerkezBranchIds(targetMap, payload) {
   if (!(targetMap instanceof Map) || !payload || typeof payload !== "object") return;
 
   if (payload.map instanceof Map) {
-    payload.map.forEach((branchIdValue, partnerIdValue) => {
-      const partnerId = String(partnerIdValue || "").trim();
+    payload.map.forEach((branchIdValue, partnerClusterKeyValue) => {
+      const partnerClusterKey = String(partnerClusterKeyValue || "").trim();
       const branchId = String(branchIdValue || "").trim();
-      if (!partnerId || !branchId || targetMap.has(partnerId)) return;
-      targetMap.set(partnerId, branchId);
+      if (!partnerClusterKey || !branchId || targetMap.has(partnerClusterKey)) return;
+      targetMap.set(partnerClusterKey, branchId);
     });
   }
 
@@ -7820,8 +7830,9 @@ function rememberResolvedObusMerkezBranchIds(targetMap, payload) {
     payload.rows.forEach((row) => {
       const partnerId = String(row?.partnerId || "").trim();
       const branchId = String(row?.branchId || "").trim();
-      if (!partnerId || !branchId || targetMap.has(partnerId)) return;
-      targetMap.set(partnerId, branchId);
+      const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.cluster);
+      if (!partnerClusterKey || !branchId || targetMap.has(partnerClusterKey)) return;
+      targetMap.set(partnerClusterKey, branchId);
     });
   }
 }
@@ -7881,18 +7892,23 @@ async function fetchObusMerkezBranchMapForTarget({
   if (loginObusMerkezBranchKey) {
     const map = new Map();
     const rows = [];
+    const partnerClusterKey = buildObusMerkezPartnerClusterKey(normalizedFallbackPartnerId, cluster);
     if (normalizedFallbackPartnerId) {
-      map.set(normalizedFallbackPartnerId, loginObusMerkezBranchKey);
+      if (partnerClusterKey) {
+        map.set(partnerClusterKey, loginObusMerkezBranchKey);
+      }
       rows.push({
         partnerId: normalizedFallbackPartnerId,
         name: "OBUSMERKEZ",
-        branchId: loginObusMerkezBranchKey
+        branchId: loginObusMerkezBranchKey,
+        cluster
       });
     } else {
       rows.push({
         partnerId: "",
         name: "OBUSMERKEZ",
-        branchId: loginObusMerkezBranchKey
+        branchId: loginObusMerkezBranchKey,
+        cluster
       });
     }
     return { cluster, map, rows, error: null, serviceLogs, failedServiceLog: null };
@@ -7963,7 +7979,7 @@ async function fetchObusMerkezBranchMapForTarget({
       };
     }
 
-    const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId);
+    const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId, cluster);
     const map = extractObusMerkezBranchMapFromRows(rows);
     return {
       cluster,
@@ -8021,12 +8037,15 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     ...row,
     ObusMerkezSubeID: String(row?.ObusMerkezSubeID || "").trim()
   }));
-  const resolvedByPartnerId = new Map();
+  const resolvedByPartnerClusterKey = new Map();
   enrichedRows.forEach((row) => {
     const partnerId = String(row?.id || "").trim();
     const branchId = String(row?.ObusMerkezSubeID || "").trim();
-    if (!partnerId || !branchId) return;
-    if (!resolvedByPartnerId.has(partnerId)) resolvedByPartnerId.set(partnerId, branchId);
+    const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
+    if (!partnerClusterKey || !branchId) return;
+    if (!resolvedByPartnerClusterKey.has(partnerClusterKey)) {
+      resolvedByPartnerClusterKey.set(partnerClusterKey, branchId);
+    }
   });
   const fetchResultPromiseCache = new Map();
 
@@ -8049,6 +8068,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const partnerId = String(row?.id || "").trim();
       const partnerCode = String(row?.code || "").trim();
       const clusterLabel = extractClusterLabel(row?.source);
+      const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, clusterLabel);
       const rowRef = `${clusterLabel || "cluster?"} / ${partnerCode || "code?"} / ${partnerId || "id?"}`;
       const isDebugTarget = isAllCompaniesObusMerkezDebugTarget(row);
       if (isDebugTarget) {
@@ -8069,7 +8089,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
           errorMessage: `${rowRef}: partner-id boş.`
         };
       }
-      const preResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      const preResolvedBranchId = String(resolvedByPartnerClusterKey.get(partnerClusterKey) || "").trim();
       if (preResolvedBranchId) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("resolved-from-shared-cache-before-fetch", {
@@ -8114,7 +8134,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         );
       }
       const result = await fetchResultPromiseCache.get(fetchCacheKey);
-      rememberResolvedObusMerkezBranchIds(resolvedByPartnerId, result);
+      rememberResolvedObusMerkezBranchIds(resolvedByPartnerClusterKey, result);
       const resultTraceText = buildObusServiceTraceText(
         result?.failedServiceLog || getLastObusServiceTrace(result?.serviceLogs),
         result?.error || ""
@@ -8145,7 +8165,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
         };
       }
 
-      const sharedResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      const sharedResolvedBranchId = String(resolvedByPartnerClusterKey.get(partnerClusterKey) || "").trim();
       if (sharedResolvedBranchId) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("resolved-from-shared-cache-after-fetch", {
@@ -8160,7 +8180,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       }
 
       const mapBranchId =
-        result.map instanceof Map ? String(result.map.get(partnerId) || "").trim() : "";
+        result.map instanceof Map ? String(result.map.get(partnerClusterKey) || "").trim() : "";
       if (mapBranchId) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("resolved-from-map", { rowRef, branchId: mapBranchId });
@@ -8241,14 +8261,15 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     const row = enrichedRows[index];
     if (!row) return;
     const partnerId = String(row?.id || "").trim();
+    const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
     const isDebugTarget = isAllCompaniesObusMerkezDebugTarget(row);
 
     const resolvedBranchId = String(result?.branchId || "").trim();
     if (resolvedBranchId) {
       row.ObusMerkezSubeID = resolvedBranchId;
       row.ObusMerkezSubeIDDebug = "";
-      if (partnerId && !resolvedByPartnerId.has(partnerId)) {
-        resolvedByPartnerId.set(partnerId, resolvedBranchId);
+      if (partnerClusterKey && !resolvedByPartnerClusterKey.has(partnerClusterKey)) {
+        resolvedByPartnerClusterKey.set(partnerClusterKey, resolvedBranchId);
       }
       if (isDebugTarget) {
         logAllCompaniesObusMerkezDebug("resolved-after-worker", {
@@ -8262,7 +8283,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     }
 
     if (partnerId) {
-      const siblingResolvedBranchId = String(resolvedByPartnerId.get(partnerId) || "").trim();
+      const siblingResolvedBranchId = String(resolvedByPartnerClusterKey.get(partnerClusterKey) || "").trim();
       if (siblingResolvedBranchId) {
         row.ObusMerkezSubeID = siblingResolvedBranchId;
         row.ObusMerkezSubeIDDebug = "";
@@ -8314,13 +8335,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
     }
     const fallbackResult = await collectObusMerkezBranchRowsForAllCompanies(enrichedRows);
     const fallbackRows = Array.isArray(fallbackResult?.rows) ? fallbackResult.rows : [];
-    const fallbackMapByPartnerId = new Map();
+    const fallbackMapByPartnerClusterKey = new Map();
     fallbackRows.forEach((row) => {
       const partnerId = String(row?.partnerId || "").trim();
       const branchId = String(row?.branchId || "").trim();
-      if (!partnerId || !branchId) return;
-      if (!fallbackMapByPartnerId.has(partnerId)) {
-        fallbackMapByPartnerId.set(partnerId, branchId);
+      const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.cluster);
+      if (!partnerClusterKey || !branchId) return;
+      if (!fallbackMapByPartnerClusterKey.has(partnerClusterKey)) {
+        fallbackMapByPartnerClusterKey.set(partnerClusterKey, branchId);
       }
     });
 
@@ -8328,13 +8350,14 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
       const row = enrichedRows[item.index];
       if (!row || String(row?.ObusMerkezSubeID || "").trim()) return;
       const partnerId = String(item.partnerId || "").trim();
-      if (!partnerId) return;
-      const fallbackBranchId = String(fallbackMapByPartnerId.get(partnerId) || "").trim();
+      const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
+      if (!partnerClusterKey) return;
+      const fallbackBranchId = String(fallbackMapByPartnerClusterKey.get(partnerClusterKey) || "").trim();
       if (!fallbackBranchId) return;
       row.ObusMerkezSubeID = fallbackBranchId;
       row.ObusMerkezSubeIDDebug = "";
-      if (!resolvedByPartnerId.has(partnerId)) {
-        resolvedByPartnerId.set(partnerId, fallbackBranchId);
+      if (!resolvedByPartnerClusterKey.has(partnerClusterKey)) {
+        resolvedByPartnerClusterKey.set(partnerClusterKey, fallbackBranchId);
       }
       if (item.isDebugTarget === true) {
         logAllCompaniesObusMerkezDebug("resolved-from-fallback", {
@@ -21263,19 +21286,50 @@ app.post(
       }
 
       const cacheRows = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
-      const knownBranchIdByPartnerId = new Map();
+      const clusterSetByPartnerId = new Map();
+      cacheRows.forEach((row) => {
+        const partnerId = String(row?.id || "").trim();
+        const clusterLabel = extractClusterLabel(row?.source);
+        if (!partnerId || !clusterLabel) return;
+        if (!clusterSetByPartnerId.has(partnerId)) {
+          clusterSetByPartnerId.set(partnerId, new Set());
+        }
+        clusterSetByPartnerId.get(partnerId).add(clusterLabel);
+      });
+      const forceRefreshPartnerClusterKeys = new Set();
+      clusterSetByPartnerId.forEach((clusterSet, partnerId) => {
+        if (!(clusterSet instanceof Set) || clusterSet.size <= 1) return;
+        clusterSet.forEach((clusterLabel) => {
+          const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, clusterLabel);
+          if (partnerClusterKey) forceRefreshPartnerClusterKeys.add(partnerClusterKey);
+        });
+      });
+      const knownBranchIdByPartnerClusterKey = new Map();
       cacheRows.forEach((row) => {
         const partnerId = String(row?.id || "").trim();
         const branchId = String(row?.ObusMerkezSubeID || "").trim();
-        if (!partnerId || !branchId || knownBranchIdByPartnerId.has(partnerId)) return;
-        knownBranchIdByPartnerId.set(partnerId, branchId);
+        const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
+        if (!partnerClusterKey || !branchId || knownBranchIdByPartnerClusterKey.has(partnerClusterKey)) return;
+        knownBranchIdByPartnerClusterKey.set(partnerClusterKey, branchId);
       });
       const targetRows = cacheRows
-        .filter((row) => !String(row?.ObusMerkezSubeID || "").trim())
+        .filter((row) => {
+          const partnerClusterKey = buildObusMerkezPartnerClusterKey(String(row?.id || "").trim(), row?.source);
+          if (partnerClusterKey && forceRefreshPartnerClusterKeys.has(partnerClusterKey)) return true;
+          return !String(row?.ObusMerkezSubeID || "").trim();
+        })
         .map((row) => {
           const partnerId = String(row?.id || "").trim();
-          const cachedBranchId = String(knownBranchIdByPartnerId.get(partnerId) || "").trim();
-          if (!partnerId || !cachedBranchId) return row;
+          const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
+          if (partnerClusterKey && forceRefreshPartnerClusterKeys.has(partnerClusterKey)) {
+            return {
+              ...row,
+              ObusMerkezSubeID: "",
+              ObusMerkezSubeIDDebug: ""
+            };
+          }
+          const cachedBranchId = String(knownBranchIdByPartnerClusterKey.get(partnerClusterKey) || "").trim();
+          if (!partnerClusterKey || !cachedBranchId) return row;
           return {
             ...row,
             ObusMerkezSubeID: cachedBranchId
