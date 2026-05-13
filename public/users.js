@@ -6,6 +6,7 @@
   const panelButtons = Array.from(document.querySelectorAll("[data-user-device-panel-toggle='1']"));
   const panelRows = Array.from(document.querySelectorAll("[data-user-device-panel]"));
   const feedbackBackdrop = document.querySelector("[data-user-feedback-backdrop]");
+  const feedbackTitleEl = document.querySelector("#user-feedback-title");
   const feedbackMessageEl = document.querySelector("[data-user-feedback-message]");
   const feedbackCloseButton = document.querySelector("[data-user-feedback-close='1']");
 
@@ -37,8 +38,19 @@
     document.body.classList.remove("user-feedback-open");
   };
 
-  const openFeedback = (message) => {
-    if (!(feedbackBackdrop instanceof HTMLElement) || !(feedbackMessageEl instanceof HTMLElement)) return;
+  const openFeedback = (message, { title = "Bilgi" } = {}) => {
+    const normalizedMessage = String(message || "").trim();
+    if (!normalizedMessage) return;
+
+    if (!(feedbackBackdrop instanceof HTMLElement) || !(feedbackMessageEl instanceof HTMLElement)) {
+      window.alert(normalizedMessage);
+      return;
+    }
+
+    if (feedbackTitleEl instanceof HTMLElement) {
+      feedbackTitleEl.textContent = String(title || "Bilgi").trim() || "Bilgi";
+    }
+
     feedbackMessageEl.textContent = String(message || "").trim();
     feedbackBackdrop.hidden = false;
     feedbackBackdrop.classList.add("active");
@@ -50,26 +62,36 @@
   };
 
   const buildSuccessMessageForToggle = (toggle, data) => {
+    const responseMessage = String(data?.message || "").trim();
     const toggleName = String(toggle?.name || "").trim();
     if (toggleName === "enabled" && toggle.hasAttribute("data-user-allowed-computer-toggle")) {
-      return toggle.checked
-        ? String(data?.message || "Izinli Bilgisayar aktif edildi. Bu kullanici artik izin verilen cihazlarla giris yapabilir.")
-        : "";
+      return (
+        responseMessage ||
+        (toggle.checked
+          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece izin verilen cihazlarla giris yapabilir."
+          : "Izinli Bilgisayar kapatildi. Bu kullanici yeniden tum cihazlardan giris yapabilir.")
+      );
     }
 
     if (toggleName === "ipEnabled") {
-      return toggle.checked
-        ? "IP adresi aktif edildi. Bu IP adresi ile giris yapilabilir."
-        : "";
+      return (
+        responseMessage ||
+        (toggle.checked
+          ? "IP adresi aktif edildi. Bu IP adresi ile giris yapilabilir."
+          : "IP adresi izni kapatildi.")
+      );
     }
 
     if (toggleName === "macEnabled") {
-      return toggle.checked
-        ? "MAC adresi aktif edildi. Bu MAC adresi ile giris yapilabilir."
-        : "";
+      return (
+        responseMessage ||
+        (toggle.checked
+          ? "MAC adresi aktif edildi. Bu MAC adresi ile giris yapilabilir."
+          : "MAC adresi izni kapatildi.")
+      );
     }
 
-    return toggle.checked ? String(data?.message || "Ayar guncellendi.") : "";
+    return responseMessage || "Ayar guncellendi.";
   };
 
   const submitAjaxToggle = async (toggle) => {
@@ -99,11 +121,13 @@
 
       const successMessage = buildSuccessMessageForToggle(toggle, data);
       if (successMessage) {
-        openFeedback(successMessage);
+        openFeedback(successMessage, { title: "Bilgi" });
       }
     } catch (err) {
       toggle.checked = previousChecked;
-      openFeedback(String(err?.message || "Ayar guncellenemedi.").trim() || "Ayar guncellenemedi.");
+      openFeedback(String(err?.message || "Ayar guncellenemedi.").trim() || "Ayar guncellenemedi.", {
+        title: "Uyari"
+      });
     } finally {
       siblingToggles.forEach((item) => {
         item.disabled = false;
