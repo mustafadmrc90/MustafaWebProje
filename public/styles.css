@@ -5677,6 +5677,72 @@ button.ghost {
   flex-wrap: wrap;
 }
 
+.users-page-grid {
+  grid-template-columns: minmax(280px, 0.78fr) minmax(0, 2.22fr);
+  align-items: start;
+}
+
+.users-create-card,
+.users-list-card {
+  min-width: 0;
+}
+
+.users-list-card {
+  overflow: hidden;
+}
+
+.users-table {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.users-main-row {
+  grid-template-columns: minmax(120px, 0.7fr) minmax(160px, 0.9fr) minmax(0, 2.7fr);
+  gap: 10px;
+}
+
+.users-main-row > span {
+  min-width: 0;
+}
+
+.users-main-row > span:not(.user-row-actions) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.users-page .users-main-row {
+  padding: 11px 12px;
+}
+
+.users-page .user-row-actions {
+  min-width: 0;
+  gap: 6px;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.users-page .user-row-actions > * {
+  flex: 0 0 auto;
+}
+
+.users-page .user-row-actions .button-link,
+.users-page .user-row-actions .user-login-lock-toggle {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.users-page .user-row-actions .button-link {
+  line-height: 1.15;
+}
+
+@media (max-width: 1180px) {
+  .users-page-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .user-login-lock-form {
   margin: 0;
 }
@@ -5814,6 +5880,26 @@ button.ghost {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.user-feedback-modal {
+  width: min(520px, 92vw);
+}
+
+.user-feedback-message {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.user-feedback-actions {
+  display: flex;
+  justify-content: center;
+}
+
+body.user-feedback-open {
+  overflow: hidden;
 }
 
 .user-edit-row {

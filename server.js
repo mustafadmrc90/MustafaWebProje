@@ -22500,6 +22500,9 @@ app.post("/users/:userId/login-lock", requireAuth, requireMenuAccess("users"), a
 app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("users"), async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isInteger(userId)) {
+    if (requestWantsJson(req)) {
+      return res.status(400).json({ ok: false, error: "Geçersiz kullanıcı seçimi." });
+    }
     return res.redirect("/users?err=invalid_user");
   }
 
@@ -22516,12 +22519,28 @@ app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("user
     );
 
     if ((result?.rowCount || 0) === 0) {
+      if (requestWantsJson(req)) {
+        return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı." });
+      }
       return res.redirect("/users?err=user_not_found");
+    }
+
+    if (requestWantsJson(req)) {
+      return res.json({
+        ok: true,
+        enabled,
+        message: enabled
+          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece izin verilen IP veya MAC ile giris yapabilir."
+          : "Izinli Bilgisayar kapatildi."
+      });
     }
 
     return res.redirect(`/users?devices=${userId}&ok=4`);
   } catch (err) {
     console.error(err);
+    if (requestWantsJson(req)) {
+      return res.status(500).json({ ok: false, error: "Izinli bilgisayar ayari guncellenemedi." });
+    }
     return res.redirect(`/users?devices=${userId}&err=allowed_computer_failed`);
   }
 });
@@ -22530,6 +22549,9 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
   const userId = Number(req.params.userId);
   const deviceId = Number(req.params.deviceId);
   if (!Number.isInteger(userId) || !Number.isInteger(deviceId)) {
+    if (requestWantsJson(req)) {
+      return res.status(400).json({ ok: false, error: "Geçersiz kullanıcı seçimi." });
+    }
     return res.redirect("/users?err=invalid_user");
   }
 
@@ -22545,6 +22567,9 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
     );
     const deviceRow = normalizeUserLoginDeviceRow(deviceResult.rows?.[0] || {});
     if (!Number.isInteger(deviceRow.id) || deviceRow.userId !== userId) {
+      if (requestWantsJson(req)) {
+        return res.status(404).json({ ok: false, error: "Cihaz kaydı bulunamadı." });
+      }
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
     }
 
@@ -22563,12 +22588,30 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
     );
 
     if ((updateResult?.rowCount || 0) === 0) {
+      if (requestWantsJson(req)) {
+        return res.status(404).json({ ok: false, error: "Cihaz kaydı bulunamadı." });
+      }
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
+    }
+
+    if (requestWantsJson(req)) {
+      return res.json({
+        ok: true,
+        ipEnabled,
+        macEnabled,
+        message:
+          ipEnabled || macEnabled
+            ? "Cihaz giris izni guncellendi."
+            : "Cihaz giris izinleri kapatildi."
+      });
     }
 
     return res.redirect(`/users?devices=${userId}&ok=5`);
   } catch (err) {
     console.error(err);
+    if (requestWantsJson(req)) {
+      return res.status(500).json({ ok: false, error: "Cihaz izinleri guncellenemedi." });
+    }
     return res.redirect(`/users?devices=${userId}&err=device_update_failed`);
   }
 });

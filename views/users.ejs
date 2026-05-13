@@ -7,7 +7,7 @@
     <link rel="icon" href="/public/favicon.png" />
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
-  <body class="dashboard layout">
+  <body class="dashboard layout users-page">
     <%- include("partials/sidebar", { active }) %>
 
     <section class="content">
@@ -40,8 +40,8 @@
         <div class="alert inline-alert"><%= error %></div>
       <% } %>
 
-      <div class="panel-grid">
-        <section class="table-card panel-card">
+      <div class="panel-grid users-page-grid">
+        <section class="table-card panel-card users-create-card">
           <h2>Yeni Kullanıcı</h2>
           <form class="form-grid" method="post" action="/users">
             <label>
@@ -60,12 +60,12 @@
           </form>
         </section>
 
-        <section class="table-card panel-card">
+        <section class="table-card panel-card users-list-card">
           <div class="table-head">
             <h2>Mevcut Kullanıcılar</h2>
           </div>
-          <div class="table">
-            <div class="row head">
+          <div class="table users-table">
+            <div class="row head users-main-row">
               <span>Kullanıcı</span>
               <span>Görünen İsim</span>
               <span>İşlemler</span>
@@ -73,7 +73,7 @@
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
               <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
-              <div class="row">
+              <div class="row users-main-row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
                 <span class="user-row-actions">
@@ -90,7 +90,12 @@
                       <span>Login Sabitle</span>
                     </label>
                   </form>
-                  <form class="user-login-lock-form" method="post" action="/users/<%= u.id %>/allowed-computer">
+                  <form
+                    class="user-login-lock-form"
+                    method="post"
+                    action="/users/<%= u.id %>/allowed-computer"
+                    data-user-ajax-form="allowed-computer"
+                  >
                     <input type="hidden" name="enabled" value="0" />
                     <label class="user-login-lock-toggle">
                       <input
@@ -146,6 +151,7 @@
                           class="user-device-item"
                           method="post"
                           action="/users/<%= u.id %>/login-devices/<%= device.id %>/update"
+                          data-user-ajax-form="device-permission"
                         >
                           <div class="user-device-item-main">
                             <div class="user-device-item-values">
@@ -226,6 +232,19 @@
         </section>
       </div>
     </section>
+
+    <div class="modal-backdrop user-feedback-backdrop" data-user-feedback-backdrop hidden aria-hidden="true">
+      <div class="modal user-feedback-modal" role="dialog" aria-modal="true" aria-labelledby="user-feedback-title">
+        <div class="modal-header">
+          <h2 id="user-feedback-title">Uyarı</h2>
+        </div>
+        <p class="user-feedback-message" data-user-feedback-message></p>
+        <div class="user-feedback-actions">
+          <button type="button" class="button-link" data-user-feedback-close="1">Tamam</button>
+        </div>
+      </div>
+    </div>
+
     <script src="/public/app.js" defer></script>
     <script src="/public/users.js" defer></script>
   </body>
