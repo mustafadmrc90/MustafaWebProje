@@ -401,7 +401,7 @@ const OBUS_USER_DEACTIVATE_API_AUTH =
 const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "6", 10) || 6;
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "8", 10) || 8;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
   String(process.env.OBUS_USER_DEACTIVATE_REQUEST_DATE || "2026-05-13 08:30:02").trim() || "2026-05-13 08:30:02";
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
@@ -10987,6 +10987,10 @@ function pushObusLiveJobEvent(job, event) {
     detailText: String(normalizedEvent.detailText || "").trim(),
     exists:
       normalizedEvent?.exists === true ? true : normalizedEvent?.exists === false ? false : null,
+    meta:
+      normalizedEvent?.meta && typeof normalizedEvent.meta === "object" && !Array.isArray(normalizedEvent.meta)
+        ? normalizedEvent.meta
+        : null,
     logLines: (Array.isArray(normalizedEvent.logLines) ? normalizedEvent.logLines : [])
       .map((item) => String(item || "").trim())
       .filter(Boolean),
@@ -15953,6 +15957,285 @@ async function fetchObusUserDeactivateSearchReport({ username = "", partnerItems
   return report;
 }
 
+function buildObusUserDeactivateCompanyEventKey(company = {}) {
+  const code = String(company?.code || "").trim() || "Firma";
+  const partnerId = String(company?.id || "").trim() || "partner";
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    "cluster";
+  return [code, partnerId, clusterLabel].join("|||");
+}
+
+function buildObusUserDeactivateCompanyEventLabel(company = {}) {
+  const code = String(company?.code || "").trim() || "Firma";
+  const partnerId = String(company?.id || "").trim() || "-";
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    "cluster";
+  return `${code} / ${partnerId} / ${clusterLabel}`;
+}
+
+function buildObusUserDeactivateMatchEventKey(row = {}) {
+  return [
+    "match",
+    String(row?.code || "").trim() || "Firma",
+    String(row?.partnerId || "").trim() || "partner",
+    String(row?.userId || "").trim() || String(row?.username || "").trim() || "user"
+  ].join("|||");
+}
+
+async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems = [] }) {
+  const normalizedSearchUsername = String(username || "").trim();
+  if (!normalizedSearchUsername) {
+    finishObusLiveJob(job, "Kullanıcı adı zorunludur.");
+    return;
+  }
+
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    finishObusLiveJob(
+      job,
+      buildMissingMacOsKeychainSecretsMessage([
+        "OBUS_USER_CREATE_LOGIN_USERNAME",
+        "OBUS_USER_CREATE_LOGIN_PASSWORD"
+      ])
+    );
+    return;
+  }
+
+  const normalizedCompanies = Array.isArray(partnerItems) ? partnerItems : [];
+  if (normalizedCompanies.length === 0) {
+    finishObusLiveJob(job, "Sorgulanacak firma listesi bulunamadı.");
+    return;
+  }
+
+  const sessionCache = new Map();
+  let matchedCount = 0;
+  let totalUserCount = 0;
+  let activeUserCount = 0;
+  const failureSamples = [];
+  job.totalCount = normalizedCompanies.length;
+
+  setObusLiveJobSummary(job, {
+    username: normalizedSearchUsername,
+    scannedCompanyCount: normalizedCompanies.length,
+    successCompanyCount: 0,
+    failureCompanyCount: 0,
+    matchedUserCount: 0,
+    totalUserCount: 0,
+    activeUserCount: 0,
+    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2)
+  });
+
+  await runWithConcurrency(
+    normalizedCompanies,
+    OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
+    async (company) => {
+      const eventKey = buildObusUserDeactivateCompanyEventKey(company);
+      const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
+      const clusterLabel =
+        normalizeObusClusterLabel(company?.cluster || "") ||
+        normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+        "cluster";
+      const requestUrl = buildMembershipGetUsersWithoutPermissionsUrl(
+        buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
+        clusterLabel
+      );
+
+      pushObusLiveJobEvent(job, {
+        key: eventKey,
+        label: eventLabel,
+        statusKind: "pending",
+        message: "Firma sorgulanıyor.",
+        detailText: [
+          `cluster=${clusterLabel}`,
+          requestUrl ? `url=${truncateObusDebugText(String(requestUrl || "").trim(), 120)}` : ""
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        meta: {
+          type: "company",
+          code: String(company?.code || "").trim(),
+          partnerId: String(company?.id || "").trim(),
+          clusterLabel
+        }
+      });
+
+      const result = await fetchObusUserDeactivateCompanyResult({
+        company,
+        searchUsername: normalizedSearchUsername,
+        loginCredentials,
+        sessionCache
+      });
+
+      if (result.ok) {
+        totalUserCount += Number(result.totalUserCount || 0);
+        activeUserCount += Number(result.activeUserCount || 0);
+
+        const matchedRows = Array.isArray(result.matchedRows) ? result.matchedRows : [];
+        matchedRows.forEach((row) => {
+          matchedCount += 1;
+          pushObusLiveJobEvent(job, {
+            key: buildObusUserDeactivateMatchEventKey(row),
+            label: `${String(row?.code || "").trim() || "Firma"} / ${String(row?.username || "").trim() || "-"}`,
+            statusKind: "info",
+            message: "Eşleşen kullanıcı bulundu.",
+            detailText: [
+              `cluster=${clusterLabel}`,
+              String(row?.partnerId || "").trim() ? `partner-id=${String(row.partnerId).trim()}` : ""
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            meta: {
+              type: "match",
+              userId: String(row?.userId || "").trim(),
+              partnerId: String(row?.partnerId || "").trim(),
+              code: String(row?.code || "").trim(),
+              username: String(row?.username || "").trim(),
+              isActiveText: String(row?.isActiveText || "").trim() || "true"
+            }
+          });
+        });
+
+        pushObusLiveJobEvent(job, {
+          key: eventKey,
+          label: eventLabel,
+          statusKind: "success",
+          ok: true,
+          message:
+            matchedRows.length > 0
+              ? `${matchedRows.length} eşleşen aktif kullanıcı bulundu.`
+              : "Eşleşen aktif kullanıcı bulunamadı.",
+          detailText: [
+            `cluster=${clusterLabel}`,
+            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+            `kullanıcı=${Number(result.totalUserCount || 0)}`,
+            `aktif=${Number(result.activeUserCount || 0)}`
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          meta: {
+            type: "company",
+            code: String(result?.code || "").trim(),
+            partnerId: String(result?.partnerId || "").trim(),
+            clusterLabel,
+            matchedCount: matchedRows.length,
+            totalUserCount: Number(result.totalUserCount || 0),
+            activeUserCount: Number(result.activeUserCount || 0)
+          }
+        });
+      } else {
+        pushObusLiveJobEvent(job, {
+          key: eventKey,
+          label: eventLabel,
+          statusKind: "failure",
+          ok: false,
+          error: String(result.error || "Firma sorgusu başarısız.").trim(),
+          errorDetail: String(result.errorDetail || "").trim(),
+          detailText: [
+            `cluster=${clusterLabel}`,
+            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+            String(result?.requestUrl || "").trim()
+              ? `url=${truncateObusDebugText(String(result.requestUrl || "").trim(), 120)}`
+              : ""
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          meta: {
+            type: "company",
+            code: String(result?.code || "").trim(),
+            partnerId: String(result?.partnerId || "").trim(),
+            clusterLabel
+          }
+        });
+
+        pushObusUserCreateSample(failureSamples, {
+          company: String(result?.code || "Firma").trim(),
+          username: normalizedSearchUsername,
+          error: String(result?.error || "Firma sorgusu başarısız.").trim()
+        });
+      }
+
+      setObusLiveJobSummary(job, {
+        username: normalizedSearchUsername,
+        scannedCompanyCount: normalizedCompanies.length,
+        successCompanyCount: Number(job.successCount || 0),
+        failureCompanyCount: Number(job.failureCount || 0),
+        matchedUserCount: matchedCount,
+        totalUserCount,
+        activeUserCount,
+        failureSamples,
+        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2)
+      });
+    }
+  );
+
+  finishObusLiveJob(job);
+}
+
+async function startObusUserDeactivateSearchJob({ username = "", ownerUserId = 0 }) {
+  const normalizedUsername = String(username || "").trim();
+  if (!normalizedUsername) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: "Kullanıcı adı zorunludur."
+    };
+  }
+
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: partnerError
+    };
+  }
+
+  if (!Array.isArray(partnerItems) || partnerItems.length === 0) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: "Tüm Firmalar SQL kaydı boş. Önce firma listesini güncelleyin."
+    };
+  }
+
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: buildMissingMacOsKeychainSecretsMessage([
+        "OBUS_USER_CREATE_LOGIN_USERNAME",
+        "OBUS_USER_CREATE_LOGIN_PASSWORD"
+      ])
+    };
+  }
+
+  const job = createObusLiveJob({
+    type: "obus-user-deactivate",
+    ownerUserId: Number(ownerUserId || 0),
+    totalCount: partnerItems.length
+  });
+
+  setImmediate(() => {
+    runObusUserDeactivateSearchJob(job, {
+      username: normalizedUsername,
+      partnerItems
+    }).catch((err) => {
+      finishObusLiveJob(job, `Kullanıcı sorgulama tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
+    });
+  });
+
+  return {
+    ok: true,
+    job,
+    companyCount: partnerItems.length
+  };
+}
+
 function buildUetdsPricesRequestBody({ taskData = "", sessionId = "", deviceId = "", token = "" } = {}) {
   return {
     data: String(taskData || "").trim(),
@@ -19245,6 +19528,36 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
   return res.json(readObusLiveJobSnapshot(job, cursor));
 });
 
+app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
+  try {
+    const username = String(req.body?.username || "").trim();
+    const startResult = await startObusUserDeactivateSearchJob({
+      username,
+      ownerUserId: req.session?.user?.id || 0
+    });
+
+    if (!startResult.ok || !startResult.job) {
+      return res.status(startResult.statusCode || 400).json({
+        ok: false,
+        error: String(startResult.error || "Sorgu başlatılamadı.").trim()
+      });
+    }
+
+    return res.json({
+      ok: true,
+      jobId: String(startResult.job.id || "").trim(),
+      totalCount: Number(startResult.job.totalCount || 0),
+      createdAt: Number(startResult.job.createdAt || 0),
+      companyCount: Number(startResult.companyCount || 0)
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: `Sorgu başlatılamadı: ${err?.message || "Bilinmeyen hata"}`
+    });
+  }
+});
+
 app.post("/api/journey-search/stations", requireAuth, requireMenuAccess("journey-search"), async (req, res) => {
   try {
     const selectedCompanyValue = String(req.body?.company || "").trim();
@@ -19599,6 +19912,8 @@ app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-c
 
 app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   const { partnerError } = await loadAuthorizedLinesCompanies();
+  const jobId = String(req.query.jobId || "").trim();
+  const liveJob = jobId ? readObusLiveJob(jobId, Number(req.session?.user?.id || 0)) : null;
   res.render("general-obus-user-deactivate", {
     user: req.session.user,
     active: "obus-user-deactivate",
@@ -19606,31 +19921,52 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
     filters: {
       username: String(req.query.username || "").trim()
     },
-    report: buildObusUserDeactivateReportModel()
+    report: buildObusUserDeactivateReportModel(),
+    liveJob: liveJob
+      ? {
+          id: String(liveJob.id || "").trim(),
+          done: Boolean(liveJob.done),
+          createdAt: Number(liveJob.createdAt || 0),
+          updatedAt: Number(liveJob.updatedAt || 0),
+          finishedAt: Number(liveJob.finishedAt || 0),
+          totalCount: Number(liveJob.totalCount || 0),
+          processedCount: Number(liveJob.processedCount || 0),
+          successCount: Number(liveJob.successCount || 0),
+          failureCount: Number(liveJob.failureCount || 0)
+        }
+      : null
   });
 });
 
 app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
-  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
-  const filters = {
-    username: String(req.body?.username || "").trim()
-  };
-  const report = await fetchObusUserDeactivateSearchReport({
-    username: filters.username,
-    partnerItems
+  const username = String(req.body?.username || "").trim();
+  const startResult = await startObusUserDeactivateSearchJob({
+    username,
+    ownerUserId: req.session?.user?.id || 0
   });
 
-  if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
-    report.error = partnerError;
+  if (!startResult.ok || !startResult.job) {
+    const { partnerError } = await loadAuthorizedLinesCompanies();
+    const report = buildObusUserDeactivateReportModel();
+    report.requested = true;
+    report.error = String(startResult.error || partnerError || "Sorgu başlatılamadı.").trim();
+    return res.render("general-obus-user-deactivate", {
+      user: req.session.user,
+      active: "obus-user-deactivate",
+      partnerError,
+      filters: {
+        username
+      },
+      report,
+      liveJob: null
+    });
   }
 
-  res.render("general-obus-user-deactivate", {
-    user: req.session.user,
-    active: "obus-user-deactivate",
-    partnerError,
-    filters,
-    report
-  });
+  return res.redirect(
+    `/general/obus-user-deactivate?username=${encodeURIComponent(username)}&jobId=${encodeURIComponent(
+      String(startResult.job.id || "").trim()
+    )}`
+  );
 });
 
 app.get("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {

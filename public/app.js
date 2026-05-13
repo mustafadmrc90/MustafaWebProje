@@ -877,6 +877,7 @@
   const initAllowedLinesLoading = () => {
     const form = document.querySelector(".allowed-lines-form");
     if (!form) return;
+    if (form.getAttribute("data-allowed-lines-ajax") === "1") return;
     if (form.dataset.loadingBound === "1") return;
     form.dataset.loadingBound = "1";
 
@@ -981,6 +982,457 @@
         loadingMessage.hidden = false;
       }
     });
+  };
+
+  const initObusUserDeactivatePage = () => {
+    const root = document.querySelector("[data-obus-user-deactivate-page='1']");
+    if (!root) return;
+    if (root.dataset.obusUserDeactivateBound === "1") return;
+    root.dataset.obusUserDeactivateBound = "1";
+
+    const form = root.querySelector("[data-obus-user-deactivate-form='1']");
+    const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
+    const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
+    const tableBody = root.querySelector("[data-obus-user-deactivate-table-body='1']");
+    const emptyEl = root.querySelector("[data-obus-user-deactivate-empty='1']");
+    const loadingMessage = form?.querySelector(".allowed-lines-loading-message");
+    const submitButton = form?.querySelector("button[type='submit']");
+    const usernameInput = form?.querySelector("input[name='username']");
+    const httpPill = root.querySelector("[data-obus-user-deactivate-http='1']");
+    const scannedPill = root.querySelector("[data-obus-user-deactivate-scanned='1']");
+    const successPill = root.querySelector("[data-obus-user-deactivate-success='1']");
+    const failurePill = root.querySelector("[data-obus-user-deactivate-failure='1']");
+    const totalUsersPill = root.querySelector("[data-obus-user-deactivate-total-users='1']");
+    const activeUsersPill = root.querySelector("[data-obus-user-deactivate-active-users='1']");
+    const matchedPill = root.querySelector("[data-obus-user-deactivate-matched='1']");
+    const submitUrl = String(root.getAttribute("data-obus-user-deactivate-submit-url") || "").trim();
+
+    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !submitUrl) {
+      return;
+    }
+
+    let activeJobId = String(root.getAttribute("data-obus-user-deactivate-initial-job-id") || "").trim();
+    let activeJobCursor = 0;
+    let activeJobCreatedAt = Number.parseInt(
+      String(root.getAttribute("data-obus-user-deactivate-initial-created-at") || "0"),
+      10
+    );
+    let activeJobFinishedAt = Number.parseInt(
+      String(root.getAttribute("data-obus-user-deactivate-initial-finished-at") || "0"),
+      10
+    );
+    let activeJobPollTimerId = 0;
+    let activeJobTimerId = 0;
+    let activeJobFailureCount = 0;
+    const matchRowsByKey = new Map();
+    let snapshot = {
+      done: String(root.getAttribute("data-obus-user-deactivate-initial-done") || "").trim() === "1",
+      error: "",
+      totalCount: Number.parseInt(String(root.getAttribute("data-obus-user-deactivate-initial-total-count") || "0"), 10) || 0,
+      processedCount:
+        Number.parseInt(String(root.getAttribute("data-obus-user-deactivate-initial-processed-count") || "0"), 10) || 0,
+      successCount:
+        Number.parseInt(String(root.getAttribute("data-obus-user-deactivate-initial-success-count") || "0"), 10) || 0,
+      failureCount:
+        Number.parseInt(String(root.getAttribute("data-obus-user-deactivate-initial-failure-count") || "0"), 10) || 0,
+      scannedCompanyCount: 0,
+      successCompanyCount: 0,
+      failureCompanyCount: 0,
+      totalUserCount: 0,
+      activeUserCount: 0,
+      matchedUserCount: 0,
+      failureSamples: []
+    };
+
+    const setStatus = (message, tone = "muted") => {
+      statusEl.textContent = String(message || "").trim();
+      statusEl.classList.remove("is-error", "is-success");
+      if (tone === "error") {
+        statusEl.classList.add("is-error");
+      } else if (tone === "success") {
+        statusEl.classList.add("is-success");
+      }
+    };
+
+    const setBusy = (busy) => {
+      form.classList.toggle("is-loading", busy);
+      submitButton.disabled = busy;
+      usernameInput.disabled = busy;
+      if (loadingMessage) {
+        loadingMessage.hidden = !busy;
+      }
+    };
+
+    const formatElapsedTime = (elapsedMs) => {
+      const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours > 0) {
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      }
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+
+    const updatePageUrl = () => {
+      try {
+        const url = new URL(window.location.href);
+        const username = String(usernameInput.value || "").trim();
+        if (username) {
+          url.searchParams.set("username", username);
+        } else {
+          url.searchParams.delete("username");
+        }
+        if (activeJobId) {
+          url.searchParams.set("jobId", activeJobId);
+        } else {
+          url.searchParams.delete("jobId");
+        }
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      } catch (err) {
+        // Ignore URL state sync failures.
+      }
+    };
+
+    const renderPills = () => {
+      const done = snapshot.done === true;
+      const httpText = snapshot.error
+        ? "HTTP -"
+        : done
+          ? `HTTP ${snapshot.failureCount > 0 ? 207 : 200}`
+          : "HTTP -";
+      if (httpPill) httpPill.textContent = httpText;
+      if (scannedPill) scannedPill.textContent = `${Number(snapshot.scannedCompanyCount || snapshot.totalCount || 0)} Firma`;
+      if (successPill) successPill.textContent = `${Number(snapshot.successCompanyCount || snapshot.successCount || 0)} Başarılı`;
+      if (failurePill) failurePill.textContent = `${Number(snapshot.failureCompanyCount || snapshot.failureCount || 0)} Hatalı`;
+      if (totalUsersPill) totalUsersPill.textContent = `${Number(snapshot.totalUserCount || 0)} Kullanıcı`;
+      if (activeUsersPill) activeUsersPill.textContent = `${Number(snapshot.activeUserCount || 0)} Aktif`;
+      if (matchedPill) matchedPill.textContent = `${matchRowsByKey.size} Eşleşti`;
+    };
+
+    const renderSummary = () => {
+      summaryEl.innerHTML = "";
+
+      const appendLine = (text) => {
+        const line = document.createElement("div");
+        line.textContent = text;
+        summaryEl.appendChild(line);
+      };
+
+      if (!activeJobId) {
+        if (snapshot.error) {
+          appendLine(snapshot.error);
+          return;
+        }
+        appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
+        appendLine("Eşleşen kayıtlar geldikçe alttaki tabloya satır satır eklenecek.");
+        return;
+      }
+
+      appendLine(
+        `İşlenen firma: ${Number(snapshot.processedCount || 0)}/${Number(snapshot.totalCount || 0)} | Başarılı: ${Number(
+          snapshot.successCount || 0
+        )} | Hatalı: ${Number(snapshot.failureCount || 0)}`
+      );
+      appendLine(
+        `Bulunan eşleşme: ${matchRowsByKey.size} | Taranan kullanıcı: ${Number(snapshot.totalUserCount || 0)} | Aktif kullanıcı: ${Number(
+          snapshot.activeUserCount || 0
+        )}`
+      );
+
+      if (snapshot.error) {
+        appendLine(snapshot.error);
+      } else if (Array.isArray(snapshot.failureSamples) && snapshot.failureSamples.length > 0) {
+        appendLine(
+          `Örnek hata: ${snapshot.failureSamples
+            .slice(0, 2)
+            .map((item) => `${String(item.company || "").trim() || "-"} - ${String(item.error || "").trim() || "Hata"}`)
+            .join(" | ")}`
+        );
+      } else if (snapshot.done) {
+        appendLine("Sorgu tamamlandı.");
+      } else {
+        appendLine("Canlı sorgu devam ediyor.");
+      }
+    };
+
+    const renderTable = () => {
+      const rows = Array.from(matchRowsByKey.values()).sort((a, b) => {
+        const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+        if (byCode !== 0) return byCode;
+        const byPartnerId = String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
+        if (byPartnerId !== 0) return byPartnerId;
+        return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
+      });
+
+      tableBody.innerHTML = "";
+      rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        [row.userId || "-", row.partnerId || "-", row.code || "-", row.username || "-", row.isActiveText || "-"].forEach(
+          (value) => {
+            const td = document.createElement("td");
+            td.textContent = value;
+            tr.appendChild(td);
+          }
+        );
+        tableBody.appendChild(tr);
+      });
+
+      emptyEl.hidden = rows.length > 0;
+      if (rows.length > 0) return;
+
+      if (activeJobId) {
+        emptyEl.textContent = snapshot.done
+          ? "Eşleşen aktif kullanıcı bulunamadı."
+          : "Eşleşen kayıtlar geldikçe tabloya satır satır eklenecek.";
+      } else {
+        emptyEl.textContent = "Sonuç listesi burada satır satır oluşacak.";
+      }
+    };
+
+    const syncRunningStatus = () => {
+      if (!activeJobId || !activeJobCreatedAt) {
+        if (snapshot.error) {
+          setStatus(snapshot.error, "error");
+          return;
+        }
+        setStatus("Kullanıcı adı girip sorguyu başlatın.");
+        return;
+      }
+
+      const endTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
+      const elapsedText = formatElapsedTime(endTime - activeJobCreatedAt);
+
+      if (snapshot.done) {
+        const finalText = snapshot.error
+          ? `${snapshot.error} | Süre: ${elapsedText}`
+          : `Sorgu tamamlandı. Başarılı firma: ${Number(snapshot.successCount || 0)}/${Number(
+              snapshot.totalCount || 0
+            )} | Hatalı: ${Number(snapshot.failureCount || 0)} | Süre: ${elapsedText}`;
+        setStatus(finalText, snapshot.error || Number(snapshot.failureCount || 0) > 0 ? "error" : "success");
+        return;
+      }
+
+      setStatus(
+        `Kullanıcılar sorgulanıyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
+          snapshot.totalCount || 0
+        )} | Eşleşen: ${matchRowsByKey.size}`,
+        "muted"
+      );
+    };
+
+    const stopTimers = () => {
+      if (activeJobPollTimerId) {
+        window.clearTimeout(activeJobPollTimerId);
+        activeJobPollTimerId = 0;
+      }
+      if (activeJobTimerId) {
+        window.clearInterval(activeJobTimerId);
+        activeJobTimerId = 0;
+      }
+    };
+
+    const startStatusTimer = () => {
+      if (activeJobTimerId) {
+        window.clearInterval(activeJobTimerId);
+        activeJobTimerId = 0;
+      }
+      syncRunningStatus();
+      if (activeJobId && snapshot.done !== true) {
+        activeJobTimerId = window.setInterval(() => {
+          syncRunningStatus();
+        }, 1000);
+      }
+    };
+
+    const resetJobState = () => {
+      stopTimers();
+      activeJobCursor = 0;
+      activeJobCreatedAt = 0;
+      activeJobFinishedAt = 0;
+      activeJobFailureCount = 0;
+      matchRowsByKey.clear();
+      snapshot = {
+        done: false,
+        error: "",
+        totalCount: 0,
+        processedCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        scannedCompanyCount: 0,
+        successCompanyCount: 0,
+        failureCompanyCount: 0,
+        totalUserCount: 0,
+        activeUserCount: 0,
+        matchedUserCount: 0,
+        failureSamples: []
+      };
+    };
+
+    const scheduleJobPoll = (delayMs = 900) => {
+      if (!activeJobId) return;
+      if (activeJobPollTimerId) {
+        window.clearTimeout(activeJobPollTimerId);
+      }
+      activeJobPollTimerId = window.setTimeout(() => {
+        void pollActiveJob();
+      }, delayMs);
+    };
+
+    const applySnapshot = (data) => {
+      activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : activeJobCreatedAt;
+      activeJobFinishedAt = Number.isFinite(Number(data.finishedAt)) ? Number(data.finishedAt) : 0;
+      snapshot.done = data.done === true;
+      snapshot.error = String(data.error || "").trim();
+      snapshot.totalCount = Number.isFinite(Number(data.totalCount)) ? Number(data.totalCount) : snapshot.totalCount;
+      snapshot.processedCount = Number.isFinite(Number(data.processedCount))
+        ? Number(data.processedCount)
+        : snapshot.processedCount;
+      snapshot.successCount = Number.isFinite(Number(data.successCount)) ? Number(data.successCount) : snapshot.successCount;
+      snapshot.failureCount = Number.isFinite(Number(data.failureCount)) ? Number(data.failureCount) : snapshot.failureCount;
+
+      if (data.summary && typeof data.summary === "object") {
+        snapshot.scannedCompanyCount = Number(data.summary.scannedCompanyCount || snapshot.totalCount || 0);
+        snapshot.successCompanyCount = Number(data.summary.successCompanyCount || snapshot.successCount || 0);
+        snapshot.failureCompanyCount = Number(data.summary.failureCompanyCount || snapshot.failureCount || 0);
+        snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
+        snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
+        snapshot.matchedUserCount = Number(data.summary.matchedUserCount || matchRowsByKey.size || 0);
+        snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
+      }
+    };
+
+    const applyEvents = (events) => {
+      (Array.isArray(events) ? events : []).forEach((event) => {
+        const meta = event?.meta;
+        if (!meta || meta.type !== "match") return;
+        const key = String(event?.key || "").trim();
+        if (!key || matchRowsByKey.has(key)) return;
+        matchRowsByKey.set(key, {
+          userId: String(meta.userId || "").trim(),
+          partnerId: String(meta.partnerId || "").trim(),
+          code: String(meta.code || "").trim(),
+          username: String(meta.username || "").trim(),
+          isActiveText: String(meta.isActiveText || "").trim() || "true"
+        });
+      });
+    };
+
+    const finalizeRender = () => {
+      renderPills();
+      renderSummary();
+      renderTable();
+      syncRunningStatus();
+    };
+
+    const pollActiveJob = async () => {
+      if (!activeJobId) return;
+      try {
+        const response = await fetch(`/api/obus-live/${encodeURIComponent(activeJobId)}?cursor=${activeJobCursor}`, {
+          headers: {
+            Accept: "application/json"
+          },
+          cache: "no-store",
+          credentials: "same-origin"
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Kullanıcı sorgu durumu okunamadı"));
+        }
+
+        activeJobFailureCount = 0;
+        activeJobCursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : activeJobCursor;
+        applySnapshot(data);
+        applyEvents(data.events);
+        finalizeRender();
+
+        if (snapshot.done) {
+          setBusy(false);
+          stopTimers();
+          return;
+        }
+
+        setBusy(true);
+        startStatusTimer();
+        scheduleJobPoll(900);
+      } catch (err) {
+        activeJobFailureCount += 1;
+        if (activeJobFailureCount >= 3) {
+          snapshot.done = true;
+          snapshot.error = err?.message || "Kullanıcı sorgu durumu okunamadı.";
+          setBusy(false);
+          stopTimers();
+          finalizeRender();
+          return;
+        }
+        scheduleJobPoll(1400);
+      }
+    };
+
+    const startJob = async () => {
+      const username = String(usernameInput.value || "").trim();
+      if (!username) {
+        setStatus("Kullanıcı adı zorunludur.", "error");
+        usernameInput.focus();
+        return;
+      }
+
+      resetJobState();
+      activeJobId = "";
+      updatePageUrl();
+      renderPills();
+      renderSummary();
+      renderTable();
+      setBusy(true);
+      setStatus("Kullanıcılar sorgulanıyor. Süre: 00:00 | İşlenen: 0/0 | Eşleşen: 0");
+
+      try {
+        const response = await fetch(submitUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({ username })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok || !data?.jobId) {
+          throw new Error(getApiErrorMessage(response, data, "Kullanıcı sorgusu başlatılamadı"));
+        }
+
+        activeJobId = String(data.jobId || "").trim();
+        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
+        snapshot.totalCount = Number.isFinite(Number(data.totalCount)) ? Number(data.totalCount) : 0;
+        snapshot.scannedCompanyCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : snapshot.totalCount;
+        updatePageUrl();
+        startStatusTimer();
+        finalizeRender();
+        void pollActiveJob();
+      } catch (err) {
+        setBusy(false);
+        snapshot.done = true;
+        snapshot.error = err?.message || "Kullanıcı sorgusu başlatılamadı.";
+        finalizeRender();
+      }
+    };
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (activeJobId && snapshot.done !== true) return;
+      void startJob();
+    });
+
+    renderPills();
+    renderSummary();
+    renderTable();
+    syncRunningStatus();
+
+    if (activeJobId) {
+      updatePageUrl();
+      setBusy(snapshot.done !== true);
+      startStatusTimer();
+      void pollActiveJob();
+    }
   };
 
   const initJourneyUpdateTableFilters = () => {
@@ -6336,6 +6788,7 @@
     initSalesTabs();
     initSalesReportLoading();
     initSlackReportLoading();
+    initObusUserDeactivatePage();
     initAllowedLinesLoading();
     initJourneyUpdateTableFilters();
     initJourneyUpdateEditorForm();

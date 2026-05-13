@@ -35,62 +35,83 @@
         <div class="alert inline-alert"><%= partnerError %></div>
       <% } %>
 
-      <section class="table-card panel-card allowed-lines-section">
-        <div class="table-head">
-          <h2>Kullanıcı Sorgusu</h2>
-        </div>
-
-        <form class="allowed-lines-form" method="post" action="/general/obus-user-deactivate">
-          <div class="allowed-lines-grid obus-user-deactivate-grid">
-            <label class="allowed-lines-field">
-              <span>Kullanıcı Adı</span>
-              <input type="text" name="username" value="<%= filters.username || '' %>" autocomplete="off" required />
-            </label>
+      <div
+        data-obus-user-deactivate-page="1"
+        data-obus-user-deactivate-submit-url="/api/obus-user-deactivate/run"
+        data-obus-user-deactivate-initial-job-id="<%= liveJob?.id || '' %>"
+        data-obus-user-deactivate-initial-created-at="<%= liveJob?.createdAt || 0 %>"
+        data-obus-user-deactivate-initial-finished-at="<%= liveJob?.finishedAt || 0 %>"
+        data-obus-user-deactivate-initial-total-count="<%= liveJob?.totalCount || 0 %>"
+        data-obus-user-deactivate-initial-processed-count="<%= liveJob?.processedCount || 0 %>"
+        data-obus-user-deactivate-initial-success-count="<%= liveJob?.successCount || 0 %>"
+        data-obus-user-deactivate-initial-failure-count="<%= liveJob?.failureCount || 0 %>"
+        data-obus-user-deactivate-initial-done="<%= liveJob?.done ? '1' : '0' %>"
+      >
+        <section class="table-card panel-card allowed-lines-section">
+          <div class="table-head">
+            <h2>Kullanıcı Sorgusu</h2>
           </div>
 
-          <div class="allowed-lines-actions">
-            <button
-              type="submit"
-              data-default-label="Kullanıcıyı Sorgula"
-              data-loading-label="Sorgulanıyor..."
-            >
-              Kullanıcıyı Sorgula
-            </button>
+          <form
+            class="allowed-lines-form obus-user-deactivate-form"
+            method="post"
+            action="/general/obus-user-deactivate"
+            data-obus-user-deactivate-form="1"
+            data-allowed-lines-ajax="1"
+          >
+            <div class="allowed-lines-grid obus-user-deactivate-grid">
+              <label class="allowed-lines-field">
+                <span>Kullanıcı Adı</span>
+                <input type="text" name="username" value="<%= filters.username || '' %>" autocomplete="off" required />
+              </label>
+            </div>
+
+            <div class="allowed-lines-actions">
+              <button
+                type="submit"
+                data-default-label="Kullanıcıyı Sorgula"
+                data-loading-label="Sorgulanıyor..."
+              >
+                Kullanıcıyı Sorgula
+              </button>
+            </div>
+
+            <div class="allowed-lines-loading-message" hidden>Kullanıcılar sorgulanıyor...</div>
+          </form>
+
+          <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
+            Kullanıcı adı girip sorguyu başlatın.
           </div>
 
-          <div class="allowed-lines-loading-message" hidden>Kullanıcı listesi sorgulanıyor...</div>
-        </form>
+          <div class="obus-user-create-live-summary" data-obus-user-deactivate-summary="1">
+            Sonuç özeti burada canlı olarak güncellenecek.
+          </div>
 
-        <% if (report.requested && report.error) { %>
-          <div class="alert inline-alert"><%= report.error %></div>
-          <% if (report.errorDetail) { %>
-            <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
-          <% } %>
-        <% } %>
-        <% if (report.requested && report.userMessage) { %>
-          <div class="inline-success"><%= report.userMessage %></div>
-        <% } %>
-      </section>
-
-      <section class="table-card panel-card allowed-lines-response">
-        <div class="table-head">
-          <h2>Sonuçlar</h2>
-          <div class="table-actions">
-            <% if (report.requested) { %>
-              <span class="pill"><%= report.status ? `HTTP ${report.status}` : "HTTP -" %></span>
-              <span class="pill"><%= report.scannedCompanyCount || 0 %> Firma</span>
-              <span class="pill"><%= report.successCompanyCount || 0 %> Başarılı</span>
-              <span class="pill"><%= report.failureCompanyCount || 0 %> Hatalı</span>
-              <span class="pill"><%= report.totalUserCount || 0 %> Kullanıcı</span>
-              <span class="pill"><%= report.activeUserCount || 0 %> Aktif</span>
-              <span class="pill"><%= report.matchedUserCount || 0 %> Eşleşti</span>
-            <% } else { %>
-              <span class="pill muted">Henüz sorgu yapılmadı</span>
+          <% if (report.requested && report.error) { %>
+            <div class="alert inline-alert"><%= report.error %></div>
+            <% if (report.errorDetail) { %>
+              <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
             <% } %>
-          </div>
-        </div>
+          <% } %>
+          <% if (report.requested && report.userMessage) { %>
+            <div class="inline-success"><%= report.userMessage %></div>
+          <% } %>
+        </section>
 
-        <% if (report.requested && report.rows.length > 0) { %>
+        <section class="table-card panel-card allowed-lines-response">
+          <div class="table-head">
+            <h2>Sonuçlar</h2>
+            <div class="table-actions">
+              <span class="pill" data-obus-user-deactivate-http="1">HTTP -</span>
+              <span class="pill" data-obus-user-deactivate-scanned="1">0 Firma</span>
+              <span class="pill" data-obus-user-deactivate-success="1">0 Başarılı</span>
+              <span class="pill" data-obus-user-deactivate-failure="1">0 Hatalı</span>
+              <span class="pill" data-obus-user-deactivate-total-users="1">0 Kullanıcı</span>
+              <span class="pill" data-obus-user-deactivate-active-users="1">0 Aktif</span>
+              <span class="pill" data-obus-user-deactivate-matched="1">0 Eşleşti</span>
+            </div>
+          </div>
+
           <div class="table-scroll">
             <table class="partners-raw-table">
               <thead>
@@ -98,29 +119,17 @@
                   <th>userid</th>
                   <th>partner-id</th>
                   <th>code</th>
-                  <th>Kullanıcı Adı</th>
+                  <th>username</th>
                   <th>is-active</th>
                 </tr>
               </thead>
-              <tbody>
-                <% report.rows.forEach((row) => { %>
-                  <tr>
-                    <td><%= row.userId || '-' %></td>
-                    <td><%= row.partnerId || '-' %></td>
-                    <td><%= row.code || '-' %></td>
-                    <td><%= row.username || '-' %></td>
-                    <td><%= row.isActiveText || '-' %></td>
-                  </tr>
-                <% }) %>
-              </tbody>
+              <tbody data-obus-user-deactivate-table-body="1"></tbody>
             </table>
           </div>
-        <% } else if (report.requested && !report.error) { %>
-          <div class="pill muted">Listeleme için uygun kayıt bulunamadı.</div>
-        <% } else { %>
-          <div class="pill muted">Sonuç listesi burada gösterilecek.</div>
-        <% } %>
-      </section>
+
+          <div class="pill muted" data-obus-user-deactivate-empty="1">Sonuç listesi burada satır satır oluşacak.</div>
+        </section>
+      </div>
     </section>
 
     <script src="/public/app.js" defer></script>
