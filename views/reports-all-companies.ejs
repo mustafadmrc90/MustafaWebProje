@@ -151,6 +151,31 @@
                 SQL kayıtları yükleniyor...
               </span>
             </form>
+            <% if (report.exclusions && Array.isArray(report.exclusions.exactCodes) && report.exclusions.exactCodes.length > 0) { %>
+              <details class="all-companies-exclusions-menu">
+                <summary class="button-link ghost">Hariç Tutulan Kodlar (<%= report.exclusions.exactCodes.length %>)</summary>
+                <div class="all-companies-exclusions-popover">
+                  <div class="all-companies-exclusions-section">
+                    <strong class="all-companies-exclusions-title">Tek tek hariç tutulan code'lar</strong>
+                    <ul class="all-companies-exclusions-list">
+                      <% report.exclusions.exactCodes.forEach((code) => { %>
+                        <li><code><%= code %></code></li>
+                      <% }) %>
+                    </ul>
+                  </div>
+                  <% if (Array.isArray(report.exclusions.automaticRules) && report.exclusions.automaticRules.length > 0) { %>
+                    <div class="all-companies-exclusions-section">
+                      <strong class="all-companies-exclusions-title">Otomatik hariç tutma kuralları</strong>
+                      <ul class="all-companies-exclusions-list">
+                        <% report.exclusions.automaticRules.forEach((rule) => { %>
+                          <li><%= rule %></li>
+                        <% }) %>
+                      </ul>
+                    </div>
+                  <% } %>
+                </div>
+              </details>
+            <% } %>
           </div>
         </div>
 

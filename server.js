@@ -2589,18 +2589,45 @@ function readPartnerRawValueByAliases(row, aliases = []) {
   return undefined;
 }
 
+const ALL_COMPANIES_EXCLUDED_EXACT_CODES = Object.freeze([
+  "admin",
+  "aou2",
+  "dashboard",
+  "corp",
+  "esbeylikduzud2",
+  "mutlularsimsekseyahat"
+]);
+
+const ALL_COMPANIES_EXCLUDED_EXACT_CODE_SET = new Set(
+  ALL_COMPANIES_EXCLUDED_EXACT_CODES.map((code) => normalizeTokenName(code))
+);
+
+const ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS = Object.freeze([
+  "Parçalarından biri `test` olan code'lar",
+  "Parçalarından biri `old` olan code'lar",
+  "`test` ile başlayan veya biten code'lar",
+  "`old` ile başlayan veya biten code'lar"
+]);
+
 function shouldExcludeAllCompaniesCode(codeValue) {
   const rawCode = String(codeValue || "").trim().toLocaleLowerCase("tr");
   if (!rawCode) return false;
 
   const normalizedCode = normalizeTokenName(rawCode);
-  if (["admin", "aou2", "dashboard", "corp"].includes(normalizedCode)) return true;
+  if (ALL_COMPANIES_EXCLUDED_EXACT_CODE_SET.has(normalizedCode)) return true;
   const normalizedSegments = rawCode.split(/[^a-z0-9]+/i).filter(Boolean);
   if (normalizedSegments.includes("test") || normalizedSegments.includes("old")) return true;
   if (rawCode.startsWith("test") || rawCode.endsWith("test")) return true;
   if (rawCode.startsWith("old") || rawCode.endsWith("old")) return true;
 
   return false;
+}
+
+function buildAllCompaniesExclusionSummary() {
+  return {
+    exactCodes: Array.from(ALL_COMPANIES_EXCLUDED_EXACT_CODES),
+    automaticRules: Array.from(ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS)
+  };
 }
 
 function attachAllCompaniesMissingObusDebug(rows, fallbackMessage = "") {
@@ -20314,6 +20341,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
             }
           : null
       },
+      exclusions: buildAllCompaniesExclusionSummary(),
       notice: emptyCacheMessage
     }
   });
