@@ -5,10 +5,6 @@
   );
   const panelButtons = Array.from(document.querySelectorAll("[data-user-device-panel-toggle='1']"));
   const panelRows = Array.from(document.querySelectorAll("[data-user-device-panel]"));
-  const feedbackBackdrop = document.querySelector("[data-user-feedback-backdrop]");
-  const feedbackTitleEl = document.querySelector("#user-feedback-title");
-  const feedbackMessageEl = document.querySelector("[data-user-feedback-message]");
-  const feedbackCloseButton = document.querySelector("[data-user-feedback-close='1']");
 
   const parseJsonResponse = async (response) => {
     try {
@@ -30,35 +26,10 @@
     });
   };
 
-  const closeFeedback = () => {
-    if (!(feedbackBackdrop instanceof HTMLElement)) return;
-    feedbackBackdrop.hidden = true;
-    feedbackBackdrop.classList.remove("active");
-    feedbackBackdrop.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("user-feedback-open");
-  };
-
-  const openFeedback = (message, { title = "Bilgi" } = {}) => {
+  const openFeedback = (message) => {
     const normalizedMessage = String(message || "").trim();
     if (!normalizedMessage) return;
-
-    if (!(feedbackBackdrop instanceof HTMLElement) || !(feedbackMessageEl instanceof HTMLElement)) {
-      window.alert(normalizedMessage);
-      return;
-    }
-
-    if (feedbackTitleEl instanceof HTMLElement) {
-      feedbackTitleEl.textContent = String(title || "Bilgi").trim() || "Bilgi";
-    }
-
-    feedbackMessageEl.textContent = String(message || "").trim();
-    feedbackBackdrop.hidden = false;
-    feedbackBackdrop.classList.add("active");
-    feedbackBackdrop.setAttribute("aria-hidden", "false");
-    document.body.classList.add("user-feedback-open");
-    window.setTimeout(() => {
-      feedbackCloseButton?.focus();
-    }, 0);
+    window.alert(normalizedMessage);
   };
 
   const buildSuccessMessageForToggle = (toggle, data) => {
@@ -121,13 +92,11 @@
 
       const successMessage = buildSuccessMessageForToggle(toggle, data);
       if (successMessage) {
-        openFeedback(successMessage, { title: "Bilgi" });
+        openFeedback(successMessage);
       }
     } catch (err) {
       toggle.checked = previousChecked;
-      openFeedback(String(err?.message || "Ayar guncellenemedi.").trim() || "Ayar guncellenemedi.", {
-        title: "Uyari"
-      });
+      openFeedback(String(err?.message || "Ayar guncellenemedi.").trim() || "Ayar guncellenemedi.");
     } finally {
       siblingToggles.forEach((item) => {
         item.disabled = false;
@@ -159,17 +128,5 @@
       const nextVisible = targetRow ? targetRow.hidden : true;
       setPanelVisibility(targetId, nextVisible);
     });
-  });
-
-  feedbackCloseButton?.addEventListener("click", closeFeedback);
-  feedbackBackdrop?.addEventListener("click", (event) => {
-    if (event.target === feedbackBackdrop) {
-      closeFeedback();
-    }
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closeFeedback();
-    }
   });
 })();
