@@ -29,11 +29,40 @@
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
-      <section class="table-card panel-card">
+      <% if (partnerError) { %>
+        <div class="alert inline-alert"><%= partnerError %></div>
+      <% } %>
+
+      <section class="table-card panel-card allowed-lines-section">
         <div class="table-head">
-          <h2>Ekran Temizlendi</h2>
+          <h2>Sorgu Alanları</h2>
         </div>
-        <p class="muted">Bu alan yeniden tasarlanmak için temizlendi.</p>
+
+        <div class="allowed-lines-grid obus-user-deactivate-grid">
+          <label class="allowed-lines-field">
+            <span>Kullanıcı Adı</span>
+            <input
+              type="text"
+              name="username"
+              value="<%= filters.username || '' %>"
+              autocomplete="off"
+              placeholder="Kullanıcı adını girin"
+            />
+          </label>
+
+          <label class="allowed-lines-field allowed-lines-field-company">
+            <span>Firmalar</span>
+            <select name="company" id="obus-user-deactivate-company">
+              <% companyOptions.forEach((company) => { %>
+                <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %>>
+                  <%= company.label %>
+                </option>
+              <% }) %>
+            </select>
+          </label>
+        </div>
+
+        <p class="muted">Firma listesinden seçim yapabilirsiniz; varsayılan seçenek <code>Hepsi</code> olarak gelir.</p>
       </section>
     </section>
 

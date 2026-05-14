@@ -17460,6 +17460,20 @@ function buildObusRuleDefineCompanyOptions(partnerItems = []) {
   });
 }
 
+function buildObusUserDeactivateCompanyOptions(partnerItems = []) {
+  return [{ value: "all", label: "Hepsi" }].concat(
+    (Array.isArray(partnerItems) ? partnerItems : []).map((item) => {
+      const value = buildCompanyOptionValue(item);
+      const idText = String(item?.id || "").trim() || "N/A";
+      const clusterText = String(item?.cluster || "").trim() || "cluster";
+      return {
+        value,
+        label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText}`
+      };
+    })
+  );
+}
+
 function buildObusPartnerRuleRequestBody({
   partnerIdValue,
   startDate = "",
@@ -20545,15 +20559,18 @@ app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-c
 });
 
 app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
-  const { partnerError } = await loadAuthorizedLinesCompanies();
+  const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+  const companyOptions = buildObusUserDeactivateCompanyOptions(partnerItems);
   const jobId = String(req.query.jobId || "").trim();
   const liveJob = jobId ? readObusLiveJob(jobId, Number(req.session?.user?.id || 0)) : null;
   res.render("general-obus-user-deactivate", {
     user: req.session.user,
     active: "obus-user-deactivate",
     partnerError,
+    companyOptions,
     filters: {
-      username: String(req.query.username || "").trim()
+      username: String(req.query.username || "").trim(),
+      company: String(req.query.company || "all").trim() || "all"
     },
     report: buildObusUserDeactivateReportModel(),
     liveJob: liveJob
@@ -20574,13 +20591,15 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
 
 app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   const username = String(req.body?.username || "").trim();
+  const company = String(req.body?.company || "all").trim() || "all";
   const startResult = await startObusUserDeactivateSearchJob({
     username,
     ownerUserId: req.session?.user?.id || 0
   });
 
   if (!startResult.ok || !startResult.job) {
-    const { partnerError } = await loadAuthorizedLinesCompanies();
+    const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
+    const companyOptions = buildObusUserDeactivateCompanyOptions(partnerItems);
     const report = buildObusUserDeactivateReportModel();
     report.requested = true;
     report.error = String(startResult.error || partnerError || "Sorgu başlatılamadı.").trim();
@@ -20588,8 +20607,10 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
       user: req.session.user,
       active: "obus-user-deactivate",
       partnerError,
+      companyOptions,
       filters: {
-        username
+        username,
+        company
       },
       report,
       liveJob: null
@@ -20597,7 +20618,9 @@ app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-u
   }
 
   return res.redirect(
-    `/general/obus-user-deactivate?username=${encodeURIComponent(username)}&jobId=${encodeURIComponent(
+    `/general/obus-user-deactivate?username=${encodeURIComponent(username)}&company=${encodeURIComponent(
+      company
+    )}&jobId=${encodeURIComponent(
       String(startResult.job.id || "").trim()
     )}`
   );
