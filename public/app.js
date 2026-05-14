@@ -1017,9 +1017,7 @@
     const failedRequestUrlEl = root.querySelector("[data-obus-user-deactivate-failed-request-url='1']");
     const failedRequestBodyEl = root.querySelector("[data-obus-user-deactivate-failed-request-body='1']");
     const failedRequestResponseEl = root.querySelector("[data-obus-user-deactivate-failed-request-response='1']");
-    const submitUrl = String(root.getAttribute("data-obus-user-deactivate-submit-url") || "").trim();
-
-    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !submitUrl) {
+    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput) {
       return;
     }
 
@@ -1476,13 +1474,17 @@
       }
     };
 
-    const startJob = async () => {
-      if (submitButton.disabled) return;
+    form.addEventListener("submit", (event) => {
+      if (activeJobId && snapshot.done !== true) {
+        event.preventDefault();
+        return;
+      }
 
       const username = String(usernameInput.value || "").trim();
       if (!username) {
         setStatus("Kullanıcı adı zorunludur.", "error");
         usernameInput.focus();
+        event.preventDefault();
         return;
       }
 
@@ -1494,46 +1496,8 @@
       renderDebugPreview();
       renderTable();
       setBusy(true);
-      setStatus("Kullanıcılar sorgulanıyor. Süre: 00:00 | İşlenen: 0/0 | Eşleşen: 0");
-
-      try {
-        const response = await fetch(submitUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json"
-          },
-          body: JSON.stringify({ username })
-        });
-        const data = await parseJsonResponse(response);
-        if (!response.ok || !data?.ok || !data?.jobId) {
-          throw new Error(getApiErrorMessage(response, data, "Kullanıcı sorgusu başlatılamadı"));
-        }
-
-        activeJobId = String(data.jobId || "").trim();
-        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
-        snapshot.totalCount = Number.isFinite(Number(data.totalCount)) ? Number(data.totalCount) : 0;
-        snapshot.scannedCompanyCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : snapshot.totalCount;
-        updatePageUrl();
-        startStatusTimer();
-        finalizeRender();
-        void pollActiveJob();
-      } catch (err) {
-        setBusy(false);
-        snapshot.done = true;
-        snapshot.error = err?.message || "Kullanıcı sorgusu başlatılamadı.";
-        finalizeRender();
-      }
-    };
-
-    const handleStartRequest = (event) => {
-      event.preventDefault();
-      if (activeJobId && snapshot.done !== true) return;
-      void startJob();
-    };
-
-    submitButton.addEventListener("click", handleStartRequest);
-    form.addEventListener("submit", handleStartRequest);
+      setStatus("Sorgu başlatılıyor...");
+    });
 
     setBusy(activeJobId && snapshot.done !== true);
     renderPills();
