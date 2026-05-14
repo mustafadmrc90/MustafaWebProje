@@ -1005,11 +1005,41 @@
     const totalUsersPill = root.querySelector("[data-obus-user-deactivate-total-users='1']");
     const activeUsersPill = root.querySelector("[data-obus-user-deactivate-active-users='1']");
     const matchedPill = root.querySelector("[data-obus-user-deactivate-matched='1']");
+    const previewStateEl = root.querySelector("[data-obus-user-deactivate-preview-state='1']");
+    const firstRequestHttpEl = root.querySelector("[data-obus-user-deactivate-first-request-http='1']");
+    const firstRequestServiceEl = root.querySelector("[data-obus-user-deactivate-first-request-service='1']");
+    const firstRequestUrlEl = root.querySelector("[data-obus-user-deactivate-first-request-url='1']");
+    const firstRequestBodyEl = root.querySelector("[data-obus-user-deactivate-first-request-body='1']");
+    const firstRequestResponseEl = root.querySelector("[data-obus-user-deactivate-first-request-response='1']");
+    const failedRequestHttpEl = root.querySelector("[data-obus-user-deactivate-failed-request-http='1']");
+    const failedRequestServiceEl = root.querySelector("[data-obus-user-deactivate-failed-request-service='1']");
+    const failedRequestUrlEl = root.querySelector("[data-obus-user-deactivate-failed-request-url='1']");
+    const failedRequestBodyEl = root.querySelector("[data-obus-user-deactivate-failed-request-body='1']");
+    const failedRequestResponseEl = root.querySelector("[data-obus-user-deactivate-failed-request-response='1']");
     const submitUrl = String(root.getAttribute("data-obus-user-deactivate-submit-url") || "").trim();
 
     if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !submitUrl) {
       return;
     }
+
+    const createEmptyDebugPreviewState = () => ({
+      firstRequest: null,
+      failedRequest: null
+    });
+
+    const normalizeDebugPreviewEntry = (value) => {
+      if (!value || typeof value !== "object") return null;
+      const statusValue =
+        typeof value.status === "number" ? value.status : Number.parseInt(String(value.status || "").trim(), 10);
+      const entry = {
+        service: String(value.service || "").trim(),
+        status: Number.isFinite(statusValue) ? statusValue : null,
+        requestUrl: String(value.requestUrl || "").trim(),
+        requestBody: String(value.requestBody || "").trim(),
+        responseBody: String(value.responseBody || "").trim()
+      };
+      return entry.service || entry.requestUrl || entry.requestBody || entry.responseBody ? entry : null;
+    };
 
     let activeJobId = String(root.getAttribute("data-obus-user-deactivate-initial-job-id") || "").trim();
     let activeJobCursor = 0;
@@ -1041,7 +1071,8 @@
       totalUserCount: 0,
       activeUserCount: 0,
       matchedUserCount: 0,
-      failureSamples: []
+      failureSamples: [],
+      debugPreview: createEmptyDebugPreviewState()
     };
 
     const setStatus = (message, tone = "muted") => {
@@ -1156,6 +1187,64 @@
       }
     };
 
+    const renderPreviewBlock = (
+      entry,
+      { httpEl, serviceEl, urlEl, bodyEl, responseEl, emptyServiceText, emptyUrlText, emptyBodyText, emptyResponseText }
+    ) => {
+      const normalizedEntry = normalizeDebugPreviewEntry(entry);
+      if (httpEl) {
+        httpEl.textContent = normalizedEntry?.status !== null ? `HTTP ${normalizedEntry.status}` : "HTTP -";
+      }
+      if (serviceEl) {
+        serviceEl.textContent = normalizedEntry?.service || emptyServiceText;
+      }
+      if (urlEl) {
+        urlEl.textContent = normalizedEntry?.requestUrl || emptyUrlText;
+      }
+      if (bodyEl) {
+        bodyEl.textContent = normalizedEntry?.requestBody || emptyBodyText;
+      }
+      if (responseEl) {
+        responseEl.textContent = normalizedEntry?.responseBody || emptyResponseText;
+      }
+    };
+
+    const renderDebugPreview = () => {
+      const firstRequest = snapshot.debugPreview?.firstRequest || null;
+      const failedRequest = snapshot.debugPreview?.failedRequest || null;
+      if (previewStateEl) {
+        previewStateEl.textContent = failedRequest
+          ? "Hata isteği kaydedildi"
+          : firstRequest
+            ? "İlk istek kaydedildi"
+            : activeJobId
+              ? "İstek bekleniyor"
+              : "Henüz istek yok";
+      }
+      renderPreviewBlock(firstRequest, {
+        httpEl: firstRequestHttpEl,
+        serviceEl: firstRequestServiceEl,
+        urlEl: firstRequestUrlEl,
+        bodyEl: firstRequestBodyEl,
+        responseEl: firstRequestResponseEl,
+        emptyServiceText: "Henüz istek yok",
+        emptyUrlText: "Henüz istek yok.",
+        emptyBodyText: "Henüz body yok.",
+        emptyResponseText: "Henüz response yok."
+      });
+      renderPreviewBlock(failedRequest, {
+        httpEl: failedRequestHttpEl,
+        serviceEl: failedRequestServiceEl,
+        urlEl: failedRequestUrlEl,
+        bodyEl: failedRequestBodyEl,
+        responseEl: failedRequestResponseEl,
+        emptyServiceText: "Henüz hata isteği yok",
+        emptyUrlText: "Henüz hata isteği yok.",
+        emptyBodyText: "Henüz body yok.",
+        emptyResponseText: "Henüz hata response'u yok."
+      });
+    };
+
     const renderTable = () => {
       const rows = Array.from(matchRowsByKey.values()).sort((a, b) => {
         const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
@@ -1265,7 +1354,8 @@
         totalUserCount: 0,
         activeUserCount: 0,
         matchedUserCount: 0,
-        failureSamples: []
+        failureSamples: [],
+        debugPreview: createEmptyDebugPreviewState()
       };
     };
 
@@ -1299,6 +1389,13 @@
         snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
         snapshot.matchedUserCount = Number(data.summary.matchedUserCount || matchRowsByKey.size || 0);
         snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
+        snapshot.debugPreview =
+          data.summary.debugPreview && typeof data.summary.debugPreview === "object"
+            ? {
+                firstRequest: normalizeDebugPreviewEntry(data.summary.debugPreview.firstRequest),
+                failedRequest: normalizeDebugPreviewEntry(data.summary.debugPreview.failedRequest)
+              }
+            : createEmptyDebugPreviewState();
       }
     };
 
@@ -1321,6 +1418,7 @@
     const finalizeRender = () => {
       renderPills();
       renderSummary();
+      renderDebugPreview();
       renderTable();
       syncRunningStatus();
     };
@@ -1382,6 +1480,7 @@
       updatePageUrl();
       renderPills();
       renderSummary();
+      renderDebugPreview();
       renderTable();
       setBusy(true);
       setStatus("Kullanıcılar sorgulanıyor. Süre: 00:00 | İşlenen: 0/0 | Eşleşen: 0");
@@ -1424,6 +1523,7 @@
 
     renderPills();
     renderSummary();
+    renderDebugPreview();
     renderTable();
     syncRunningStatus();
 

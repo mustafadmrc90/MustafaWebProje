@@ -3243,6 +3243,36 @@ function getLastObusServiceTrace(serviceLogs) {
   return logs[logs.length - 1];
 }
 
+function getFirstObusServiceTrace(serviceLogs) {
+  const logs = Array.isArray(serviceLogs)
+    ? serviceLogs.filter((item) => item && typeof item === "object")
+    : [];
+  return logs[0] || null;
+}
+
+function buildObusRequestPreviewFromTrace(trace, fallback = {}) {
+  const entry = trace && typeof trace === "object" ? trace : null;
+  const fallbackValue = fallback && typeof fallback === "object" ? fallback : {};
+  const statusValue = entry?.status ?? fallbackValue.status;
+  const parsedStatus =
+    typeof statusValue === "number" ? statusValue : Number.parseInt(String(statusValue ?? "").trim(), 10);
+  const service = String(entry?.service || fallbackValue.service || "").trim();
+  const requestUrl = String(entry?.url || fallbackValue.requestUrl || "").trim();
+  const requestBody = String(entry?.requestBody || fallbackValue.requestBody || "").trim();
+  const responseBody = String(entry?.responseBody || entry?.error || fallbackValue.responseBody || fallbackValue.error || "").trim();
+  if (!service && !requestUrl && !requestBody && !responseBody) {
+    return null;
+  }
+  const preview = {
+    service,
+    status: Number.isFinite(parsedStatus) ? parsedStatus : null,
+    requestUrl,
+    requestBody: requestBody || "{}",
+    responseBody: responseBody || "-"
+  };
+  return preview;
+}
+
 function buildObusServiceTraceText(trace, fallbackError = "", { bodyMaxLen = 160, responseMaxLen = 220 } = {}) {
   const entry = trace && typeof trace === "object" ? trace : null;
   const parts = [];
@@ -15774,6 +15804,11 @@ async function fetchObusUserDeactivateCompanyResult({
   const requestUrl = normalizeTargetUrl(
     buildMembershipGetUsersWithoutPermissionsUrl(companyBaseUrl || OBUS_USER_DEACTIVATE_API_URL, clusterLabel)
   );
+  const buildPreview = (trace, fallback = {}) =>
+    buildObusRequestPreviewFromTrace(trace, {
+      requestUrl,
+      ...fallback
+    });
 
   const buildFailure = (error = "", errorDetail = "", status = null, responseBody = "") => ({
     ok: false,
@@ -15784,7 +15819,9 @@ async function fetchObusUserDeactivateCompanyResult({
     status: Number.isFinite(Number(status)) ? Number(status) : null,
     error: String(error || "").trim() || "İstek gönderilemedi.",
     errorDetail: String(errorDetail || "").trim(),
-    responseBody: String(responseBody || "").trim()
+    responseBody: String(responseBody || "").trim(),
+    firstRequestPreview: null,
+    failedRequestPreview: null
   });
 
   if (!companyCode) {
@@ -15810,24 +15847,40 @@ async function fetchObusUserDeactivateCompanyResult({
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
     sessionCache
   });
+  const firstLoginTrace = getFirstObusServiceTrace(loginResult?.serviceLogs);
+  const firstRequestPreview = buildPreview(firstLoginTrace, {
+    requestUrl: String(loginResult?.loginUrl || "").trim() || requestUrl,
+    responseBody: String(loginResult?.rawLoginBody || "").trim()
+  });
+  const failedLoginPreview = buildPreview(loginResult?.failedServiceLog || getLastObusServiceTrace(loginResult?.serviceLogs), {
+    requestUrl: String(loginResult?.loginUrl || "").trim() || requestUrl,
+    responseBody: String(loginResult?.rawLoginBody || "").trim(),
+    error: String(loginResult?.error || "").trim()
+  });
 
   if (!loginResult?.ok) {
-    return buildFailure(
+    const failure = buildFailure(
       String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
       String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim(),
       null,
       String(loginResult?.rawLoginBody || "").trim()
     );
+    failure.firstRequestPreview = firstRequestPreview;
+    failure.failedRequestPreview = failedLoginPreview;
+    return failure;
   }
 
   const token = String(loginResult?.token || "").trim();
   if (!token) {
-    return buildFailure(
+    const failure = buildFailure(
       "UserLogin token bulunamadı.",
       String(loginResult?.tokenMissingDetail || loginResult?.errorDetail || "").trim(),
       null,
       String(loginResult?.rawLoginBody || "").trim()
     );
+    failure.firstRequestPreview = firstRequestPreview;
+    failure.failedRequestPreview = failedLoginPreview;
+    return failure;
   }
 
   const requestBodyObject = buildObusUserDeactivateRequestBody({
@@ -15855,6 +15908,13 @@ async function fetchObusUserDeactivateCompanyResult({
     const parsed = parseJsonSafe(raw);
     const responseBody =
       parsed && typeof parsed === "object" ? JSON.stringify(parsed, null, 2) : String(raw || "").trim();
+    const requestTrace = buildObusServiceTraceEntry({
+      service: "Membership GetUsersWithoutPermissions",
+      url: requestUrl,
+      status: response.status,
+      requestBody: requestBodyObject,
+      responseBody: parsed ?? raw
+    });
     const reason =
       (parsed &&
         typeof parsed === "object" &&
@@ -15863,17 +15923,34 @@ async function fetchObusUserDeactivateCompanyResult({
       "Bilinmeyen hata";
 
     if (!response.ok) {
-      return buildFailure(`HTTP ${response.status}: ${reason}`, responseBody, response.status, responseBody);
+      const failure = buildFailure(`HTTP ${response.status}: ${reason}`, responseBody, response.status, responseBody);
+      failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
+      failure.failedRequestPreview = buildPreview(requestTrace, { responseBody, status: response.status, error: reason });
+      return failure;
     }
 
     if (!parsed || typeof parsed !== "object") {
-      return buildFailure("Servis yanıtı okunamadı.", String(raw || "").trim(), response.status, String(raw || "").trim());
+      const failure = buildFailure(
+        "Servis yanıtı okunamadı.",
+        String(raw || "").trim(),
+        response.status,
+        String(raw || "").trim()
+      );
+      failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
+      failure.failedRequestPreview = buildPreview(requestTrace, {
+        responseBody: String(raw || "").trim(),
+        status: response.status
+      });
+      return failure;
     }
 
     const hasExplicitStatusField =
       "status" in parsed || "success" in parsed || "status-code" in parsed;
     if (hasExplicitStatusField && !isSuccessStatusPayload(parsed)) {
-      return buildFailure(reason || "İşlem başarısız döndü.", responseBody, response.status, responseBody);
+      const failure = buildFailure(reason || "İşlem başarısız döndü.", responseBody, response.status, responseBody);
+      failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
+      failure.failedRequestPreview = buildPreview(requestTrace, { responseBody, status: response.status, error: reason });
+      return failure;
     }
 
     const allRows = extractObusUserDeactivateRows(parsed);
@@ -15901,12 +15978,26 @@ async function fetchObusUserDeactivateCompanyResult({
       totalUserCount: allRows.length,
       activeUserCount: activeRows.length,
       matchedRows,
-      responseBody
+      responseBody,
+      firstRequestPreview: firstRequestPreview || buildPreview(requestTrace),
+      failedRequestPreview: null
     };
   } catch (err) {
-    return buildFailure(
+    const requestTrace = buildObusServiceTraceEntry({
+      service: "Membership GetUsersWithoutPermissions",
+      url: requestUrl,
+      requestBody: requestBodyObject,
+      responseBody: "",
+      error: err?.message || "İstek gönderilemedi."
+    });
+    const failure = buildFailure(
       err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
     );
+    failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
+    failure.failedRequestPreview = buildPreview(requestTrace, {
+      error: err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+    });
+    return failure;
   } finally {
     clearTimeout(timeout);
   }
@@ -16096,6 +16187,8 @@ async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems
   let totalUserCount = 0;
   let activeUserCount = 0;
   const failureSamples = [];
+  let firstRequestPreview = null;
+  let firstFailedRequestPreview = null;
   job.totalCount = normalizedCompanies.length;
 
   setObusLiveJobSummary(job, {
@@ -16106,7 +16199,11 @@ async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems
     matchedUserCount: 0,
     totalUserCount: 0,
     activeUserCount: 0,
-    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2)
+    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
+    debugPreview: {
+      firstRequest: null,
+      failedRequest: null
+    }
   });
 
   await runWithConcurrency(
@@ -16149,6 +16246,12 @@ async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems
         loginCredentials,
         sessionCache
       });
+      if (!firstRequestPreview && result?.firstRequestPreview) {
+        firstRequestPreview = result.firstRequestPreview;
+      }
+      if (!firstFailedRequestPreview && result?.failedRequestPreview) {
+        firstFailedRequestPreview = result.failedRequestPreview;
+      }
 
       if (result.ok) {
         totalUserCount += Number(result.totalUserCount || 0);
@@ -16247,7 +16350,11 @@ async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems
         totalUserCount,
         activeUserCount,
         failureSamples,
-        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2)
+        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
+        debugPreview: {
+          firstRequest: firstRequestPreview,
+          failedRequest: firstFailedRequestPreview
+        }
       });
     }
   );
