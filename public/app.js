@@ -996,7 +996,8 @@
     const tableBody = root.querySelector("[data-obus-user-deactivate-table-body='1']");
     const emptyEl = root.querySelector("[data-obus-user-deactivate-empty='1']");
     const loadingMessage = form?.querySelector(".allowed-lines-loading-message");
-    const submitButton = form?.querySelector("button[type='submit']");
+    const submitButton =
+      form?.querySelector("[data-obus-user-deactivate-submit='1']") || form?.querySelector("button[type='submit']");
     const usernameInput = form?.querySelector("input[name='username']");
     const httpPill = root.querySelector("[data-obus-user-deactivate-http='1']");
     const scannedPill = root.querySelector("[data-obus-user-deactivate-scanned='1']");
@@ -1021,6 +1022,12 @@
     if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !submitUrl) {
       return;
     }
+
+    const submitDefaultLabel =
+      String(submitButton.getAttribute("data-default-label") || submitButton.textContent || "").trim() ||
+      "Kullanıcıyı Sorgula";
+    const submitLoadingLabel =
+      String(submitButton.getAttribute("data-loading-label") || "").trim() || "Sorgulanıyor...";
 
     const createEmptyDebugPreviewState = () => ({
       firstRequest: null,
@@ -1087,7 +1094,9 @@
 
     const setBusy = (busy) => {
       form.classList.toggle("is-loading", busy);
+      form.setAttribute("aria-busy", busy ? "true" : "false");
       submitButton.disabled = busy;
+      submitButton.textContent = busy ? submitLoadingLabel : submitDefaultLabel;
       usernameInput.disabled = busy;
       if (loadingMessage) {
         loadingMessage.hidden = !busy;
@@ -1468,6 +1477,8 @@
     };
 
     const startJob = async () => {
+      if (submitButton.disabled) return;
+
       const username = String(usernameInput.value || "").trim();
       if (!username) {
         setStatus("Kullanıcı adı zorunludur.", "error");
@@ -1515,12 +1526,16 @@
       }
     };
 
-    form.addEventListener("submit", (event) => {
+    const handleStartRequest = (event) => {
       event.preventDefault();
       if (activeJobId && snapshot.done !== true) return;
       void startJob();
-    });
+    };
 
+    submitButton.addEventListener("click", handleStartRequest);
+    form.addEventListener("submit", handleStartRequest);
+
+    setBusy(activeJobId && snapshot.done !== true);
     renderPills();
     renderSummary();
     renderDebugPreview();
@@ -1529,7 +1544,6 @@
 
     if (activeJobId) {
       updatePageUrl();
-      setBusy(snapshot.done !== true);
       startStatusTimer();
       void pollActiveJob();
     }
