@@ -999,6 +999,7 @@
     const submitButton =
       form?.querySelector("[data-obus-user-deactivate-submit='1']") || form?.querySelector("button[type='submit']");
     const usernameInput = form?.querySelector("input[name='username']");
+    const companySelect = form?.querySelector("select[name='company']");
     const httpPill = root.querySelector("[data-obus-user-deactivate-http='1']");
     const scannedPill = root.querySelector("[data-obus-user-deactivate-scanned='1']");
     const successPill = root.querySelector("[data-obus-user-deactivate-success='1']");
@@ -1017,7 +1018,7 @@
     const failedRequestUrlEl = root.querySelector("[data-obus-user-deactivate-failed-request-url='1']");
     const failedRequestBodyEl = root.querySelector("[data-obus-user-deactivate-failed-request-body='1']");
     const failedRequestResponseEl = root.querySelector("[data-obus-user-deactivate-failed-request-response='1']");
-    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput) {
+    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !companySelect) {
       return;
     }
 
@@ -1096,6 +1097,7 @@
       submitButton.disabled = busy;
       submitButton.textContent = busy ? submitLoadingLabel : submitDefaultLabel;
       usernameInput.disabled = busy;
+      companySelect.disabled = busy;
       if (loadingMessage) {
         loadingMessage.hidden = !busy;
       }
@@ -1120,6 +1122,12 @@
           url.searchParams.set("username", username);
         } else {
           url.searchParams.delete("username");
+        }
+        const company = String(companySelect.value || "").trim();
+        if (company) {
+          url.searchParams.set("company", company);
+        } else {
+          url.searchParams.delete("company");
         }
         if (activeJobId) {
           url.searchParams.set("jobId", activeJobId);
@@ -1256,21 +1264,19 @@
       const rows = Array.from(matchRowsByKey.values()).sort((a, b) => {
         const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
         if (byCode !== 0) return byCode;
-        const byPartnerId = String(a.partnerId || "").localeCompare(String(b.partnerId || ""), "tr");
-        if (byPartnerId !== 0) return byPartnerId;
+        const byClusterUrl = String(a.clusterUrl || "").localeCompare(String(b.clusterUrl || ""), "tr");
+        if (byClusterUrl !== 0) return byClusterUrl;
         return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
       });
 
       tableBody.innerHTML = "";
       rows.forEach((row) => {
         const tr = document.createElement("tr");
-        [row.userId || "-", row.partnerId || "-", row.code || "-", row.username || "-", row.isActiveText || "-"].forEach(
-          (value) => {
-            const td = document.createElement("td");
-            td.textContent = value;
-            tr.appendChild(td);
-          }
-        );
+        [row.userId || "-", row.username || "-", row.code || "-", row.clusterUrl || "-"].forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
         tableBody.appendChild(tr);
       });
 
@@ -1292,7 +1298,7 @@
           setStatus(snapshot.error, "error");
           return;
         }
-        setStatus("Kullanıcı adı girip sorguyu başlatın.");
+        setStatus("Kullanıcı adı ve firma seçip sorguyu başlatın.");
         return;
       }
 
@@ -1414,10 +1420,9 @@
         if (!key || matchRowsByKey.has(key)) return;
         matchRowsByKey.set(key, {
           userId: String(meta.userId || "").trim(),
-          partnerId: String(meta.partnerId || "").trim(),
-          code: String(meta.code || "").trim(),
           username: String(meta.username || "").trim(),
-          isActiveText: String(meta.isActiveText || "").trim() || "true"
+          code: String(meta.code || "").trim(),
+          clusterUrl: String(meta.clusterUrl || "").trim()
         });
       });
     };

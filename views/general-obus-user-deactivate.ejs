@@ -23,47 +23,192 @@
             </span>
             <span>Obus Kullanıcı Pasife Al</span>
           </h1>
-          <p>Tüm firmalar ayrı ayrı sorgulanır; kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
+          <p>Seçilen firmada veya tüm firmalarda kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
         </div>
       </header>
+      <%- include("partials/page-screen-log", { screenLogPanel }) %>
+
       <% if (partnerError) { %>
         <div class="alert inline-alert"><%= partnerError %></div>
       <% } %>
 
-      <section class="table-card panel-card allowed-lines-section">
-        <div class="table-head">
-          <h2>Sorgu Alanları</h2>
-        </div>
+      <div
+        class="obus-user-deactivate-workbench"
+        data-obus-user-deactivate-page="1"
+        data-obus-user-deactivate-initial-job-id="<%= liveJob?.id || '' %>"
+        data-obus-user-deactivate-initial-created-at="<%= liveJob?.createdAt || 0 %>"
+        data-obus-user-deactivate-initial-finished-at="<%= liveJob?.finishedAt || 0 %>"
+        data-obus-user-deactivate-initial-total-count="<%= liveJob?.totalCount || 0 %>"
+        data-obus-user-deactivate-initial-processed-count="<%= liveJob?.processedCount || 0 %>"
+        data-obus-user-deactivate-initial-success-count="<%= liveJob?.successCount || 0 %>"
+        data-obus-user-deactivate-initial-failure-count="<%= liveJob?.failureCount || 0 %>"
+        data-obus-user-deactivate-initial-done="<%= liveJob?.done ? '1' : '0' %>"
+      >
+        <section class="table-card panel-card allowed-lines-section">
+          <div class="table-head">
+            <h2>Kullanıcı Sorgusu</h2>
+          </div>
 
-        <div class="allowed-lines-grid obus-user-deactivate-grid">
-          <label class="allowed-lines-field">
-            <span>Kullanıcı Adı</span>
-            <input
-              type="text"
-              name="username"
-              value="<%= filters.username || '' %>"
-              autocomplete="off"
-              placeholder="Kullanıcı adını girin"
-            />
-          </label>
+          <form
+            class="allowed-lines-form obus-user-deactivate-form"
+            method="post"
+            action="/general/obus-user-deactivate"
+            data-obus-user-deactivate-form="1"
+            data-allowed-lines-ajax="1"
+          >
+            <div class="allowed-lines-grid obus-user-deactivate-grid">
+              <label class="allowed-lines-field">
+                <span>Kullanıcı Adı</span>
+                <input
+                  type="text"
+                  name="username"
+                  value="<%= filters.username || '' %>"
+                  autocomplete="off"
+                  placeholder="Kullanıcı adını girin"
+                  required
+                />
+              </label>
 
-          <label class="allowed-lines-field allowed-lines-field-company">
-            <span>Firmalar</span>
-            <select name="company" id="obus-user-deactivate-company">
-              <% companyOptions.forEach((company) => { %>
-                <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %>>
-                  <%= company.label %>
-                </option>
-              <% }) %>
-            </select>
-          </label>
-        </div>
+              <label class="allowed-lines-field allowed-lines-field-company">
+                <span>Firmalar</span>
+                <select name="company" id="obus-user-deactivate-company" required>
+                  <% companyOptions.forEach((company) => { %>
+                    <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %>>
+                      <%= company.label %>
+                    </option>
+                  <% }) %>
+                </select>
+              </label>
+            </div>
 
-        <p class="muted">Firma listesinden seçim yapabilirsiniz; varsayılan seçenek <code>Hepsi</code> olarak gelir.</p>
-      </section>
+            <div class="allowed-lines-actions">
+              <button
+                type="submit"
+                data-obus-user-deactivate-submit="1"
+                data-default-label="Kullanıcı Sorgula"
+                data-loading-label="Sorgulanıyor..."
+              >
+                Kullanıcı Sorgula
+              </button>
+            </div>
+
+            <div class="allowed-lines-loading-message" hidden>Kullanıcılar sorgulanıyor...</div>
+          </form>
+
+          <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
+            Kullanıcı adı ve firma seçip sorguyu başlatın.
+          </div>
+
+          <div class="obus-user-create-live-summary" data-obus-user-deactivate-summary="1">
+            Sonuç özeti burada canlı olarak güncellenecek.
+          </div>
+
+          <% if (report.requested && report.error) { %>
+            <div class="alert inline-alert"><%= report.error %></div>
+            <% if (report.errorDetail) { %>
+              <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
+            <% } %>
+          <% } %>
+          <% if (report.requested && report.userMessage) { %>
+            <div class="inline-success"><%= report.userMessage %></div>
+          <% } %>
+        </section>
+
+        <section class="table-card panel-card allowed-lines-response">
+          <div class="table-head">
+            <h2>Sonuçlar</h2>
+            <div class="table-actions">
+              <span class="pill" data-obus-user-deactivate-http="1">HTTP -</span>
+              <span class="pill" data-obus-user-deactivate-scanned="1">0 Firma</span>
+              <span class="pill" data-obus-user-deactivate-success="1">0 Başarılı</span>
+              <span class="pill" data-obus-user-deactivate-failure="1">0 Hatalı</span>
+              <span class="pill" data-obus-user-deactivate-total-users="1">0 Kullanıcı</span>
+              <span class="pill" data-obus-user-deactivate-active-users="1">0 Aktif</span>
+              <span class="pill" data-obus-user-deactivate-matched="1">0 Eşleşti</span>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table class="partners-raw-table">
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>username</th>
+                  <th>code</th>
+                  <th>cluster-url</th>
+                </tr>
+              </thead>
+              <tbody data-obus-user-deactivate-table-body="1"></tbody>
+            </table>
+          </div>
+
+          <div class="pill muted" data-obus-user-deactivate-empty="1">Eşleşen aktif kullanıcılar burada listelenecek.</div>
+        </section>
+
+        <aside class="table-card panel-card obus-user-deactivate-preview-card">
+          <div class="table-head">
+            <h2>Servis İzleme</h2>
+            <div class="table-actions">
+              <span class="pill muted" data-obus-user-deactivate-preview-state="1">Henüz istek yok</span>
+            </div>
+          </div>
+
+          <div class="obus-user-deactivate-preview-stack">
+            <section class="obus-user-deactivate-preview-block">
+              <div class="obus-user-deactivate-preview-head">
+                <strong>İlk Servis İsteği</strong>
+                <span class="pill muted" data-obus-user-deactivate-first-request-http="1">HTTP -</span>
+              </div>
+              <div class="label">Servis</div>
+              <div class="pill muted obus-user-deactivate-preview-service" data-obus-user-deactivate-first-request-service="1">
+                Henüz istek yok
+              </div>
+              <div class="allowed-lines-request-url">
+                <div class="label">İstek URL</div>
+                <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-first-request-url="1">Henüz istek yok.</pre>
+              </div>
+              <div class="allowed-lines-result-grid">
+                <div class="allowed-lines-result-item">
+                  <div class="label">İstek Body</div>
+                  <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-first-request-body="1">Henüz body yok.</pre>
+                </div>
+                <div class="allowed-lines-result-item">
+                  <div class="label">Yanıt</div>
+                  <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-first-request-response="1">Henüz response yok.</pre>
+                </div>
+              </div>
+            </section>
+
+            <section class="obus-user-deactivate-preview-block">
+              <div class="obus-user-deactivate-preview-head">
+                <strong>İlk Hatalı İstek</strong>
+                <span class="pill muted" data-obus-user-deactivate-failed-request-http="1">HTTP -</span>
+              </div>
+              <div class="label">Servis</div>
+              <div class="pill muted obus-user-deactivate-preview-service" data-obus-user-deactivate-failed-request-service="1">
+                Henüz hata isteği yok
+              </div>
+              <div class="allowed-lines-request-url">
+                <div class="label">İstek URL</div>
+                <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-failed-request-url="1">Henüz hata isteği yok.</pre>
+              </div>
+              <div class="allowed-lines-result-grid">
+                <div class="allowed-lines-result-item">
+                  <div class="label">İstek Body</div>
+                  <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-failed-request-body="1">Henüz body yok.</pre>
+                </div>
+                <div class="allowed-lines-result-item">
+                  <div class="label">Yanıt / Hata</div>
+                  <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-failed-request-response="1">Henüz hata response'u yok.</pre>
+                </div>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
     </section>
 
     <script src="/public/app.js" defer></script>
