@@ -27,8 +27,9 @@ save_secret() {
     -w "$secret_value" >/dev/null
 }
 
-printf "OBUS kullanici adini girin: "
+printf "OBUS kullanici adini girin [busproductapp]: "
 read -r obus_username
+obus_username="${obus_username:-busproductapp}"
 
 printf "OBUS sifresini girin: "
 stty -echo
@@ -41,6 +42,8 @@ if [[ -z "$obus_username" || -z "$obus_password" ]]; then
   exit 1
 fi
 
+save_secret "OBUS_SERVICE_LOGIN_USERNAME" "$obus_username"
+save_secret "OBUS_SERVICE_LOGIN_PASSWORD" "$obus_password"
 save_secret "INVENTORY_BRANCHES_LOGIN_USERNAME" "$obus_username"
 save_secret "INVENTORY_BRANCHES_LOGIN_PASSWORD" "$obus_password"
 save_secret "OBUS_JOB_FIXED_USERNAME" "$obus_username"
@@ -50,5 +53,5 @@ save_secret "OBUS_USER_CREATE_LOGIN_PASSWORD" "$obus_password"
 
 trap - EXIT INT TERM
 
-echo "6 secret macOS Keychain'e kaydedildi."
+echo "8 secret macOS Keychain'e kaydedildi."
 echo "Uygulamayi yeniden baslatin."

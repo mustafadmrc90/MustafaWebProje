@@ -48,12 +48,16 @@ cp .env.example .env
 
 Asagidaki login bilgileri `.env` dosyasindan degil, macOS Keychain'den okunur:
 
+- `MustafaWebProje/OBUS_SERVICE_LOGIN_USERNAME`
+- `MustafaWebProje/OBUS_SERVICE_LOGIN_PASSWORD`
 - `MustafaWebProje/INVENTORY_BRANCHES_LOGIN_USERNAME`
 - `MustafaWebProje/INVENTORY_BRANCHES_LOGIN_PASSWORD`
 - `MustafaWebProje/OBUS_JOB_FIXED_USERNAME`
 - `MustafaWebProje/OBUS_JOB_FIXED_PASSWORD`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_USERNAME`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_PASSWORD`
+
+Uygulama kaynak kodunda OBUS servis sifresi plaintext tutulmaz. Runtime'da gercek sifre macOS Keychain'den okunur; kod tarafinda yalnizca bcrypt hash ile dogrulama yapilir.
 
 Kurulum icin:
 

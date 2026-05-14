@@ -234,67 +234,86 @@ function buildMissingMacOsKeychainSecretsMessage(secretNames = []) {
   return `Obus servis giris bilgileri eksik: ${secretText}.`;
 }
 
-function getInventoryBranchesLoginCredentials() {
+const OBUS_SERVICE_LOGIN_USERNAME_SECRET_NAMES = Object.freeze([
+  "OBUS_SERVICE_LOGIN_USERNAME",
+  "OBUS_USER_CREATE_LOGIN_USERNAME",
+  "INVENTORY_BRANCHES_LOGIN_USERNAME",
+  "OBUS_JOB_FIXED_USERNAME"
+]);
+const OBUS_SERVICE_LOGIN_PASSWORD_SECRET_NAMES = Object.freeze([
+  "OBUS_SERVICE_LOGIN_PASSWORD",
+  "OBUS_USER_CREATE_LOGIN_PASSWORD",
+  "INVENTORY_BRANCHES_LOGIN_PASSWORD",
+  "OBUS_JOB_FIXED_PASSWORD"
+]);
+const OBUS_SERVICE_LOGIN_USERNAME_FALLBACK = "busproductapp";
+const OBUS_SERVICE_LOGIN_PASSWORD_BCRYPT_HASH = String(
+  process.env.OBUS_SERVICE_LOGIN_PASSWORD_BCRYPT_HASH ||
+    "$2a$12$U55obMMMb21LYx.OFPmbxeOHHv45iHDbHdb4bGWIMRT3YVai8h9cu"
+).trim();
+
+function buildInvalidObusServiceLoginPasswordMessage() {
+  return "Obus servis sifresi dogrulanamadi. macOS Keychain'deki OBUS_SERVICE_LOGIN_PASSWORD degerini guncelleyin.";
+}
+
+function buildObusServiceLoginConfigurationMessage(credentials = null) {
+  const explicitError = credentials && typeof credentials === "object" ? String(credentials.error || "").trim() : "";
+  if (explicitError) return explicitError;
+  return buildMissingMacOsKeychainSecretsMessage([
+    OBUS_SERVICE_LOGIN_USERNAME_SECRET_NAMES[0],
+    OBUS_SERVICE_LOGIN_PASSWORD_SECRET_NAMES[0]
+  ]);
+}
+
+function getObusServiceLoginCredentials() {
+  const username =
+    resolveObusCredentialSecret(OBUS_SERVICE_LOGIN_USERNAME_SECRET_NAMES, { trim: true }) ||
+    OBUS_SERVICE_LOGIN_USERNAME_FALLBACK;
+  const password = resolveObusCredentialSecret(OBUS_SERVICE_LOGIN_PASSWORD_SECRET_NAMES, { trim: false });
+
+  if (!password) {
+    return {
+      username,
+      password: "",
+      error: ""
+    };
+  }
+
+  if (OBUS_SERVICE_LOGIN_PASSWORD_BCRYPT_HASH) {
+    try {
+      if (!bcrypt.compareSync(password, OBUS_SERVICE_LOGIN_PASSWORD_BCRYPT_HASH)) {
+        return {
+          username,
+          password: "",
+          error: buildInvalidObusServiceLoginPasswordMessage()
+        };
+      }
+    } catch (err) {
+      return {
+        username,
+        password: "",
+        error: "Obus servis sifresi hash dogrulamasi tamamlanamadi."
+      };
+    }
+  }
+
   return {
-    username: resolveObusCredentialSecret(
-      [
-        "INVENTORY_BRANCHES_LOGIN_USERNAME",
-        "OBUS_JOB_FIXED_USERNAME",
-        "OBUS_USER_CREATE_LOGIN_USERNAME"
-      ],
-      { trim: true }
-    ),
-    password: resolveObusCredentialSecret(
-      [
-        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
-        "OBUS_JOB_FIXED_PASSWORD",
-        "OBUS_USER_CREATE_LOGIN_PASSWORD"
-      ],
-      { trim: false }
-    )
+    username,
+    password,
+    error: ""
   };
+}
+
+function getInventoryBranchesLoginCredentials() {
+  return getObusServiceLoginCredentials();
 }
 
 function getObusJobFixedCredentials() {
-  return {
-    username: resolveObusCredentialSecret(
-      [
-        "OBUS_JOB_FIXED_USERNAME",
-        "INVENTORY_BRANCHES_LOGIN_USERNAME",
-        "OBUS_USER_CREATE_LOGIN_USERNAME"
-      ],
-      { trim: true }
-    ),
-    password: resolveObusCredentialSecret(
-      [
-        "OBUS_JOB_FIXED_PASSWORD",
-        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
-        "OBUS_USER_CREATE_LOGIN_PASSWORD"
-      ],
-      { trim: false }
-    )
-  };
+  return getObusServiceLoginCredentials();
 }
 
 function getObusUserCreateLoginCredentials() {
-  return {
-    username: resolveObusCredentialSecret(
-      [
-        "OBUS_USER_CREATE_LOGIN_USERNAME",
-        "INVENTORY_BRANCHES_LOGIN_USERNAME",
-        "OBUS_JOB_FIXED_USERNAME"
-      ],
-      { trim: true }
-    ),
-    password: resolveObusCredentialSecret(
-      [
-        "OBUS_USER_CREATE_LOGIN_PASSWORD",
-        "INVENTORY_BRANCHES_LOGIN_PASSWORD",
-        "OBUS_JOB_FIXED_PASSWORD"
-      ],
-      { trim: false }
-    )
-  };
+  return getObusServiceLoginCredentials();
 }
 
 const app = express();
@@ -7386,10 +7405,7 @@ async function searchStationPassengerJourneysByPlate(plateQuery) {
       requestUrl: endpointUrl,
       requestDate,
       requestDateTime,
-      error: buildMissingMacOsKeychainSecretsMessage([
-        "INVENTORY_BRANCHES_LOGIN_USERNAME",
-        "INVENTORY_BRANCHES_LOGIN_PASSWORD"
-      ]),
+      error: buildObusServiceLoginConfigurationMessage(inventoryLogin),
       detail: ""
     };
   }
@@ -7899,6 +7915,17 @@ async function fetchObusMerkezBranchMapForTarget({
     };
   }
 
+  if (!inventoryLogin.username || !inventoryLogin.password) {
+    return {
+      cluster,
+      map: new Map(),
+      rows: [],
+      error: buildObusServiceLoginConfigurationMessage(inventoryLogin),
+      serviceLogs: [],
+      failedServiceLog: null
+    };
+  }
+
   const loginResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl,
     companyUrl: endpointUrl,
@@ -8058,10 +8085,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   if (!inventoryLogin.username || !inventoryLogin.password) {
     return {
       rows: sourceRows,
-      notice: buildMissingMacOsKeychainSecretsMessage([
-        "INVENTORY_BRANCHES_LOGIN_USERNAME",
-        "INVENTORY_BRANCHES_LOGIN_PASSWORD"
-      ])
+      notice: buildObusServiceLoginConfigurationMessage(inventoryLogin)
     };
   }
 
@@ -15904,10 +15928,7 @@ async function fetchObusUserDeactivateSearchReport({ username = "", partnerItems
 
   const loginCredentials = getObusUserCreateLoginCredentials();
   if (!loginCredentials.username || !loginCredentials.password) {
-    report.error = buildMissingMacOsKeychainSecretsMessage([
-      "OBUS_USER_CREATE_LOGIN_USERNAME",
-      "OBUS_USER_CREATE_LOGIN_PASSWORD"
-    ]);
+    report.error = buildObusServiceLoginConfigurationMessage(loginCredentials);
     return report;
   }
 
@@ -16059,10 +16080,7 @@ async function runObusUserDeactivateSearchJob(job, { username = "", partnerItems
   if (!loginCredentials.username || !loginCredentials.password) {
     finishObusLiveJob(
       job,
-      buildMissingMacOsKeychainSecretsMessage([
-        "OBUS_USER_CREATE_LOGIN_USERNAME",
-        "OBUS_USER_CREATE_LOGIN_PASSWORD"
-      ])
+      buildObusServiceLoginConfigurationMessage(loginCredentials)
     );
     return;
   }
@@ -16269,10 +16287,7 @@ async function startObusUserDeactivateSearchJob({ username = "", ownerUserId = 0
     return {
       ok: false,
       statusCode: 400,
-      error: buildMissingMacOsKeychainSecretsMessage([
-        "OBUS_USER_CREATE_LOGIN_USERNAME",
-        "OBUS_USER_CREATE_LOGIN_PASSWORD"
-      ])
+      error: buildObusServiceLoginConfigurationMessage(loginCredentials)
     };
   }
 
@@ -17233,10 +17248,7 @@ async function executeObusJobsScreenAction({ filters, partnerItems }) {
   const obusJobsLogin = getObusJobFixedCredentials();
 
   if (!obusJobsLogin.username || !obusJobsLogin.password) {
-    report.error = buildMissingMacOsKeychainSecretsMessage([
-      "OBUS_JOB_FIXED_USERNAME",
-      "OBUS_JOB_FIXED_PASSWORD"
-    ]);
+    report.error = buildObusServiceLoginConfigurationMessage(obusJobsLogin);
     return report;
   }
 
@@ -17484,6 +17496,17 @@ async function createObusPartnerRuleForCompany({ company, startDate, endDate, ra
   const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
   const branchRaw = String(company?.meta?.branchId || "").trim();
 
+  if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: "",
+      partnerId: Number.isInteger(partnerIdValue) ? partnerIdValue : null,
+      status: null,
+      error: buildObusServiceLoginConfigurationMessage(obusUserCreateLogin)
+    };
+  }
+
   if (!companyCluster) {
     return {
       ok: false,
@@ -17729,6 +17752,18 @@ async function updateObusPartnerRuleForCompany({
   const partnerIdValue = normalizeObusPartnerIdValue(partnerIdRaw);
   const partnerRuleIdValue = normalizeObusPartnerIdValue(partnerRuleId);
   const branchRaw = String(company?.meta?.branchId || "").trim();
+
+  if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
+    return {
+      ok: false,
+      label: companyLabel,
+      requestUrl: "",
+      partnerId: Number.isInteger(partnerIdValue) ? partnerIdValue : null,
+      partnerRuleId: Number.isInteger(partnerRuleIdValue) ? partnerRuleIdValue : null,
+      status: null,
+      error: buildObusServiceLoginConfigurationMessage(obusUserCreateLogin)
+    };
+  }
 
   if (!companyCluster) {
     return {
@@ -18641,10 +18676,7 @@ async function runObusBulkUserCreateJob(job, { entries, partnerItems }) {
   if (!loginCredentials.username || !loginCredentials.password) {
     finishObusLiveJob(
       job,
-      buildMissingMacOsKeychainSecretsMessage([
-        "OBUS_USER_CREATE_LOGIN_USERNAME",
-        "OBUS_USER_CREATE_LOGIN_PASSWORD"
-      ])
+      buildObusServiceLoginConfigurationMessage(loginCredentials)
     );
     return;
   }
@@ -20577,10 +20609,7 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
     if (!loginCredentials.username || !loginCredentials.password) {
       return res.status(400).json({
         ok: false,
-        error: buildMissingMacOsKeychainSecretsMessage([
-          "OBUS_USER_CREATE_LOGIN_USERNAME",
-          "OBUS_USER_CREATE_LOGIN_PASSWORD"
-        ])
+        error: buildObusServiceLoginConfigurationMessage(loginCredentials)
       });
     }
 
@@ -20727,10 +20756,7 @@ app.post("/api/obus-rule-define/create", requireAuth, requireMenuAccess("obus-ru
     if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
       return res.status(400).json({
         ok: false,
-        error: buildMissingMacOsKeychainSecretsMessage([
-          "OBUS_USER_CREATE_LOGIN_USERNAME",
-          "OBUS_USER_CREATE_LOGIN_PASSWORD"
-        ])
+        error: buildObusServiceLoginConfigurationMessage(obusUserCreateLogin)
       });
     }
 
@@ -20840,10 +20866,7 @@ app.post("/api/obus-rule-define/update", requireAuth, requireMenuAccess("obus-ru
     if (!obusUserCreateLogin.username || !obusUserCreateLogin.password) {
       return res.status(400).json({
         ok: false,
-        error: buildMissingMacOsKeychainSecretsMessage([
-          "OBUS_USER_CREATE_LOGIN_USERNAME",
-          "OBUS_USER_CREATE_LOGIN_PASSWORD"
-        ])
+        error: buildObusServiceLoginConfigurationMessage(obusUserCreateLogin)
       });
     }
 
@@ -20995,6 +21018,12 @@ app.post(
       const tripId = String(req.body?.tripId || req.body?.journeyId || req.body?.seferId || "").trim();
       if (!tripId) {
         return res.status(400).json({ ok: false, error: "journey-id zorunludur." });
+      }
+      if (!inventoryLogin.username || !inventoryLogin.password) {
+        return res.status(400).json({
+          ok: false,
+          error: buildObusServiceLoginConfigurationMessage(inventoryLogin)
+        });
       }
 
       const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
@@ -21180,6 +21209,12 @@ app.post(
       }
       if (!stationId) {
         return res.status(400).json({ ok: false, error: "station-id zorunludur." });
+      }
+      if (!inventoryLogin.username || !inventoryLogin.password) {
+        return res.status(400).json({
+          ok: false,
+          error: buildObusServiceLoginConfigurationMessage(inventoryLogin)
+        });
       }
 
       const endpointUrl = normalizeTargetUrl(STATION_PASSENGER_INFO_API_URL);
