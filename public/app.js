@@ -998,9 +998,9 @@
     const loadingMessage = form?.querySelector(".allowed-lines-loading-message");
     const submitButton =
       form?.querySelector("[data-obus-user-deactivate-submit='1']") || form?.querySelector("button[type='submit']");
-    const usernameInput = form?.querySelector("input[name='username']");
     const companySelect = form?.querySelector("select[name='company']");
     const httpPill = root.querySelector("[data-obus-user-deactivate-http='1']");
+    const durationPill = root.querySelector("[data-obus-user-deactivate-duration='1']");
     const scannedPill = root.querySelector("[data-obus-user-deactivate-scanned='1']");
     const successPill = root.querySelector("[data-obus-user-deactivate-success='1']");
     const failurePill = root.querySelector("[data-obus-user-deactivate-failure='1']");
@@ -1018,15 +1018,15 @@
     const failedRequestUrlEl = root.querySelector("[data-obus-user-deactivate-failed-request-url='1']");
     const failedRequestBodyEl = root.querySelector("[data-obus-user-deactivate-failed-request-body='1']");
     const failedRequestResponseEl = root.querySelector("[data-obus-user-deactivate-failed-request-response='1']");
-    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !usernameInput || !companySelect) {
+    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !companySelect) {
       return;
     }
 
     const submitDefaultLabel =
       String(submitButton.getAttribute("data-default-label") || submitButton.textContent || "").trim() ||
-      "Kullanıcıyı Sorgula";
+      "Kullanıcıları Listele";
     const submitLoadingLabel =
-      String(submitButton.getAttribute("data-loading-label") || "").trim() || "Sorgulanıyor...";
+      String(submitButton.getAttribute("data-loading-label") || "").trim() || "Listeleniyor...";
 
     const createEmptyDebugPreviewState = () => ({
       firstRequest: null,
@@ -1060,7 +1060,7 @@
     let activeJobPollTimerId = 0;
     let activeJobTimerId = 0;
     let activeJobFailureCount = 0;
-    const matchRowsByKey = new Map();
+    const listedRowsByKey = new Map();
     let snapshot = {
       done: String(root.getAttribute("data-obus-user-deactivate-initial-done") || "").trim() === "1",
       error: "",
@@ -1076,6 +1076,7 @@
       failureCompanyCount: 0,
       totalUserCount: 0,
       activeUserCount: 0,
+      listedUserCount: 0,
       matchedUserCount: 0,
       failureSamples: [],
       debugPreview: createEmptyDebugPreviewState()
@@ -1096,7 +1097,6 @@
       form.setAttribute("aria-busy", busy ? "true" : "false");
       submitButton.disabled = busy;
       submitButton.textContent = busy ? submitLoadingLabel : submitDefaultLabel;
-      usernameInput.disabled = busy;
       companySelect.disabled = busy;
       if (loadingMessage) {
         loadingMessage.hidden = !busy;
@@ -1117,12 +1117,6 @@
     const updatePageUrl = () => {
       try {
         const url = new URL(window.location.href);
-        const username = String(usernameInput.value || "").trim();
-        if (username) {
-          url.searchParams.set("username", username);
-        } else {
-          url.searchParams.delete("username");
-        }
         const company = String(companySelect.value || "").trim();
         if (company) {
           url.searchParams.set("company", company);
@@ -1147,13 +1141,17 @@
         : done
           ? `HTTP ${snapshot.failureCount > 0 ? 207 : 200}`
           : "HTTP -";
+      const hasDuration = activeJobId && activeJobCreatedAt > 0;
+      const durationEndTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
+      const durationText = hasDuration ? `Süre ${formatElapsedTime(durationEndTime - activeJobCreatedAt)}` : "Süre -";
       if (httpPill) httpPill.textContent = httpText;
+      if (durationPill) durationPill.textContent = durationText;
       if (scannedPill) scannedPill.textContent = `${Number(snapshot.scannedCompanyCount || snapshot.totalCount || 0)} Firma`;
       if (successPill) successPill.textContent = `${Number(snapshot.successCompanyCount || snapshot.successCount || 0)} Başarılı`;
       if (failurePill) failurePill.textContent = `${Number(snapshot.failureCompanyCount || snapshot.failureCount || 0)} Hatalı`;
       if (totalUsersPill) totalUsersPill.textContent = `${Number(snapshot.totalUserCount || 0)} Kullanıcı`;
       if (activeUsersPill) activeUsersPill.textContent = `${Number(snapshot.activeUserCount || 0)} Aktif`;
-      if (matchedPill) matchedPill.textContent = `${matchRowsByKey.size} Eşleşti`;
+      if (matchedPill) matchedPill.textContent = `${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)} Listelendi`;
     };
 
     const renderSummary = () => {
@@ -1171,7 +1169,7 @@
           return;
         }
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
-        appendLine("Eşleşen kayıtlar geldikçe alttaki tabloya satır satır eklenecek.");
+        appendLine("Kullanıcı kayıtları geldikçe alttaki tabloya satır satır eklenecek.");
         return;
       }
 
@@ -1181,10 +1179,13 @@
         )} | Hatalı: ${Number(snapshot.failureCount || 0)}`
       );
       appendLine(
-        `Bulunan eşleşme: ${matchRowsByKey.size} | Taranan kullanıcı: ${Number(snapshot.totalUserCount || 0)} | Aktif kullanıcı: ${Number(
+        `Listelenen kullanıcı: ${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)} | Taranan kullanıcı: ${Number(
+          snapshot.totalUserCount || 0
+        )} | Aktif kullanıcı: ${Number(
           snapshot.activeUserCount || 0
         )}`
       );
+      appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
 
       if (snapshot.error) {
         appendLine(snapshot.error);
@@ -1196,9 +1197,9 @@
             .join(" | ")}`
         );
       } else if (snapshot.done) {
-        appendLine("Sorgu tamamlandı.");
+        appendLine("Listeleme tamamlandı.");
       } else {
-        appendLine("Canlı sorgu devam ediyor.");
+        appendLine("Canlı listeleme devam ediyor.");
       }
     };
 
@@ -1261,18 +1262,18 @@
     };
 
     const renderTable = () => {
-      const rows = Array.from(matchRowsByKey.values()).sort((a, b) => {
+      const rows = Array.from(listedRowsByKey.values()).sort((a, b) => {
         const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
         if (byCode !== 0) return byCode;
-        const byClusterUrl = String(a.clusterUrl || "").localeCompare(String(b.clusterUrl || ""), "tr");
-        if (byClusterUrl !== 0) return byClusterUrl;
+        const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
+        if (byUsername !== 0) return byUsername;
         return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
       });
 
       tableBody.innerHTML = "";
       rows.forEach((row) => {
         const tr = document.createElement("tr");
-        [row.userId || "-", row.username || "-", row.code || "-", row.clusterUrl || "-"].forEach((value) => {
+        [row.userId || "-", row.username || "-", row.fullName || "-", row.isActiveText || "-", row.code || "-", row.clusterUrl || "-"].forEach((value) => {
           const td = document.createElement("td");
           td.textContent = value;
           tr.appendChild(td);
@@ -1285,8 +1286,8 @@
 
       if (activeJobId) {
         emptyEl.textContent = snapshot.done
-          ? "Eşleşen aktif kullanıcı bulunamadı."
-          : "Eşleşen kayıtlar geldikçe tabloya satır satır eklenecek.";
+          ? "Listelenecek kullanıcı bulunamadı."
+          : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
       } else {
         emptyEl.textContent = "Sonuç listesi burada satır satır oluşacak.";
       }
@@ -1298,17 +1299,18 @@
           setStatus(snapshot.error, "error");
           return;
         }
-        setStatus("Kullanıcı adı ve firma seçip sorguyu başlatın.");
+        setStatus("Firma seçip listelemeyi başlatın.");
         return;
       }
 
       const endTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
       const elapsedText = formatElapsedTime(endTime - activeJobCreatedAt);
+      renderPills();
 
       if (snapshot.done) {
         const finalText = snapshot.error
           ? `${snapshot.error} | Süre: ${elapsedText}`
-          : `Sorgu tamamlandı. Başarılı firma: ${Number(snapshot.successCount || 0)}/${Number(
+          : `Listeleme tamamlandı. Başarılı firma: ${Number(snapshot.successCount || 0)}/${Number(
               snapshot.totalCount || 0
             )} | Hatalı: ${Number(snapshot.failureCount || 0)} | Süre: ${elapsedText}`;
         setStatus(finalText, snapshot.error || Number(snapshot.failureCount || 0) > 0 ? "error" : "success");
@@ -1316,9 +1318,9 @@
       }
 
       setStatus(
-        `Kullanıcılar sorgulanıyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
+        `Kullanıcılar listeleniyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
           snapshot.totalCount || 0
-        )} | Eşleşen: ${matchRowsByKey.size}`,
+        )} | Listelenen: ${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)}`,
         "muted"
       );
     };
@@ -1353,7 +1355,7 @@
       activeJobCreatedAt = 0;
       activeJobFinishedAt = 0;
       activeJobFailureCount = 0;
-      matchRowsByKey.clear();
+      listedRowsByKey.clear();
       snapshot = {
         done: false,
         error: "",
@@ -1366,6 +1368,7 @@
         failureCompanyCount: 0,
         totalUserCount: 0,
         activeUserCount: 0,
+        listedUserCount: 0,
         matchedUserCount: 0,
         failureSamples: [],
         debugPreview: createEmptyDebugPreviewState()
@@ -1400,7 +1403,10 @@
         snapshot.failureCompanyCount = Number(data.summary.failureCompanyCount || snapshot.failureCount || 0);
         snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
         snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
-        snapshot.matchedUserCount = Number(data.summary.matchedUserCount || matchRowsByKey.size || 0);
+        snapshot.listedUserCount = Number(
+          data.summary.listedUserCount || data.summary.matchedUserCount || listedRowsByKey.size || 0
+        );
+        snapshot.matchedUserCount = Number(data.summary.matchedUserCount || snapshot.listedUserCount || 0);
         snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
         snapshot.debugPreview =
           data.summary.debugPreview && typeof data.summary.debugPreview === "object"
@@ -1415,12 +1421,14 @@
     const applyEvents = (events) => {
       (Array.isArray(events) ? events : []).forEach((event) => {
         const meta = event?.meta;
-        if (!meta || meta.type !== "match") return;
+        if (!meta || (meta.type !== "user" && meta.type !== "match")) return;
         const key = String(event?.key || "").trim();
-        if (!key || matchRowsByKey.has(key)) return;
-        matchRowsByKey.set(key, {
+        if (!key || listedRowsByKey.has(key)) return;
+        listedRowsByKey.set(key, {
           userId: String(meta.userId || "").trim(),
           username: String(meta.username || "").trim(),
+          fullName: String(meta.fullName || "").trim(),
+          isActiveText: String(meta.isActiveText || "").trim(),
           code: String(meta.code || "").trim(),
           clusterUrl: String(meta.clusterUrl || "").trim()
         });
@@ -1447,7 +1455,7 @@
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "Kullanıcı sorgu durumu okunamadı"));
+          throw new Error(getApiErrorMessage(response, data, "Kullanıcı listeleme durumu okunamadı"));
         }
 
         activeJobFailureCount = 0;
@@ -1469,7 +1477,7 @@
         activeJobFailureCount += 1;
         if (activeJobFailureCount >= 3) {
           snapshot.done = true;
-          snapshot.error = err?.message || "Kullanıcı sorgu durumu okunamadı.";
+          snapshot.error = err?.message || "Kullanıcı listeleme durumu okunamadı.";
           setBusy(false);
           stopTimers();
           finalizeRender();
@@ -1485,14 +1493,6 @@
         return;
       }
 
-      const username = String(usernameInput.value || "").trim();
-      if (!username) {
-        setStatus("Kullanıcı adı zorunludur.", "error");
-        usernameInput.focus();
-        event.preventDefault();
-        return;
-      }
-
       resetJobState();
       activeJobId = "";
       updatePageUrl();
@@ -1501,7 +1501,7 @@
       renderDebugPreview();
       renderTable();
       setBusy(true);
-      setStatus("Sorgu başlatılıyor...");
+      setStatus("Listeleme başlatılıyor...");
     });
 
     setBusy(activeJobId && snapshot.done !== true);

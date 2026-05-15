@@ -21,9 +21,9 @@
                 <path d="M16 11h6"></path>
               </svg>
             </span>
-            <span>Obus Kullanıcı Pasife Al</span>
+            <span>Obus Kullanıcı Listele</span>
           </h1>
-          <p>Seçilen firmada veya tüm firmalarda kullanıcı adı birebir eşleşen ve <code>is-active=true</code> olan kayıtlar listelenir.</p>
+          <p>Seçilen firmadaki veya tüm firmalardaki kullanıcılar listelenir. <code>Hepsi</code> seçilirse tüm firmalar taranır.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -49,7 +49,7 @@
       >
         <section class="table-card panel-card allowed-lines-section">
           <div class="table-head">
-            <h2>Kullanıcı Sorgusu</h2>
+            <h2>Kullanıcı Listeleme</h2>
           </div>
 
           <form
@@ -60,18 +60,6 @@
             data-allowed-lines-ajax="1"
           >
             <div class="allowed-lines-grid obus-user-deactivate-grid">
-              <label class="allowed-lines-field">
-                <span>Kullanıcı Adı</span>
-                <input
-                  type="text"
-                  name="username"
-                  value="<%= filters.username || '' %>"
-                  autocomplete="off"
-                  placeholder="Kullanıcı adını girin"
-                  required
-                />
-              </label>
-
               <label class="allowed-lines-field allowed-lines-field-company">
                 <span>Firmalar</span>
                 <select name="company" id="obus-user-deactivate-company" required>
@@ -88,18 +76,18 @@
               <button
                 type="submit"
                 data-obus-user-deactivate-submit="1"
-                data-default-label="Kullanıcı Sorgula"
-                data-loading-label="Sorgulanıyor..."
+                data-default-label="Kullanıcıları Listele"
+                data-loading-label="Listeleniyor..."
               >
-                Kullanıcı Sorgula
+                Kullanıcıları Listele
               </button>
             </div>
 
-            <div class="allowed-lines-loading-message" hidden>Kullanıcılar sorgulanıyor...</div>
+            <div class="allowed-lines-loading-message" hidden>Kullanıcılar listeleniyor...</div>
           </form>
 
           <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
-            Kullanıcı adı ve firma seçip sorguyu başlatın.
+            Firma seçip listelemeyi başlatın.
           </div>
 
           <div class="obus-user-create-live-summary" data-obus-user-deactivate-summary="1">
@@ -122,12 +110,13 @@
             <h2>Sonuçlar</h2>
             <div class="table-actions">
               <span class="pill" data-obus-user-deactivate-http="1">HTTP -</span>
+              <span class="pill" data-obus-user-deactivate-duration="1">Süre -</span>
               <span class="pill" data-obus-user-deactivate-scanned="1">0 Firma</span>
               <span class="pill" data-obus-user-deactivate-success="1">0 Başarılı</span>
               <span class="pill" data-obus-user-deactivate-failure="1">0 Hatalı</span>
               <span class="pill" data-obus-user-deactivate-total-users="1">0 Kullanıcı</span>
               <span class="pill" data-obus-user-deactivate-active-users="1">0 Aktif</span>
-              <span class="pill" data-obus-user-deactivate-matched="1">0 Eşleşti</span>
+              <span class="pill" data-obus-user-deactivate-matched="1">0 Listelendi</span>
             </div>
           </div>
 
@@ -137,6 +126,8 @@
                 <tr>
                   <th>id</th>
                   <th>username</th>
+                  <th>full-name</th>
+                  <th>is-active</th>
                   <th>code</th>
                   <th>cluster-url</th>
                 </tr>
@@ -145,7 +136,7 @@
             </table>
           </div>
 
-          <div class="pill muted" data-obus-user-deactivate-empty="1">Eşleşen aktif kullanıcılar burada listelenecek.</div>
+          <div class="pill muted" data-obus-user-deactivate-empty="1">Listelenen kullanıcılar burada gösterilecek.</div>
         </section>
 
         <aside class="table-card panel-card obus-user-deactivate-preview-card">
