@@ -1185,7 +1185,7 @@
 
       if (!activeJobId) {
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
-        appendLine("Kullanıcı kayıtları geldikçe soldaki tabloya eklenecek.");
+        appendLine("Kullanıcı kayıtları geldikçe sağdaki tabloya eklenecek.");
         return;
       }
 
@@ -1254,7 +1254,7 @@
 
     const syncRunningStatus = () => {
       if (!activeJobId || !activeJobCreatedAt) {
-        setStatus("Sağdaki firma listesinden seçim yapın ve listelemeyi başlatın.");
+        setStatus("Soldaki firma listesinden seçim yapın ve listelemeyi başlatın.");
         renderPills();
         return;
       }

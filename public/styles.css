@@ -4699,7 +4699,7 @@ button.ghost {
 
 .obus-user-deactivate-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }

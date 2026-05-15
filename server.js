@@ -15948,7 +15948,7 @@ async function fetchObusUserDeactivateCompanyResult({
 
     const allRows = extractObusUserDeactivateRows(parsed);
     const activeRows = allRows.filter((row) => row.isActive === true);
-    const listedRows = allRows
+    const listedRows = activeRows
       .map((row) => ({
         userId: String(row.userId || "").trim(),
         partnerId: String(row.partnerId || "").trim() || partnerId,
