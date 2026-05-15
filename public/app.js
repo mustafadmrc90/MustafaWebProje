@@ -899,8 +899,8 @@
       const url = String(urlValue || "").trim();
       const cluster = String(clusterValue || "").trim().toLowerCase();
       if (!url || !cluster) return url;
-      if (/cluster\d+/i.test(url)) {
-        return url.replace(/cluster\d+/i, cluster);
+      if (/cluster(?:\d+|x)/i.test(url)) {
+        return url.replace(/cluster(?:\d+|x)/i, cluster);
       }
       return url;
     };
@@ -996,6 +996,8 @@
     const selectAllCheckbox = root.querySelector("[data-obus-user-deactivate-select-all='1']");
     const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-user-deactivate-company-checkbox='1']"));
     const selectedCompaniesInput = root.querySelector("[data-obus-user-deactivate-selected-companies='1']");
+    const usernameFilterInput = root.querySelector("[data-obus-user-deactivate-username-filter='1']");
+    const filterButton = root.querySelector("[data-obus-user-deactivate-filter-submit='1']");
     const submitButton = root.querySelector("[data-obus-user-deactivate-submit='1']");
     const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
     const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
@@ -1010,6 +1012,13 @@
     const totalUsersPill = root.querySelector("[data-obus-user-deactivate-total-users='1']");
     const activeUsersPill = root.querySelector("[data-obus-user-deactivate-active-users='1']");
     const matchedPill = root.querySelector("[data-obus-user-deactivate-matched='1']");
+    const debugPanel = root.querySelector("[data-obus-user-deactivate-debug='1']");
+    const debugCompanyPill = root.querySelector("[data-obus-user-deactivate-debug-company='1']");
+    const debugServicePill = root.querySelector("[data-obus-user-deactivate-debug-service='1']");
+    const debugStatusPill = root.querySelector("[data-obus-user-deactivate-debug-status='1']");
+    const debugUrlEl = root.querySelector("[data-obus-user-deactivate-debug-url='1']");
+    const debugRequestBodyEl = root.querySelector("[data-obus-user-deactivate-debug-request-body='1']");
+    const debugResponseBodyEl = root.querySelector("[data-obus-user-deactivate-debug-response-body='1']");
 
     if (
       !multiselect ||
@@ -1037,6 +1046,7 @@
         .filter((item) => item.checked)
         .map((item) => String(item.value || "").trim())
         .filter(Boolean);
+    const normalizeDeactivateUsernameFilter = (value) => String(value || "").trim().toLocaleLowerCase("tr");
 
     const formatElapsedTime = (elapsedMs) => {
       const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
@@ -1047,6 +1057,26 @@
         return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
       }
       return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+
+    const formatDebugPayload = (value, fallback = "-") => {
+      if (value === undefined || value === null) return fallback;
+      if (typeof value === "object") {
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch (err) {
+          return String(value || "").trim() || fallback;
+        }
+      }
+
+      const text = String(value || "").trim();
+      if (!text) return fallback;
+
+      try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+      } catch (err) {
+        return text;
+      }
     };
 
     const updatePageUrl = () => {
@@ -1111,6 +1141,7 @@
     let activeJobPollTimerId = 0;
     let activeJobTimerId = 0;
     let activeJobFailureCount = 0;
+    let appliedUsernameFilter = "";
     const listedRowsByKey = new Map();
     let snapshot = {
       done: String(root.getAttribute("data-obus-user-deactivate-initial-done") || "").trim() === "1",
@@ -1128,7 +1159,8 @@
       totalUserCount: 0,
       activeUserCount: 0,
       listedUserCount: 0,
-      failureSamples: []
+      failureSamples: [],
+      failedRequestPreview: null
     };
 
     const setStatus = (message, tone = "muted") => {
@@ -1154,8 +1186,29 @@
       }
     };
 
+    const compareListedRows = (a, b) => {
+      const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
+      if (byCode !== 0) return byCode;
+      const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
+      if (byUsername !== 0) return byUsername;
+      return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
+    };
+
+    const getTotalListedRowCount = () => Math.max(Number(snapshot.listedUserCount || 0), listedRowsByKey.size);
+
+    const getVisibleListedRows = () => {
+      const normalizedFilter = normalizeDeactivateUsernameFilter(appliedUsernameFilter);
+      const rows = Array.from(listedRowsByKey.values()).sort(compareListedRows);
+      if (!normalizedFilter) return rows;
+      return rows.filter((row) =>
+        normalizeDeactivateUsernameFilter(row?.username || "").includes(normalizedFilter)
+      );
+    };
+
     const renderPills = () => {
       const done = snapshot.done === true;
+      const visibleListedCount = getVisibleListedRows().length;
+      const totalListedCount = getTotalListedRowCount();
       const httpText = snapshot.error
         ? "HTTP -"
         : done
@@ -1171,7 +1224,11 @@
       if (failurePill) failurePill.textContent = `${Number(snapshot.failureCompanyCount || snapshot.failureCount || 0)} Hatalı`;
       if (totalUsersPill) totalUsersPill.textContent = `${Number(snapshot.totalUserCount || 0)} Kullanıcı`;
       if (activeUsersPill) activeUsersPill.textContent = `${Number(snapshot.activeUserCount || 0)} Aktif`;
-      if (matchedPill) matchedPill.textContent = `${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)} Listelendi`;
+      if (matchedPill) {
+        matchedPill.textContent = appliedUsernameFilter
+          ? `${visibleListedCount} / ${totalListedCount} Listelendi`
+          : `${totalListedCount} Listelendi`;
+      }
     };
 
     const renderSummary = () => {
@@ -1195,10 +1252,14 @@
         )} | Hatalı: ${Number(snapshot.failureCount || 0)}`
       );
       appendLine(
-        `Listelenen kullanıcı: ${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)} | Taranan kullanıcı: ${Number(
+        `Listelenen kullanıcı: ${getTotalListedRowCount()} | Taranan kullanıcı: ${Number(
           snapshot.totalUserCount || 0
         )} | Aktif kullanıcı: ${Number(snapshot.activeUserCount || 0)}`
       );
+
+      if (appliedUsernameFilter) {
+        appendLine(`Username filtresi: ${appliedUsernameFilter} | Eşleşen: ${getVisibleListedRows().length}`);
+      }
 
       if (activeJobCreatedAt > 0) {
         appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
@@ -1221,13 +1282,7 @@
     };
 
     const renderTable = () => {
-      const rows = Array.from(listedRowsByKey.values()).sort((a, b) => {
-        const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
-        if (byCode !== 0) return byCode;
-        const byUsername = String(a.username || "").localeCompare(String(b.username || ""), "tr");
-        if (byUsername !== 0) return byUsername;
-        return String(a.userId || "").localeCompare(String(b.userId || ""), "tr");
-      });
+      const rows = getVisibleListedRows();
 
       tableBody.innerHTML = "";
       rows.forEach((row) => {
@@ -1243,6 +1298,11 @@
       emptyEl.hidden = rows.length > 0;
       if (rows.length > 0) return;
 
+      if (appliedUsernameFilter) {
+        emptyEl.textContent = "Girilen username filtresine uygun kullanıcı bulunamadı.";
+        return;
+      }
+
       if (activeJobId) {
         emptyEl.textContent = snapshot.done
           ? "Listelenecek kullanıcı bulunamadı."
@@ -1250,6 +1310,44 @@
       } else {
         emptyEl.textContent = "Listelenen kullanıcılar burada gösterilecek.";
       }
+    };
+
+    const renderDebugPreview = () => {
+      if (
+        !debugPanel ||
+        !debugCompanyPill ||
+        !debugServicePill ||
+        !debugStatusPill ||
+        !debugUrlEl ||
+        !debugRequestBodyEl ||
+        !debugResponseBodyEl
+      ) {
+        return;
+      }
+
+      const preview =
+        snapshot.failedRequestPreview && typeof snapshot.failedRequestPreview === "object"
+          ? snapshot.failedRequestPreview
+          : null;
+
+      if (!preview) {
+        debugPanel.hidden = true;
+        debugCompanyPill.textContent = "Firma -";
+        debugServicePill.textContent = "Servis -";
+        debugStatusPill.textContent = "HTTP -";
+        debugUrlEl.textContent = "-";
+        debugRequestBodyEl.textContent = "{}";
+        debugResponseBodyEl.textContent = "-";
+        return;
+      }
+
+      debugPanel.hidden = false;
+      debugCompanyPill.textContent = String(preview.companyLabel || "").trim() || "Firma bilinmiyor";
+      debugServicePill.textContent = String(preview.service || "").trim() || "Servis bilinmiyor";
+      debugStatusPill.textContent = Number.isFinite(Number(preview.status)) ? `HTTP ${Number(preview.status)}` : "HTTP -";
+      debugUrlEl.textContent = String(preview.requestUrl || "").trim() || "-";
+      debugRequestBodyEl.textContent = formatDebugPayload(preview.requestBody, "{}");
+      debugResponseBodyEl.textContent = formatDebugPayload(preview.responseBody, "-");
     };
 
     const syncRunningStatus = () => {
@@ -1276,7 +1374,7 @@
       setStatus(
         `Kullanıcılar listeleniyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
           snapshot.totalCount || 0
-        )} | Listelenen: ${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)}`,
+        )} | Listelenen: ${getTotalListedRowCount()}`,
         "muted"
       );
     };
@@ -1325,7 +1423,8 @@
         totalUserCount: 0,
         activeUserCount: 0,
         listedUserCount: 0,
-        failureSamples: []
+        failureSamples: [],
+        failedRequestPreview: null
       };
     };
 
@@ -1350,6 +1449,7 @@
         : snapshot.processedCount;
       snapshot.successCount = Number.isFinite(Number(data.successCount)) ? Number(data.successCount) : snapshot.successCount;
       snapshot.failureCount = Number.isFinite(Number(data.failureCount)) ? Number(data.failureCount) : snapshot.failureCount;
+      snapshot.failedRequestPreview = null;
 
       if (data.summary && typeof data.summary === "object") {
         snapshot.scannedCompanyCount = Number(data.summary.scannedCompanyCount || snapshot.totalCount || 0);
@@ -1359,6 +1459,13 @@
         snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
         snapshot.listedUserCount = Number(data.summary.listedUserCount || listedRowsByKey.size || 0);
         snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
+        snapshot.failedRequestPreview =
+          data.summary.debugPreview &&
+          typeof data.summary.debugPreview === "object" &&
+          data.summary.debugPreview.failedRequest &&
+          typeof data.summary.debugPreview.failedRequest === "object"
+            ? data.summary.debugPreview.failedRequest
+            : null;
       }
     };
 
@@ -1383,7 +1490,13 @@
       renderPills();
       renderSummary();
       renderTable();
+      renderDebugPreview();
       syncRunningStatus();
+    };
+
+    const applyUsernameFilter = () => {
+      appliedUsernameFilter = String(usernameFilterInput?.value || "").trim();
+      finalizeRender();
     };
 
     const pollActiveJob = async () => {
@@ -1461,6 +1574,20 @@
         closeDropdown();
       }
     });
+
+    if (filterButton) {
+      filterButton.addEventListener("click", () => {
+        applyUsernameFilter();
+      });
+    }
+
+    if (usernameFilterInput) {
+      usernameFilterInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        applyUsernameFilter();
+      });
+    }
 
     submitButton.addEventListener("click", async () => {
       if (activeJobId && snapshot.done !== true) return;
@@ -3351,10 +3478,10 @@
       const modeConfig = obusRuleModeConfigs[normalizeObusRuleMode(mode)] || obusRuleModeConfigs.create;
       const requestBaseUrl = String(modeConfig.requestBaseUrl || "").trim();
       const normalizedCluster = normalizeObusClusterLabel(clusterLabel);
-      if (!requestBaseUrl || !normalizedCluster || !/cluster\d+/i.test(requestBaseUrl)) {
+      if (!requestBaseUrl || !normalizedCluster || !/cluster(?:\d+|x)/i.test(requestBaseUrl)) {
         return "";
       }
-      const nextUrl = requestBaseUrl.replace(/cluster\d+/i, normalizedCluster);
+      const nextUrl = requestBaseUrl.replace(/cluster(?:\d+|x)/i, normalizedCluster);
       const matchedCluster = normalizeObusClusterLabel((String(nextUrl).match(/cluster\d+/i) || [])[0] || "");
       return matchedCluster === normalizedCluster ? nextUrl : "";
     };

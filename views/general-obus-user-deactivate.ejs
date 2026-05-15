@@ -94,6 +94,20 @@
               <small class="muted">Liste Tüm Firmalar ekranındaki SQL verisinden gelir. Çoklu seçim yapılabilir.</small>
             </label>
 
+            <label class="allowed-lines-field">
+              <span>Pasife Alınacak Kullanıcı Adını Giriniz</span>
+              <input
+                type="text"
+                placeholder="username"
+                autocomplete="off"
+                data-obus-user-deactivate-username-filter="1"
+              />
+            </label>
+
+            <div class="allowed-lines-actions">
+              <button type="button" data-obus-user-deactivate-filter-submit="1">Filtrele</button>
+            </div>
+
             <div class="allowed-lines-actions">
               <button
                 type="button"
@@ -149,6 +163,33 @@
           </div>
 
           <div class="pill muted" data-obus-user-deactivate-empty="1">Listelenen kullanıcılar burada gösterilecek.</div>
+
+          <div class="obus-user-deactivate-debug-panel" data-obus-user-deactivate-debug="1" hidden>
+            <div class="obus-user-deactivate-debug-head">
+              <h3>Hatalı İstek / Yanıt</h3>
+              <div class="table-actions">
+                <span class="pill muted" data-obus-user-deactivate-debug-company="1">Firma -</span>
+                <span class="pill muted" data-obus-user-deactivate-debug-service="1">Servis -</span>
+                <span class="pill muted" data-obus-user-deactivate-debug-status="1">HTTP -</span>
+              </div>
+            </div>
+
+            <div class="allowed-lines-request-url">
+              <div class="label">İstek URL</div>
+              <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-debug-url="1">-</pre>
+            </div>
+
+            <div class="allowed-lines-result-grid">
+              <div class="allowed-lines-result-item">
+                <div class="label">İstek Body</div>
+                <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-debug-request-body="1">{}</pre>
+              </div>
+              <div class="allowed-lines-result-item">
+                <div class="label">Response / Hata</div>
+                <pre class="allowed-lines-debug-pre" data-obus-user-deactivate-debug-response-body="1">-</pre>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </section>
