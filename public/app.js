@@ -995,6 +995,7 @@
     const dropdown = root.querySelector("[data-obus-user-deactivate-company-dropdown='1']");
     const selectAllCheckbox = root.querySelector("[data-obus-user-deactivate-select-all='1']");
     const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-user-deactivate-company-checkbox='1']"));
+    const companyOptionRows = Array.from(root.querySelectorAll("[data-obus-user-deactivate-company-option-row='1']"));
     const selectedCompaniesInput = root.querySelector("[data-obus-user-deactivate-selected-companies='1']");
     const usernameFilterInput = root.querySelector("[data-obus-user-deactivate-username-filter='1']");
     const filterButton = root.querySelector("[data-obus-user-deactivate-filter-submit='1']");
@@ -1054,6 +1055,25 @@
         .map((item) => String(item.value || "").trim())
         .filter(Boolean);
     const normalizeDeactivateUsernameFilter = (value) => String(value || "").trim().toLocaleLowerCase("tr");
+    const normalizeCompanySearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
+
+    const clearCompanyTypeAhead = () => {
+      companyTypeAheadText = "";
+      if (companyTypeAheadTimerId) {
+        clearTimeout(companyTypeAheadTimerId);
+        companyTypeAheadTimerId = null;
+      }
+    };
+
+    const queueCompanyTypeAheadReset = () => {
+      if (companyTypeAheadTimerId) {
+        clearTimeout(companyTypeAheadTimerId);
+      }
+      companyTypeAheadTimerId = setTimeout(() => {
+        companyTypeAheadText = "";
+        companyTypeAheadTimerId = null;
+      }, 900);
+    };
 
     const formatElapsedTime = (elapsedMs) => {
       const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
@@ -1128,11 +1148,61 @@
     const closeDropdown = () => {
       dropdown.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
+      clearCompanyTypeAhead();
     };
 
     const openDropdown = () => {
       dropdown.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
+    };
+
+    const findMatchingCompanyOption = (queryText) => {
+      const normalizedQuery = normalizeCompanySearchText(queryText);
+      if (!normalizedQuery) return null;
+
+      return (
+        companyOptionRows.find((row) => {
+          const labelText = String(row.querySelector("span")?.textContent || "");
+          return normalizeCompanySearchText(labelText).includes(normalizedQuery);
+        }) || null
+      );
+    };
+
+    const focusCompanyOptionRow = (row) => {
+      if (!row) return;
+      const currentFocusedRows = Array.from(root.querySelectorAll(".obus-company-option-focus"));
+      currentFocusedRows.forEach((item) => item.classList.remove("obus-company-option-focus"));
+      row.scrollIntoView({ block: "nearest" });
+      row.classList.add("obus-company-option-focus");
+      row.querySelector("input")?.focus({ preventScroll: true });
+      setTimeout(() => {
+        row.classList.remove("obus-company-option-focus");
+      }, 450);
+    };
+
+    const handleCompanyTypeAheadKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.key === "Escape" || event.key === "Tab" || event.key === " " || event.code === "Space") return;
+
+      let nextQuery = companyTypeAheadText;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        nextQuery = String(companyTypeAheadText || "").slice(0, -1);
+      } else if (event.key.length === 1) {
+        event.preventDefault();
+        nextQuery = `${String(companyTypeAheadText || "")}${event.key}`;
+      } else {
+        return;
+      }
+
+      companyTypeAheadText = normalizeCompanySearchText(nextQuery);
+      queueCompanyTypeAheadReset();
+      if (!companyTypeAheadText) return;
+
+      if (dropdown.hidden) {
+        openDropdown();
+      }
+      focusCompanyOptionRow(findMatchingCompanyOption(companyTypeAheadText));
     };
 
     let activeJobId = String(root.getAttribute("data-obus-user-deactivate-initial-job-id") || "").trim();
@@ -1150,6 +1220,8 @@
     let activeJobFailureCount = 0;
     let deleteInProgress = false;
     let appliedUsernameFilter = "";
+    let companyTypeAheadText = "";
+    let companyTypeAheadTimerId = null;
     const listedRowsByKey = new Map();
     const selectedUserKeys = new Set();
     let snapshot = {
@@ -1651,6 +1723,10 @@
       }
     });
 
+    trigger.addEventListener("keydown", (event) => {
+      handleCompanyTypeAheadKey(event);
+    });
+
     selectAllCheckbox.addEventListener("change", () => {
       companyCheckboxes.forEach((item) => {
         item.checked = selectAllCheckbox.checked;
@@ -1673,6 +1749,13 @@
       if (event.key === "Escape") {
         closeDropdown();
       }
+    });
+
+    multiselect.addEventListener("keydown", (event) => {
+      const activeElement = document.activeElement;
+      const isCheckboxActive = activeElement instanceof HTMLInputElement && activeElement.type === "checkbox";
+      if (!isCheckboxActive) return;
+      handleCompanyTypeAheadKey(event);
     });
 
     if (resultSelectAllCheckbox) {
