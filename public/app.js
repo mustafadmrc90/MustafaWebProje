@@ -990,15 +990,18 @@
     if (root.dataset.obusUserDeactivateBound === "1") return;
     root.dataset.obusUserDeactivateBound = "1";
 
-    const form = root.querySelector("[data-obus-user-deactivate-form='1']");
+    const multiselect = root.querySelector(".obus-company-multiselect");
+    const trigger = root.querySelector("[data-obus-user-deactivate-company-trigger='1']");
+    const dropdown = root.querySelector("[data-obus-user-deactivate-company-dropdown='1']");
+    const selectAllCheckbox = root.querySelector("[data-obus-user-deactivate-select-all='1']");
+    const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-user-deactivate-company-checkbox='1']"));
+    const selectedCompaniesInput = root.querySelector("[data-obus-user-deactivate-selected-companies='1']");
+    const submitButton = root.querySelector("[data-obus-user-deactivate-submit='1']");
     const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
     const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
     const tableBody = root.querySelector("[data-obus-user-deactivate-table-body='1']");
     const emptyEl = root.querySelector("[data-obus-user-deactivate-empty='1']");
-    const loadingMessage = form?.querySelector(".allowed-lines-loading-message");
-    const submitButton =
-      form?.querySelector("[data-obus-user-deactivate-submit='1']") || form?.querySelector("button[type='submit']");
-    const companySelect = form?.querySelector("select[name='company']");
+    const loadingMessage = root.querySelector("[data-obus-user-deactivate-loading='1']");
     const httpPill = root.querySelector("[data-obus-user-deactivate-http='1']");
     const durationPill = root.querySelector("[data-obus-user-deactivate-duration='1']");
     const scannedPill = root.querySelector("[data-obus-user-deactivate-scanned='1']");
@@ -1007,18 +1010,19 @@
     const totalUsersPill = root.querySelector("[data-obus-user-deactivate-total-users='1']");
     const activeUsersPill = root.querySelector("[data-obus-user-deactivate-active-users='1']");
     const matchedPill = root.querySelector("[data-obus-user-deactivate-matched='1']");
-    const previewStateEl = root.querySelector("[data-obus-user-deactivate-preview-state='1']");
-    const firstRequestHttpEl = root.querySelector("[data-obus-user-deactivate-first-request-http='1']");
-    const firstRequestServiceEl = root.querySelector("[data-obus-user-deactivate-first-request-service='1']");
-    const firstRequestUrlEl = root.querySelector("[data-obus-user-deactivate-first-request-url='1']");
-    const firstRequestBodyEl = root.querySelector("[data-obus-user-deactivate-first-request-body='1']");
-    const firstRequestResponseEl = root.querySelector("[data-obus-user-deactivate-first-request-response='1']");
-    const failedRequestHttpEl = root.querySelector("[data-obus-user-deactivate-failed-request-http='1']");
-    const failedRequestServiceEl = root.querySelector("[data-obus-user-deactivate-failed-request-service='1']");
-    const failedRequestUrlEl = root.querySelector("[data-obus-user-deactivate-failed-request-url='1']");
-    const failedRequestBodyEl = root.querySelector("[data-obus-user-deactivate-failed-request-body='1']");
-    const failedRequestResponseEl = root.querySelector("[data-obus-user-deactivate-failed-request-response='1']");
-    if (!form || !statusEl || !summaryEl || !tableBody || !emptyEl || !submitButton || !companySelect) {
+
+    if (
+      !multiselect ||
+      !trigger ||
+      !dropdown ||
+      !selectAllCheckbox ||
+      !selectedCompaniesInput ||
+      !submitButton ||
+      !statusEl ||
+      !summaryEl ||
+      !tableBody ||
+      !emptyEl
+    ) {
       return;
     }
 
@@ -1028,23 +1032,70 @@
     const submitLoadingLabel =
       String(submitButton.getAttribute("data-loading-label") || "").trim() || "Listeleniyor...";
 
-    const createEmptyDebugPreviewState = () => ({
-      firstRequest: null,
-      failedRequest: null
-    });
+    const readSelectedValues = () =>
+      companyCheckboxes
+        .filter((item) => item.checked)
+        .map((item) => String(item.value || "").trim())
+        .filter(Boolean);
 
-    const normalizeDebugPreviewEntry = (value) => {
-      if (!value || typeof value !== "object") return null;
-      const statusValue =
-        typeof value.status === "number" ? value.status : Number.parseInt(String(value.status || "").trim(), 10);
-      const entry = {
-        service: String(value.service || "").trim(),
-        status: Number.isFinite(statusValue) ? statusValue : null,
-        requestUrl: String(value.requestUrl || "").trim(),
-        requestBody: String(value.requestBody || "").trim(),
-        responseBody: String(value.responseBody || "").trim()
-      };
-      return entry.service || entry.requestUrl || entry.requestBody || entry.responseBody ? entry : null;
+    const formatElapsedTime = (elapsedMs) => {
+      const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours > 0) {
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      }
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+
+    const updatePageUrl = () => {
+      try {
+        const url = new URL(window.location.href);
+        if (activeJobId) {
+          url.searchParams.set("jobId", activeJobId);
+        } else {
+          url.searchParams.delete("jobId");
+        }
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      } catch (err) {
+        // Ignore URL update errors.
+      }
+    };
+
+    const updateTriggerLabel = () => {
+      const selectedValues = readSelectedValues();
+      if (selectedValues.length === 0) {
+        trigger.textContent = "Firma seçiniz";
+        return;
+      }
+      if (selectedValues.length === companyCheckboxes.length) {
+        trigger.textContent = "Hepsi";
+        return;
+      }
+      if (selectedValues.length === 1) {
+        const selectedItem = companyCheckboxes.find((item) => item.checked);
+        trigger.textContent = String(selectedItem?.dataset.companyLabel || "").trim() || "1 firma seçildi";
+        return;
+      }
+      trigger.textContent = `${selectedValues.length} firma seçildi`;
+    };
+
+    const syncSelectedCompanies = () => {
+      const selectedValues = readSelectedValues();
+      selectedCompaniesInput.value = JSON.stringify(selectedValues);
+      selectAllCheckbox.checked = companyCheckboxes.length > 0 && selectedValues.length === companyCheckboxes.length;
+      updateTriggerLabel();
+    };
+
+    const closeDropdown = () => {
+      dropdown.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    };
+
+    const openDropdown = () => {
+      dropdown.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
     };
 
     let activeJobId = String(root.getAttribute("data-obus-user-deactivate-initial-job-id") || "").trim();
@@ -1077,9 +1128,7 @@
       totalUserCount: 0,
       activeUserCount: 0,
       listedUserCount: 0,
-      matchedUserCount: 0,
-      failureSamples: [],
-      debugPreview: createEmptyDebugPreviewState()
+      failureSamples: []
     };
 
     const setStatus = (message, tone = "muted") => {
@@ -1093,44 +1142,15 @@
     };
 
     const setBusy = (busy) => {
-      form.classList.toggle("is-loading", busy);
-      form.setAttribute("aria-busy", busy ? "true" : "false");
       submitButton.disabled = busy;
       submitButton.textContent = busy ? submitLoadingLabel : submitDefaultLabel;
-      companySelect.disabled = busy;
+      selectAllCheckbox.disabled = busy;
+      companyCheckboxes.forEach((item) => {
+        item.disabled = busy;
+      });
+      trigger.disabled = busy;
       if (loadingMessage) {
         loadingMessage.hidden = !busy;
-      }
-    };
-
-    const formatElapsedTime = (elapsedMs) => {
-      const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
-      if (hours > 0) {
-        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-      }
-      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-    };
-
-    const updatePageUrl = () => {
-      try {
-        const url = new URL(window.location.href);
-        const company = String(companySelect.value || "").trim();
-        if (company) {
-          url.searchParams.set("company", company);
-        } else {
-          url.searchParams.delete("company");
-        }
-        if (activeJobId) {
-          url.searchParams.set("jobId", activeJobId);
-        } else {
-          url.searchParams.delete("jobId");
-        }
-        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-      } catch (err) {
-        // Ignore URL state sync failures.
       }
     };
 
@@ -1164,12 +1184,8 @@
       };
 
       if (!activeJobId) {
-        if (snapshot.error) {
-          appendLine(snapshot.error);
-          return;
-        }
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
-        appendLine("Kullanıcı kayıtları geldikçe alttaki tabloya satır satır eklenecek.");
+        appendLine("Kullanıcı kayıtları geldikçe soldaki tabloya eklenecek.");
         return;
       }
 
@@ -1181,11 +1197,12 @@
       appendLine(
         `Listelenen kullanıcı: ${Number(snapshot.listedUserCount || listedRowsByKey.size || 0)} | Taranan kullanıcı: ${Number(
           snapshot.totalUserCount || 0
-        )} | Aktif kullanıcı: ${Number(
-          snapshot.activeUserCount || 0
-        )}`
+        )} | Aktif kullanıcı: ${Number(snapshot.activeUserCount || 0)}`
       );
-      appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
+
+      if (activeJobCreatedAt > 0) {
+        appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
+      }
 
       if (snapshot.error) {
         appendLine(snapshot.error);
@@ -1201,64 +1218,6 @@
       } else {
         appendLine("Canlı listeleme devam ediyor.");
       }
-    };
-
-    const renderPreviewBlock = (
-      entry,
-      { httpEl, serviceEl, urlEl, bodyEl, responseEl, emptyServiceText, emptyUrlText, emptyBodyText, emptyResponseText }
-    ) => {
-      const normalizedEntry = normalizeDebugPreviewEntry(entry);
-      if (httpEl) {
-        httpEl.textContent = normalizedEntry?.status !== null ? `HTTP ${normalizedEntry.status}` : "HTTP -";
-      }
-      if (serviceEl) {
-        serviceEl.textContent = normalizedEntry?.service || emptyServiceText;
-      }
-      if (urlEl) {
-        urlEl.textContent = normalizedEntry?.requestUrl || emptyUrlText;
-      }
-      if (bodyEl) {
-        bodyEl.textContent = normalizedEntry?.requestBody || emptyBodyText;
-      }
-      if (responseEl) {
-        responseEl.textContent = normalizedEntry?.responseBody || emptyResponseText;
-      }
-    };
-
-    const renderDebugPreview = () => {
-      const firstRequest = snapshot.debugPreview?.firstRequest || null;
-      const failedRequest = snapshot.debugPreview?.failedRequest || null;
-      if (previewStateEl) {
-        previewStateEl.textContent = failedRequest
-          ? "Hata isteği kaydedildi"
-          : firstRequest
-            ? "İlk istek kaydedildi"
-            : activeJobId
-              ? "İstek bekleniyor"
-              : "Henüz istek yok";
-      }
-      renderPreviewBlock(firstRequest, {
-        httpEl: firstRequestHttpEl,
-        serviceEl: firstRequestServiceEl,
-        urlEl: firstRequestUrlEl,
-        bodyEl: firstRequestBodyEl,
-        responseEl: firstRequestResponseEl,
-        emptyServiceText: "Henüz istek yok",
-        emptyUrlText: "Henüz istek yok.",
-        emptyBodyText: "Henüz body yok.",
-        emptyResponseText: "Henüz response yok."
-      });
-      renderPreviewBlock(failedRequest, {
-        httpEl: failedRequestHttpEl,
-        serviceEl: failedRequestServiceEl,
-        urlEl: failedRequestUrlEl,
-        bodyEl: failedRequestBodyEl,
-        responseEl: failedRequestResponseEl,
-        emptyServiceText: "Henüz hata isteği yok",
-        emptyUrlText: "Henüz hata isteği yok.",
-        emptyBodyText: "Henüz body yok.",
-        emptyResponseText: "Henüz hata response'u yok."
-      });
     };
 
     const renderTable = () => {
@@ -1289,17 +1248,14 @@
           ? "Listelenecek kullanıcı bulunamadı."
           : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
       } else {
-        emptyEl.textContent = "Sonuç listesi burada satır satır oluşacak.";
+        emptyEl.textContent = "Listelenen kullanıcılar burada gösterilecek.";
       }
     };
 
     const syncRunningStatus = () => {
       if (!activeJobId || !activeJobCreatedAt) {
-        if (snapshot.error) {
-          setStatus(snapshot.error, "error");
-          return;
-        }
-        setStatus("Firma seçip listelemeyi başlatın.");
+        setStatus("Sağdaki firma listesinden seçim yapın ve listelemeyi başlatın.");
+        renderPills();
         return;
       }
 
@@ -1339,12 +1295,12 @@
     const startStatusTimer = () => {
       if (activeJobTimerId) {
         window.clearInterval(activeJobTimerId);
-        activeJobTimerId = 0;
       }
       syncRunningStatus();
       if (activeJobId && snapshot.done !== true) {
         activeJobTimerId = window.setInterval(() => {
           syncRunningStatus();
+          renderSummary();
         }, 1000);
       }
     };
@@ -1369,9 +1325,7 @@
         totalUserCount: 0,
         activeUserCount: 0,
         listedUserCount: 0,
-        matchedUserCount: 0,
-        failureSamples: [],
-        debugPreview: createEmptyDebugPreviewState()
+        failureSamples: []
       };
     };
 
@@ -1403,25 +1357,15 @@
         snapshot.failureCompanyCount = Number(data.summary.failureCompanyCount || snapshot.failureCount || 0);
         snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
         snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
-        snapshot.listedUserCount = Number(
-          data.summary.listedUserCount || data.summary.matchedUserCount || listedRowsByKey.size || 0
-        );
-        snapshot.matchedUserCount = Number(data.summary.matchedUserCount || snapshot.listedUserCount || 0);
+        snapshot.listedUserCount = Number(data.summary.listedUserCount || listedRowsByKey.size || 0);
         snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
-        snapshot.debugPreview =
-          data.summary.debugPreview && typeof data.summary.debugPreview === "object"
-            ? {
-                firstRequest: normalizeDebugPreviewEntry(data.summary.debugPreview.firstRequest),
-                failedRequest: normalizeDebugPreviewEntry(data.summary.debugPreview.failedRequest)
-              }
-            : createEmptyDebugPreviewState();
       }
     };
 
     const applyEvents = (events) => {
       (Array.isArray(events) ? events : []).forEach((event) => {
         const meta = event?.meta;
-        if (!meta || (meta.type !== "user" && meta.type !== "match")) return;
+        if (!meta || meta.type !== "user") return;
         const key = String(event?.key || "").trim();
         if (!key || listedRowsByKey.has(key)) return;
         listedRowsByKey.set(key, {
@@ -1438,7 +1382,6 @@
     const finalizeRender = () => {
       renderPills();
       renderSummary();
-      renderDebugPreview();
       renderTable();
       syncRunningStatus();
     };
@@ -1447,9 +1390,7 @@
       if (!activeJobId) return;
       try {
         const response = await fetch(`/api/obus-live/${encodeURIComponent(activeJobId)}?cursor=${activeJobCursor}`, {
-          headers: {
-            Accept: "application/json"
-          },
+          headers: { Accept: "application/json" },
           cache: "no-store",
           credentials: "same-origin"
         });
@@ -1487,29 +1428,90 @@
       }
     };
 
-    form.addEventListener("submit", (event) => {
-      if (activeJobId && snapshot.done !== true) {
-        event.preventDefault();
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (submitButton.disabled) return;
+      if (dropdown.hidden) {
+        openDropdown();
+      } else {
+        closeDropdown();
+      }
+    });
+
+    selectAllCheckbox.addEventListener("change", () => {
+      companyCheckboxes.forEach((item) => {
+        item.checked = selectAllCheckbox.checked;
+      });
+      syncSelectedCompanies();
+    });
+
+    companyCheckboxes.forEach((item) => {
+      item.addEventListener("change", () => {
+        syncSelectedCompanies();
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (multiselect.contains(event.target)) return;
+      closeDropdown();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeDropdown();
+      }
+    });
+
+    submitButton.addEventListener("click", async () => {
+      if (activeJobId && snapshot.done !== true) return;
+
+      const companies = readSelectedValues();
+      if (companies.length === 0) {
+        setStatus("En az bir firma seçmelisiniz.", "error");
         return;
       }
 
       resetJobState();
       activeJobId = "";
       updatePageUrl();
-      renderPills();
-      renderSummary();
-      renderDebugPreview();
-      renderTable();
+      finalizeRender();
       setBusy(true);
       setStatus("Listeleme başlatılıyor...");
+      closeDropdown();
+
+      try {
+        const response = await fetch("/api/obus-user-deactivate/run", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({ companies })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Kullanıcı listeleme başlatılamadı"));
+        }
+
+        activeJobId = String(data.jobId || "").trim();
+        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
+        snapshot.totalCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : companies.length;
+        snapshot.scannedCompanyCount = snapshot.totalCount;
+        updatePageUrl();
+        finalizeRender();
+        startStatusTimer();
+        void pollActiveJob();
+      } catch (err) {
+        setBusy(false);
+        snapshot.error = err?.message || "Kullanıcı listeleme başlatılamadı.";
+        finalizeRender();
+      }
     });
 
+    syncSelectedCompanies();
     setBusy(activeJobId && snapshot.done !== true);
-    renderPills();
-    renderSummary();
-    renderDebugPreview();
-    renderTable();
-    syncRunningStatus();
+    finalizeRender();
 
     if (activeJobId) {
       updatePageUrl();

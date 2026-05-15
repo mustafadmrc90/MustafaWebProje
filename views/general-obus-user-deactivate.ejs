@@ -21,9 +21,9 @@
                 <path d="M16 11h6"></path>
               </svg>
             </span>
-            <span>Obus Kullanıcı Listele</span>
+            <span>Obus Kullanıcı Pasife Al</span>
           </h1>
-          <p>Seçilen firmadaki veya tüm firmalardaki kullanıcılar listelenir. <code>Hepsi</code> seçilirse tüm firmalar taranır.</p>
+          <p>Seçilen firmalar için kullanıcılar listelenir. İsterseniz <code>Hepsi</code> ile tüm firmaları aynı anda taratabilirsiniz.</p>
         </div>
         <div class="page-actions">
           <div class="user-pill"><%= user.displayName %></div>
@@ -36,7 +36,7 @@
       <% } %>
 
       <div
-        class="obus-user-deactivate-workbench"
+        class="obus-user-deactivate-layout"
         data-obus-user-deactivate-page="1"
         data-obus-user-deactivate-initial-job-id="<%= liveJob?.id || '' %>"
         data-obus-user-deactivate-initial-created-at="<%= liveJob?.createdAt || 0 %>"
@@ -47,64 +47,6 @@
         data-obus-user-deactivate-initial-failure-count="<%= liveJob?.failureCount || 0 %>"
         data-obus-user-deactivate-initial-done="<%= liveJob?.done ? '1' : '0' %>"
       >
-        <section class="table-card panel-card allowed-lines-section">
-          <div class="table-head">
-            <h2>Kullanıcı Listeleme</h2>
-          </div>
-
-          <form
-            class="allowed-lines-form obus-user-deactivate-form"
-            method="post"
-            action="/general/obus-user-deactivate"
-            data-obus-user-deactivate-form="1"
-            data-allowed-lines-ajax="1"
-          >
-            <div class="allowed-lines-grid obus-user-deactivate-grid">
-              <label class="allowed-lines-field allowed-lines-field-company">
-                <span>Firmalar</span>
-                <select name="company" id="obus-user-deactivate-company" required>
-                  <% companyOptions.forEach((company) => { %>
-                    <option value="<%= company.value %>" <%= filters.company === company.value ? "selected" : "" %>>
-                      <%= company.label %>
-                    </option>
-                  <% }) %>
-                </select>
-              </label>
-            </div>
-
-            <div class="allowed-lines-actions">
-              <button
-                type="submit"
-                data-obus-user-deactivate-submit="1"
-                data-default-label="Kullanıcıları Listele"
-                data-loading-label="Listeleniyor..."
-              >
-                Kullanıcıları Listele
-              </button>
-            </div>
-
-            <div class="allowed-lines-loading-message" hidden>Kullanıcılar listeleniyor...</div>
-          </form>
-
-          <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
-            Firma seçip listelemeyi başlatın.
-          </div>
-
-          <div class="obus-user-create-live-summary" data-obus-user-deactivate-summary="1">
-            Sonuç özeti burada canlı olarak güncellenecek.
-          </div>
-
-          <% if (report.requested && report.error) { %>
-            <div class="alert inline-alert"><%= report.error %></div>
-            <% if (report.errorDetail) { %>
-              <pre class="allowed-lines-debug-pre"><%= report.errorDetail %></pre>
-            <% } %>
-          <% } %>
-          <% if (report.requested && report.userMessage) { %>
-            <div class="inline-success"><%= report.userMessage %></div>
-          <% } %>
-        </section>
-
         <section class="table-card panel-card allowed-lines-response">
           <div class="table-head">
             <h2>Sonuçlar</h2>
@@ -138,6 +80,76 @@
 
           <div class="pill muted" data-obus-user-deactivate-empty="1">Listelenen kullanıcılar burada gösterilecek.</div>
         </section>
+
+        <aside class="table-card panel-card obus-user-deactivate-controls">
+          <div class="table-head">
+            <h2>Firma Seçimi</h2>
+          </div>
+
+          <div class="obus-user-deactivate-controls-body">
+            <label class="allowed-lines-field">
+              <span>Firmalar</span>
+              <input type="hidden" value="[]" data-obus-user-deactivate-selected-companies="1" />
+              <div class="obus-company-multiselect">
+                <button
+                  type="button"
+                  class="obus-company-trigger"
+                  data-obus-user-deactivate-company-trigger="1"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  Firma seçiniz
+                </button>
+
+                <div class="obus-company-dropdown" data-obus-user-deactivate-company-dropdown="1" role="listbox" hidden>
+                  <label class="obus-company-option obus-company-option-all">
+                    <input type="checkbox" data-obus-user-deactivate-select-all="1" />
+                    <span>Hepsi</span>
+                  </label>
+
+                  <% companyOptions.forEach((company) => { %>
+                    <label class="obus-company-option" data-obus-user-deactivate-company-option-row="1">
+                      <input
+                        type="checkbox"
+                        data-obus-user-deactivate-company-checkbox="1"
+                        value="<%= company.value %>"
+                        data-company-label="<%= company.label %>"
+                        data-company-code="<%= company.code %>"
+                        data-company-id="<%= company.id %>"
+                        data-company-cluster="<%= company.cluster %>"
+                        data-company-branch-id="<%= company.branchId %>"
+                        data-company-url="<%= company.url %>"
+                      />
+                      <span><%= company.label %></span>
+                    </label>
+                  <% }) %>
+                </div>
+              </div>
+              <small class="muted">Liste Tüm Firmalar ekranındaki SQL verisinden gelir. Çoklu seçim yapılabilir.</small>
+            </label>
+
+            <div class="allowed-lines-actions">
+              <button
+                type="button"
+                data-obus-user-deactivate-submit="1"
+                data-default-label="Kullanıcıları Listele"
+                data-loading-label="Listeleniyor..."
+              >
+                Kullanıcıları Listele
+              </button>
+            </div>
+
+            <div class="allowed-lines-loading-message" data-obus-user-deactivate-loading="1" hidden>Kullanıcılar listeleniyor...</div>
+
+            <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
+              Sağdaki firma listesinden seçim yapın ve listelemeyi başlatın.
+            </div>
+
+            <div class="obus-user-create-live-summary" data-obus-user-deactivate-summary="1">
+              Sonuç özeti burada canlı olarak güncellenecek.
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
 

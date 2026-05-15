@@ -416,7 +416,7 @@ const OBUS_USER_CREATE_REQUEST_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_CREATE_REQUEST_CONCURRENCY || "10", 10) || 10;
 const OBUS_USER_DEACTIVATE_API_URL =
   process.env.OBUS_USER_DEACTIVATE_API_URL ||
-  "https://api-coreprod-cluster0.obus.com.tr/api/Membership/GetUsersWithoutPermissions";
+  "https://api-coreprod-cluster4.obus.com.tr/api/Membership/GetUsersWithoutPermissions";
 const OBUS_USER_DEACTIVATE_API_AUTH =
   process.env.OBUS_USER_DEACTIVATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
@@ -631,7 +631,7 @@ const SIDEBAR_MENU_REGISTRY = [
   {
     key: "obus-user-deactivate",
     type: "item",
-    label: "Obus Kullanıcı Listele",
+    label: "Obus Kullanıcı Pasife Al",
     parentKey: "general",
     route: "/general/obus-user-deactivate",
     routeKey: "obus-user-deactivate",
@@ -15772,17 +15772,12 @@ function extractObusUserDeactivateRows(payload) {
 
 function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") {
   const normalizedCluster =
-    normalizeObusClusterLabel(clusterLabel) ||
-    normalizeObusClusterLabel(company?.cluster || "") ||
-    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
     normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
-    "cluster0";
+    normalizeObusClusterLabel(clusterLabel) ||
+    "cluster4";
 
   return (
-    normalizeTargetUrl(buildUrlForCluster(String(company?.url || "").trim(), normalizedCluster)) ||
     normalizeTargetUrl(buildUrlForCluster(OBUS_USER_DEACTIVATE_API_URL, normalizedCluster)) ||
-    normalizeTargetUrl(buildUrlForCluster(PARTNERS_API_URL, normalizedCluster)) ||
-    normalizeTargetUrl(company?.url || "") ||
     normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL)
   );
 }
@@ -15796,10 +15791,8 @@ async function fetchObusUserDeactivateCompanyResult({
   const partnerId = String(company?.id || "").trim();
   const branchId = String(company?.branchId || company?.id || "").trim();
   const clusterLabel =
-    normalizeObusClusterLabel(company?.cluster || "") ||
-    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
     normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
-    "cluster0";
+    "cluster4";
   const companyBaseUrl = buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel);
   const requestUrl = normalizeTargetUrl(
     buildMembershipGetUsersWithoutPermissionsUrl(companyBaseUrl || OBUS_USER_DEACTIVATE_API_URL, clusterLabel)
@@ -16353,7 +16346,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
   finishObusLiveJob(job);
 }
 
-async function startObusUserDeactivateSearchJob({ company = "all", ownerUserId = 0 }) {
+async function startObusUserDeactivateSearchJob({ companies = ["all"], ownerUserId = 0 }) {
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
   if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
     return {
@@ -16371,8 +16364,7 @@ async function startObusUserDeactivateSearchJob({ company = "all", ownerUserId =
     };
   }
 
-  const selectedCompanyValue = String(company || "all").trim() || "all";
-  const selectedCompaniesResult = resolveObusUserDeactivatePartnerItems(partnerItems, selectedCompanyValue);
+  const selectedCompaniesResult = resolveObusUserDeactivatePartnerItems(partnerItems, companies);
   if (selectedCompaniesResult.error) {
     return {
       ok: false,
@@ -17461,53 +17453,73 @@ function buildObusRuleDefineCompanyOptions(partnerItems = []) {
 }
 
 function buildObusUserDeactivateCompanyOptions(partnerItems = []) {
-  return [{ value: "all", label: "Hepsi" }].concat(
-    (Array.isArray(partnerItems) ? partnerItems : []).map((item) => {
-      const value = buildCompanyOptionValue(item);
-      const idText = String(item?.id || "").trim() || "N/A";
-      const clusterText = String(item?.cluster || "").trim() || "cluster";
-      return {
-        value,
-        label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText}`
-      };
-    })
-  );
+  return (Array.isArray(partnerItems) ? partnerItems : []).map((item) => {
+    const value = buildCompanyOptionValue(item);
+    const idText = String(item?.id || "").trim() || "N/A";
+    const clusterText = String(item?.cluster || "").trim() || "cluster";
+    const branchIdText = String(item?.branchId || "").trim() || "-";
+    return {
+      value,
+      label: `${String(item?.code || "").trim()} - ${idText} - ${clusterText} - ObusMerkezSubeID: ${branchIdText}`,
+      code: String(item?.code || "").trim(),
+      id: String(item?.id || "").trim(),
+      cluster: String(item?.cluster || "").trim(),
+      branchId: String(item?.branchId || "").trim(),
+      url: String(item?.url || "").trim()
+    };
+  });
 }
 
-function resolveObusUserDeactivatePartnerItems(partnerItems = [], selectedCompanyValue = "all") {
+function resolveObusUserDeactivatePartnerItems(partnerItems = [], selectedCompanyValues = ["all"]) {
   const normalizedItems = Array.isArray(partnerItems) ? partnerItems : [];
-  const normalizedSelectedValue = String(selectedCompanyValue || "all").trim() || "all";
-  if (normalizedSelectedValue.toLowerCase() === "all") {
+  const normalizedSelectedValues = (Array.isArray(selectedCompanyValues) ? selectedCompanyValues : [selectedCompanyValues])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  if (
+    normalizedSelectedValues.length === 0 ||
+    normalizedSelectedValues.some((item) => item.toLowerCase() === "all")
+  ) {
     return {
       items: normalizedItems,
       error: ""
     };
   }
 
-  const parsedCompany = parseCompanyOptionValue(normalizedSelectedValue);
-  if (!parsedCompany) {
-    return {
-      items: [],
-      error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın."
-    };
-  }
+  const matchedItems = [];
+  const selectedKeys = new Set();
 
-  const matchedItem = normalizedItems.find(
-    (item) =>
-      String(item?.code || "").trim() === parsedCompany.code &&
-      String(item?.id || "").trim() === String(parsedCompany.id || "").trim() &&
-      String(item?.cluster || "").trim().toLowerCase() === String(parsedCompany.cluster || "").trim().toLowerCase()
-  );
+  for (const selectedValue of normalizedSelectedValues) {
+    const parsedCompany = parseCompanyOptionValue(selectedValue);
+    if (!parsedCompany) {
+      return {
+        items: [],
+        error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın."
+      };
+    }
 
-  if (!matchedItem) {
-    return {
-      items: [],
-      error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın."
-    };
+    const matchedItem = normalizedItems.find(
+      (item) =>
+        String(item?.code || "").trim() === parsedCompany.code &&
+        String(item?.id || "").trim() === String(parsedCompany.id || "").trim() &&
+        String(item?.cluster || "").trim().toLowerCase() === String(parsedCompany.cluster || "").trim().toLowerCase()
+    );
+
+    if (!matchedItem) {
+      return {
+        items: [],
+        error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın."
+      };
+    }
+
+    const itemKey = buildCompanyOptionValue(matchedItem);
+    if (selectedKeys.has(itemKey)) continue;
+    selectedKeys.add(itemKey);
+    matchedItems.push(matchedItem);
   }
 
   return {
-    items: [matchedItem],
+    items: matchedItems,
     error: ""
   };
 }
@@ -20216,9 +20228,9 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
 
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {
-    const company = String(req.body?.company || "all").trim() || "all";
+    const companies = Array.isArray(req.body?.companies) ? req.body.companies : [];
     const startResult = await startObusUserDeactivateSearchJob({
-      company,
+      companies,
       ownerUserId: req.session?.user?.id || 0
     });
 
@@ -20606,10 +20618,6 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
     active: "obus-user-deactivate",
     partnerError,
     companyOptions,
-    filters: {
-      company: String(req.query.company || "all").trim() || "all"
-    },
-    report: buildObusUserDeactivateReportModel(),
     liveJob: liveJob
       ? {
           id: String(liveJob.id || "").trim(),
@@ -20624,39 +20632,6 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
         }
       : null
   });
-});
-
-app.post("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
-  const company = String(req.body?.company || "all").trim() || "all";
-  const startResult = await startObusUserDeactivateSearchJob({
-    company,
-    ownerUserId: req.session?.user?.id || 0
-  });
-
-  if (!startResult.ok || !startResult.job) {
-    const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
-    const companyOptions = buildObusUserDeactivateCompanyOptions(partnerItems);
-    const report = buildObusUserDeactivateReportModel();
-    report.requested = true;
-    report.error = String(startResult.error || partnerError || "Sorgu başlatılamadı.").trim();
-    return res.render("general-obus-user-deactivate", {
-      user: req.session.user,
-      active: "obus-user-deactivate",
-      partnerError,
-      companyOptions,
-      filters: {
-        company
-      },
-      report,
-      liveJob: null
-    });
-  }
-
-  return res.redirect(
-    `/general/obus-user-deactivate?company=${encodeURIComponent(company)}&jobId=${encodeURIComponent(
-      String(startResult.job.id || "").trim()
-    )}`
-  );
 });
 
 app.get("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
