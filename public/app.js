@@ -1163,7 +1163,7 @@
       return (
         companyOptionRows.find((row) => {
           const labelText = String(row.querySelector("span")?.textContent || "");
-          return normalizeCompanySearchText(labelText).includes(normalizedQuery);
+          return normalizeCompanySearchText(labelText).startsWith(normalizedQuery);
         }) || null
       );
     };
