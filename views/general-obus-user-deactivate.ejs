@@ -120,6 +120,19 @@
               <button type="button" data-obus-user-deactivate-filter-submit="1">Filtrele</button>
             </div>
 
+            <div class="allowed-lines-actions">
+              <button
+                type="button"
+                class="obus-user-deactivate-danger-button"
+                data-obus-user-deactivate-deactivate="1"
+                data-default-label="Pasife Al"
+                data-loading-label="Pasife Alınıyor..."
+                disabled
+              >
+                Pasife Al
+              </button>
+            </div>
+
             <div class="allowed-lines-loading-message" data-obus-user-deactivate-loading="1" hidden>Kullanıcılar listeleniyor...</div>
 
             <div class="obus-user-create-status muted" data-obus-user-deactivate-status="1">
@@ -151,6 +164,9 @@
             <table class="partners-raw-table">
               <thead>
                 <tr>
+                  <th class="obus-user-deactivate-select-head">
+                    <input type="checkbox" data-obus-user-deactivate-result-select-all="1" aria-label="Tüm kullanıcıları seç" />
+                  </th>
                   <th>id</th>
                   <th>username</th>
                   <th>full-name</th>

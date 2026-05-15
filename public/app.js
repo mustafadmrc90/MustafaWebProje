@@ -998,9 +998,11 @@
     const selectedCompaniesInput = root.querySelector("[data-obus-user-deactivate-selected-companies='1']");
     const usernameFilterInput = root.querySelector("[data-obus-user-deactivate-username-filter='1']");
     const filterButton = root.querySelector("[data-obus-user-deactivate-filter-submit='1']");
+    const deactivateButton = root.querySelector("[data-obus-user-deactivate-deactivate='1']");
     const submitButton = root.querySelector("[data-obus-user-deactivate-submit='1']");
     const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
     const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
+    const resultSelectAllCheckbox = root.querySelector("[data-obus-user-deactivate-result-select-all='1']");
     const tableBody = root.querySelector("[data-obus-user-deactivate-table-body='1']");
     const emptyEl = root.querySelector("[data-obus-user-deactivate-empty='1']");
     const loadingMessage = root.querySelector("[data-obus-user-deactivate-loading='1']");
@@ -1040,6 +1042,11 @@
       "Kullanıcıları Listele";
     const submitLoadingLabel =
       String(submitButton.getAttribute("data-loading-label") || "").trim() || "Listeleniyor...";
+    const deactivateDefaultLabel =
+      String(deactivateButton?.getAttribute("data-default-label") || deactivateButton?.textContent || "").trim() ||
+      "Pasife Al";
+    const deactivateLoadingLabel =
+      String(deactivateButton?.getAttribute("data-loading-label") || "").trim() || "Pasife Alınıyor...";
 
     const readSelectedValues = () =>
       companyCheckboxes
@@ -1141,8 +1148,10 @@
     let activeJobPollTimerId = 0;
     let activeJobTimerId = 0;
     let activeJobFailureCount = 0;
+    let deleteInProgress = false;
     let appliedUsernameFilter = "";
     const listedRowsByKey = new Map();
+    const selectedUserKeys = new Set();
     let snapshot = {
       done: String(root.getAttribute("data-obus-user-deactivate-initial-done") || "").trim() === "1",
       error: "",
@@ -1205,6 +1214,61 @@
       );
     };
 
+    const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
+
+    const getSelectableVisibleRows = () => getVisibleListedRows().filter((row) => isListedRowActive(row));
+
+    const isUsernameFilterAppliedForDeactivate = () => {
+      const currentInputValue = String(usernameFilterInput?.value || "").trim();
+      return Boolean(appliedUsernameFilter && currentInputValue === appliedUsernameFilter);
+    };
+
+    const syncSelectionControls = () => {
+      if (!resultSelectAllCheckbox) return;
+      const selectableRows = getSelectableVisibleRows();
+      const selectedVisibleCount = selectableRows.filter((row) => selectedUserKeys.has(String(row?.key || "").trim())).length;
+      resultSelectAllCheckbox.disabled = deleteInProgress || selectableRows.length === 0;
+      resultSelectAllCheckbox.checked = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+      resultSelectAllCheckbox.indeterminate =
+        selectableRows.length > 0 && selectedVisibleCount > 0 && selectedVisibleCount < selectableRows.length;
+    };
+
+    const syncDeactivateButtonState = () => {
+      if (!deactivateButton) return;
+      const isListingBusy = Boolean(activeJobId && snapshot.done !== true);
+      const hasAppliedFilter = isUsernameFilterAppliedForDeactivate();
+      const hasSelectableRows = getSelectableVisibleRows().length > 0;
+      deactivateButton.disabled = deleteInProgress || isListingBusy || !hasAppliedFilter || !hasSelectableRows;
+      deactivateButton.textContent = deleteInProgress ? deactivateLoadingLabel : deactivateDefaultLabel;
+    };
+
+    const readSelectedUserRows = () =>
+      Array.from(selectedUserKeys)
+        .map((key) => listedRowsByKey.get(String(key || "").trim()))
+        .filter((row) => row && isListedRowActive(row));
+
+    const applyDeactivateResults = (data) => {
+      const updatedRows = Array.isArray(data?.updatedRows) ? data.updatedRows : [];
+      updatedRows.forEach((item) => {
+        const key = String(item?.key || "").trim();
+        if (!key || !listedRowsByKey.has(key)) return;
+        const currentRow = listedRowsByKey.get(key) || {};
+        listedRowsByKey.set(key, {
+          ...currentRow,
+          isActive: false,
+          isActiveText: String(item?.isActiveText || "false").trim() || "false"
+        });
+        selectedUserKeys.delete(key);
+      });
+
+      const updatedCount = updatedRows.length;
+      if (updatedCount > 0) {
+        snapshot.activeUserCount = Math.max(0, Number(snapshot.activeUserCount || 0) - updatedCount);
+      }
+      snapshot.failedRequestPreview =
+        data?.failedRequestPreview && typeof data.failedRequestPreview === "object" ? data.failedRequestPreview : null;
+    };
+
     const renderPills = () => {
       const done = snapshot.done === true;
       const visibleListedCount = getVisibleListedRows().length;
@@ -1261,6 +1325,10 @@
         appendLine(`Username filtresi: ${appliedUsernameFilter} | Eşleşen: ${getVisibleListedRows().length}`);
       }
 
+      if (selectedUserKeys.size > 0) {
+        appendLine(`Seçili kullanıcı: ${selectedUserKeys.size}`);
+      }
+
       if (activeJobCreatedAt > 0) {
         appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
       }
@@ -1287,6 +1355,28 @@
       tableBody.innerHTML = "";
       rows.forEach((row) => {
         const tr = document.createElement("tr");
+        tr.className = isListedRowActive(row) ? "obus-user-deactivate-row" : "obus-user-deactivate-row is-inactive";
+
+        const checkboxCell = document.createElement("td");
+        checkboxCell.className = "obus-user-deactivate-select-cell";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedUserKeys.has(String(row?.key || "").trim());
+        checkbox.disabled = deleteInProgress || !isListedRowActive(row);
+        checkbox.setAttribute("aria-label", `${row.username || row.userId || "Kullanıcı"} seç`);
+        checkbox.addEventListener("change", () => {
+          const key = String(row?.key || "").trim();
+          if (!key) return;
+          if (checkbox.checked) {
+            selectedUserKeys.add(key);
+          } else {
+            selectedUserKeys.delete(key);
+          }
+          finalizeRender({ preserveStatus: true });
+        });
+        checkboxCell.appendChild(checkbox);
+        tr.appendChild(checkboxCell);
+
         [row.userId || "-", row.username || "-", row.fullName || "-", row.isActiveText || "-", row.code || "-", row.clusterUrl || "-"].forEach((value) => {
           const td = document.createElement("td");
           td.textContent = value;
@@ -1409,6 +1499,7 @@
       activeJobCreatedAt = 0;
       activeJobFinishedAt = 0;
       activeJobFailureCount = 0;
+      selectedUserKeys.clear();
       listedRowsByKey.clear();
       snapshot = {
         done: false,
@@ -1476,27 +1567,36 @@
         const key = String(event?.key || "").trim();
         if (!key || listedRowsByKey.has(key)) return;
         listedRowsByKey.set(key, {
+          key,
           userId: String(meta.userId || "").trim(),
+          partnerId: String(meta.partnerId || "").trim(),
           username: String(meta.username || "").trim(),
           fullName: String(meta.fullName || "").trim(),
+          isActive: meta.isActive === true,
           isActiveText: String(meta.isActiveText || "").trim(),
           code: String(meta.code || "").trim(),
-          clusterUrl: String(meta.clusterUrl || "").trim()
+          clusterUrl: String(meta.clusterUrl || "").trim(),
+          clusterLabel: String(meta.clusterLabel || "").trim()
         });
       });
     };
 
-    const finalizeRender = () => {
+    const finalizeRender = ({ preserveStatus = false } = {}) => {
       renderPills();
       renderSummary();
       renderTable();
+      syncSelectionControls();
+      syncDeactivateButtonState();
       renderDebugPreview();
-      syncRunningStatus();
+      if (!preserveStatus) {
+        syncRunningStatus();
+      }
     };
 
     const applyUsernameFilter = () => {
       appliedUsernameFilter = String(usernameFilterInput?.value || "").trim();
-      finalizeRender();
+      selectedUserKeys.clear();
+      finalizeRender({ preserveStatus: true });
     };
 
     const pollActiveJob = async () => {
@@ -1575,6 +1675,21 @@
       }
     });
 
+    if (resultSelectAllCheckbox) {
+      resultSelectAllCheckbox.addEventListener("change", () => {
+        getSelectableVisibleRows().forEach((row) => {
+          const key = String(row?.key || "").trim();
+          if (!key) return;
+          if (resultSelectAllCheckbox.checked) {
+            selectedUserKeys.add(key);
+          } else {
+            selectedUserKeys.delete(key);
+          }
+        });
+        finalizeRender({ preserveStatus: true });
+      });
+    }
+
     if (filterButton) {
       filterButton.addEventListener("click", () => {
         applyUsernameFilter();
@@ -1582,6 +1697,10 @@
     }
 
     if (usernameFilterInput) {
+      usernameFilterInput.addEventListener("input", () => {
+        syncDeactivateButtonState();
+      });
+
       usernameFilterInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
@@ -1589,7 +1708,77 @@
       });
     }
 
+    if (deactivateButton) {
+      deactivateButton.addEventListener("click", async () => {
+        if (deleteInProgress) return;
+
+        if (!isUsernameFilterAppliedForDeactivate()) {
+          setStatus("Pasife alma için önce kullanıcı adı filtresi uygulayın.", "error");
+          return;
+        }
+
+        const selectedRows = readSelectedUserRows();
+        if (selectedRows.length === 0) {
+          setStatus("Pasife alınacak kullanıcı seçmelisiniz.", "error");
+          return;
+        }
+
+        let responseData = null;
+        deleteInProgress = true;
+        finalizeRender({ preserveStatus: true });
+        setStatus(`${selectedRows.length} kullanıcı pasife alınıyor...`, "muted");
+
+        try {
+          const response = await fetch("/api/obus-user-deactivate/deactivate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              usernameFilter: appliedUsernameFilter,
+              users: selectedRows.map((row) => ({
+                key: String(row?.key || "").trim(),
+                userId: String(row?.userId || "").trim(),
+                username: String(row?.username || "").trim(),
+                code: String(row?.code || "").trim(),
+                partnerId: String(row?.partnerId || "").trim(),
+                clusterLabel: String(row?.clusterLabel || "").trim(),
+                clusterUrl: String(row?.clusterUrl || "").trim()
+              }))
+            })
+          });
+          responseData = await parseJsonResponse(response);
+
+          if (!response.ok || !responseData?.ok) {
+            if (responseData?.failedRequestPreview && typeof responseData.failedRequestPreview === "object") {
+              snapshot.failedRequestPreview = responseData.failedRequestPreview;
+            }
+            throw new Error(getApiErrorMessage(response, responseData, "Kullanıcılar pasife alınamadı"));
+          }
+
+          applyDeactivateResults(responseData);
+          finalizeRender({ preserveStatus: true });
+          setStatus(
+            String(responseData.userMessage || "").trim() || `${Number(responseData.successCount || 0)} kullanıcı pasife alındı.`,
+            Number(responseData.failureCount || 0) > 0 ? "error" : "success"
+          );
+        } catch (err) {
+          if (responseData?.failedRequestPreview && typeof responseData.failedRequestPreview === "object") {
+            snapshot.failedRequestPreview = responseData.failedRequestPreview;
+          }
+          finalizeRender({ preserveStatus: true });
+          setStatus(err?.message || "Kullanıcılar pasife alınamadı.", "error");
+        } finally {
+          deleteInProgress = false;
+          finalizeRender({ preserveStatus: true });
+        }
+      });
+    }
+
     submitButton.addEventListener("click", async () => {
+      if (deleteInProgress) return;
       if (activeJobId && snapshot.done !== true) return;
 
       const companies = readSelectedValues();

@@ -4729,6 +4729,39 @@ button.ghost {
   cursor: not-allowed;
 }
 
+.obus-user-deactivate-controls-body .obus-user-deactivate-danger-button {
+  background: #c83a33;
+  border-color: #c83a33;
+  color: #fff;
+}
+
+.obus-user-deactivate-controls-body .obus-user-deactivate-danger-button:hover {
+  background: #a92e28;
+  border-color: #a92e28;
+}
+
+.obus-user-deactivate-controls-body .obus-user-deactivate-danger-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.obus-user-deactivate-select-head,
+.obus-user-deactivate-select-cell {
+  width: 44px;
+  text-align: center;
+}
+
+.obus-user-deactivate-select-head input,
+.obus-user-deactivate-select-cell input {
+  width: 16px;
+  height: 16px;
+  accent-color: #1f8f4e;
+}
+
+.obus-user-deactivate-row.is-inactive {
+  opacity: 0.72;
+}
+
 .obus-user-deactivate-debug-panel {
   display: grid;
   gap: 12px;
