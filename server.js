@@ -17492,14 +17492,14 @@ function resolveObusUserDeactivatePartnerItems(partnerItems = [], selectedCompan
     };
   }
 
-  const matchedItems = normalizedItems.filter(
+  const matchedItem = normalizedItems.find(
     (item) =>
       String(item?.code || "").trim() === parsedCompany.code &&
       String(item?.id || "").trim() === String(parsedCompany.id || "").trim() &&
       String(item?.cluster || "").trim().toLowerCase() === String(parsedCompany.cluster || "").trim().toLowerCase()
   );
 
-  if (matchedItems.length === 0) {
+  if (!matchedItem) {
     return {
       items: [],
       error: "Seçilen firma bulunamadı. Listeden tekrar seçim yapın."
@@ -17507,7 +17507,7 @@ function resolveObusUserDeactivatePartnerItems(partnerItems = [], selectedCompan
   }
 
   return {
-    items: matchedItems,
+    items: [matchedItem],
     error: ""
   };
 }
