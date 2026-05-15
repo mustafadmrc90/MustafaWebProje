@@ -15772,8 +15772,10 @@ function extractObusUserDeactivateRows(payload) {
 
 function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") {
   const normalizedCluster =
-    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
     normalizeObusClusterLabel(clusterLabel) ||
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
     "cluster4";
 
   return (
@@ -15791,6 +15793,8 @@ async function fetchObusUserDeactivateCompanyResult({
   const partnerId = String(company?.id || "").trim();
   const branchId = String(company?.branchId || company?.id || "").trim();
   const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
     normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
     "cluster4";
   const companyBaseUrl = buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel);
@@ -16171,7 +16175,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
   let activeUserCount = 0;
   const failureSamples = [];
   let firstRequestPreview = null;
-  let firstFailedRequestPreview = null;
+  let latestFailedRequestPreview = null;
   job.totalCount = normalizedCompanies.length;
 
   setObusLiveJobSummary(job, {
@@ -16231,8 +16235,18 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
       if (!firstRequestPreview && result?.firstRequestPreview) {
         firstRequestPreview = result.firstRequestPreview;
       }
-      if (!firstFailedRequestPreview && result?.failedRequestPreview) {
-        firstFailedRequestPreview = result.failedRequestPreview;
+      if (result?.failedRequestPreview) {
+        latestFailedRequestPreview = {
+          ...result.failedRequestPreview,
+          companyCode: String(result?.code || company?.code || "").trim(),
+          partnerId: String(result?.partnerId || company?.id || "").trim(),
+          clusterLabel,
+          companyLabel: buildObusUserDeactivateCompanyEventLabel({
+            code: String(result?.code || company?.code || "").trim(),
+            id: String(result?.partnerId || company?.id || "").trim(),
+            cluster: clusterLabel
+          })
+        };
       }
 
       if (result.ok) {
@@ -16337,7 +16351,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
         requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
         debugPreview: {
           firstRequest: firstRequestPreview,
-          failedRequest: firstFailedRequestPreview
+          failedRequest: latestFailedRequestPreview
         }
       });
     }
