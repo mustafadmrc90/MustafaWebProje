@@ -4228,6 +4228,7 @@
       "CanRefundOwnSalesAtOwnBranch",
       "CanTransferAtOwnBranch",
       "CanRefundObiletTicket",
+      "CanTransferObiletTickets",
       "CanRefundWebTicket",
       "PermittedAllBranchStations"
     ];

@@ -795,6 +795,7 @@ const OBUS_USER_CREATE_PERMISSION_TYPES = [
   "CanRefundOwnSalesAtOwnBranch",
   "CanTransferAtOwnBranch",
   "CanRefundObiletTicket",
+  "CanTransferObiletTickets",
   "CanRefundWebTicket",
   "PermittedAllBranchStations"
 ];
