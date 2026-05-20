@@ -19718,35 +19718,35 @@ function normalizeUserLoginDeviceRow(row = {}) {
   };
 }
 
-function buildUserLoginDeviceMatchScore(row, deviceInfo = {}) {
+function buildUserLoginDeviceMatchDetails(row, deviceInfo = {}) {
   const normalizedRow = normalizeUserLoginDeviceRow(row);
   const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
   const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
-  let score = 0;
+  const ipMatches = Boolean(ipAddress && normalizedRow.ipAddress && ipAddress === normalizedRow.ipAddress);
+  const macMatches = Boolean(macAddress && normalizedRow.macAddress && macAddress === normalizedRow.macAddress);
 
-  if (ipAddress && normalizedRow.ipAddress && ipAddress === normalizedRow.ipAddress) {
-    score += 2;
-  }
-  if (macAddress && normalizedRow.macAddress && macAddress === normalizedRow.macAddress) {
-    score += 3;
-  }
-
-  return score;
+  return {
+    row: normalizedRow,
+    ipMatches,
+    macMatches,
+    score: (ipMatches ? 2 : 0) + (macMatches ? 3 : 0),
+    allowed: (ipMatches && normalizedRow.ipEnabled) || (macMatches && normalizedRow.macEnabled)
+  };
 }
 
 function findBestMatchingUserLoginDeviceRow(rows, deviceInfo = {}) {
-  let bestRow = null;
+  let bestMatch = null;
   let bestScore = 0;
 
   (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const score = buildUserLoginDeviceMatchScore(row, deviceInfo);
-    if (score > bestScore) {
-      bestScore = score;
-      bestRow = row;
+    const details = buildUserLoginDeviceMatchDetails(row, deviceInfo);
+    if (details.score > bestScore) {
+      bestScore = details.score;
+      bestMatch = details;
     }
   });
 
-  return bestRow;
+  return bestScore > 0 ? bestMatch : null;
 }
 
 async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
@@ -19771,18 +19771,16 @@ async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
     [normalizedUserId]
   );
 
-  const matchedDevice =
-    (result.rows || [])
-      .map((row) => normalizeUserLoginDeviceRow(row))
-      .find(
-        (row) =>
-          (row.ipEnabled && ipAddress && row.ipAddress === ipAddress) ||
-          (row.macEnabled && macAddress && row.macAddress === macAddress)
-      ) || null;
+  const matchedDeviceDetails = findBestMatchingUserLoginDeviceRow(result.rows || [], {
+    ipAddress,
+    macAddress
+  });
 
   return {
-    allowed: Boolean(matchedDevice),
-    matchedDevice
+    allowed: Boolean(matchedDeviceDetails?.allowed),
+    matchedDevice: matchedDeviceDetails?.row || null,
+    matchedByIp: Boolean(matchedDeviceDetails?.ipMatches),
+    matchedByMac: Boolean(matchedDeviceDetails?.macMatches)
   };
 }
 
@@ -19805,13 +19803,13 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
     [normalizedUserId]
   );
 
-  const matchedRow = findBestMatchingUserLoginDeviceRow(existingResult.rows || [], {
+  const matchedRowDetails = findBestMatchingUserLoginDeviceRow(existingResult.rows || [], {
     ipAddress: normalizedIpAddress,
     macAddress: normalizedMacAddress
   });
 
-  if (matchedRow && Number.isInteger(Number(matchedRow.id))) {
-    const normalizedRow = normalizeUserLoginDeviceRow(matchedRow);
+  if (matchedRowDetails?.row && Number.isInteger(Number(matchedRowDetails.row.id))) {
+    const normalizedRow = matchedRowDetails.row;
     const nextIpAddress = normalizedRow.ipAddress || normalizedIpAddress || null;
     const nextMacAddress = normalizedRow.macAddress || normalizedMacAddress || null;
     await pool.query(
@@ -19991,7 +19989,7 @@ app.post("/login", async (req, res) => {
           req,
           res,
           403,
-          "Bu cihaz icin giris izni yok. Yoneticiden kullanici ekranindaki Izinli Bilgisayar listesinden IP veya MAC onayi isteyin."
+          "Izinli Bilgisayar acik. Bu cihaz icin Cihazlar bolumunden IP veya MAC onayi verilmeden giris basarili olmaz."
         );
       }
     }
@@ -23217,7 +23215,7 @@ app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("user
         ok: true,
         enabled,
         message: enabled
-          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece izin verilen IP veya MAC ile giris yapabilir."
+          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden IP veya MAC onayi verilmis kayitlarla giris yapabilir."
           : "Izinli Bilgisayar kapatildi."
       });
     }

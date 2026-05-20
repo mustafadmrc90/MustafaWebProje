@@ -72,6 +72,7 @@
             </div>
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
+              <% const approvedDeviceCount = deviceItems.filter((device) => device.ipEnabled || device.macEnabled).length; %>
               <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
               <div class="row users-main-row">
                 <span>@<%= u.username %></span>
@@ -136,8 +137,14 @@
                     <div>
                       <strong>İzinli Bilgisayar Listesi</strong>
                       <p>Bu kullanıcı için giriş deneyen cihazların IP ve MAC kayıtları.</p>
+                      <% if (u.allowed_computer_enabled) { %>
+                        <p class="muted">
+                          İzinli Bilgisayar açıkken login ancak aşağıdaki kayıtlardan IP veya MAC onayı verilen cihazlar için başarılı olur.
+                        </p>
+                      <% } %>
                     </div>
                     <span class="pill muted"><%= deviceItems.length %> cihaz</span>
+                    <span class="pill muted"><%= approvedDeviceCount %> onaylı</span>
                   </div>
 
                   <% if (deviceItems.length === 0) { %>

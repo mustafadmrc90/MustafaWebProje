@@ -68,7 +68,7 @@
       return (
         responseMessage ||
         (toggle.checked
-          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece izin verilen cihazlarla giris yapabilir."
+          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden onay verilen cihazlarla giris yapabilir."
           : "Izinli Bilgisayar kapatildi. Bu kullanici yeniden tum cihazlardan giris yapabilir.")
       );
     }
