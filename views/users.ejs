@@ -72,7 +72,7 @@
             </div>
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
-              <% const approvedDeviceCount = deviceItems.filter((device) => device.ipEnabled || device.macEnabled).length; %>
+              <% const approvedDeviceCount = deviceItems.filter((device) => device.approved).length; %>
               <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
               <div class="row users-main-row">
                 <span>@<%= u.username %></span>
@@ -103,10 +103,10 @@
                         type="checkbox"
                         name="enabled"
                         value="1"
-                        data-user-allowed-computer-toggle="1"
+                        data-user-device-approval-required-toggle="1"
                         <%= u.allowed_computer_enabled ? 'checked' : '' %>
                       />
-                      <span>İzinli Bilgisayar</span>
+                      <span>Cihaz Onayı Zorunlu</span>
                     </label>
                   </form>
                   <button
@@ -135,11 +135,11 @@
                 <div class="user-device-panel">
                   <div class="user-device-panel-head">
                     <div>
-                      <strong>İzinli Bilgisayar Listesi</strong>
+                      <strong>Cihaz Onay Listesi</strong>
                       <p>Bu kullanıcı için giriş deneyen cihazların IP ve MAC kayıtları.</p>
                       <% if (u.allowed_computer_enabled) { %>
                         <p class="muted">
-                          İzinli Bilgisayar açıkken login ancak aşağıdaki kayıtlardan IP veya MAC onayı verilen cihazlar için başarılı olur.
+                          Cihaz Onayı açıkken login ancak aşağıdaki listede onay verilen aynı IP ve MAC kaydı ile başarılı olur.
                         </p>
                       <% } %>
                     </div>
@@ -166,6 +166,9 @@
                               <span><strong>MAC</strong><code><%= device.macAddress || '-' %></code></span>
                             </div>
                             <div class="user-device-item-meta">
+                              <span class="pill <%= device.approved ? '' : 'muted' %>">
+                                <%= device.approved ? 'Onaylı' : 'Onay Bekliyor' %>
+                              </span>
                               <span class="pill user-device-result-pill is-<%= device.lastLoginResult %>">
                                 <%= device.lastLoginResultText %>
                               </span>
@@ -177,30 +180,17 @@
                           </div>
 
                           <div class="user-device-permission-grid">
-                            <input type="hidden" name="ipEnabled" value="0" />
-                            <label class="user-login-lock-toggle <%= device.ipAddress ? '' : 'is-disabled' %>">
+                            <input type="hidden" name="approved" value="0" />
+                            <label class="user-login-lock-toggle <%= device.ipAddress || device.macAddress ? '' : 'is-disabled' %>">
                               <input
                                 type="checkbox"
-                                name="ipEnabled"
+                                name="approved"
                                 value="1"
                                 data-user-device-permission-toggle="1"
-                                <%= device.ipEnabled ? 'checked' : '' %>
-                                <%= device.ipAddress ? '' : 'disabled' %>
+                                <%= device.approved ? 'checked' : '' %>
+                                <%= device.ipAddress || device.macAddress ? '' : 'disabled' %>
                               />
-                              <span>IP Aktif</span>
-                            </label>
-
-                            <input type="hidden" name="macEnabled" value="0" />
-                            <label class="user-login-lock-toggle <%= device.macAddress ? '' : 'is-disabled' %>">
-                              <input
-                                type="checkbox"
-                                name="macEnabled"
-                                value="1"
-                                data-user-device-permission-toggle="1"
-                                <%= device.macEnabled ? 'checked' : '' %>
-                                <%= device.macAddress ? '' : 'disabled' %>
-                              />
-                              <span>MAC Aktif</span>
+                              <span>Cihaza İzin Ver</span>
                             </label>
                           </div>
                         </form>

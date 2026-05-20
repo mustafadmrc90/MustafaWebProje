@@ -1,7 +1,7 @@
 (() => {
   const loginLockToggles = Array.from(document.querySelectorAll("[data-user-login-lock-toggle='1']"));
   const ajaxToggles = Array.from(
-    document.querySelectorAll("[data-user-allowed-computer-toggle='1'], [data-user-device-permission-toggle='1']")
+    document.querySelectorAll("[data-user-device-approval-required-toggle='1'], [data-user-device-permission-toggle='1']")
   );
   const panelButtons = Array.from(document.querySelectorAll("[data-user-device-panel-toggle='1']"));
   const panelRows = Array.from(document.querySelectorAll("[data-user-device-panel]"));
@@ -64,30 +64,21 @@
   const buildSuccessMessageForToggle = (toggle, data) => {
     const responseMessage = String(data?.message || "").trim();
     const toggleName = String(toggle?.name || "").trim();
-    if (toggleName === "enabled" && toggle.hasAttribute("data-user-allowed-computer-toggle")) {
+    if (toggleName === "enabled" && toggle.hasAttribute("data-user-device-approval-required-toggle")) {
       return (
         responseMessage ||
         (toggle.checked
-          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden onay verilen cihazlarla giris yapabilir."
-          : "Izinli Bilgisayar kapatildi. Bu kullanici yeniden tum cihazlardan giris yapabilir.")
+          ? "Cihaz Onayi aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden onay verilen IP ve MAC kayitlariyla giris yapabilir."
+          : "Cihaz Onayi kapatildi. Bu kullanici yeniden cihaz onayi olmadan giris yapabilir.")
       );
     }
 
-    if (toggleName === "ipEnabled") {
+    if (toggleName === "approved") {
       return (
         responseMessage ||
         (toggle.checked
-          ? "IP adresi aktif edildi. Bu IP adresi ile giris yapilabilir."
-          : "IP adresi izni kapatildi.")
-      );
-    }
-
-    if (toggleName === "macEnabled") {
-      return (
-        responseMessage ||
-        (toggle.checked
-          ? "MAC adresi aktif edildi. Bu MAC adresi ile giris yapilabilir."
-          : "MAC adresi izni kapatildi.")
+          ? "Cihaza onay verildi. Bu IP ve MAC kaydiyla giris yapilabilir."
+          : "Cihaz onayi kaldirildi. Bu kayit ile giris engellenecek.")
       );
     }
 

@@ -1010,6 +1010,7 @@ async function initDb() {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       ip_address TEXT,
       mac_address TEXT,
+      approved BOOLEAN NOT NULL DEFAULT false,
       ip_enabled BOOLEAN NOT NULL DEFAULT false,
       mac_enabled BOOLEAN NOT NULL DEFAULT false,
       last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1025,6 +1026,7 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       ADD COLUMN IF NOT EXISTS ip_address TEXT,
       ADD COLUMN IF NOT EXISTS mac_address TEXT,
+      ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS ip_enabled BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS mac_enabled BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -19703,11 +19705,14 @@ function normalizeUserLoginDeviceRow(row = {}) {
   const userId = Number(row?.user_id ?? row?.userId);
   const lastAttemptAt = row?.last_attempt_at ?? row?.lastAttemptAt ?? null;
   const normalizedResult = normalizeUserLoginDeviceResult(row?.last_login_result ?? row?.lastLoginResult);
+  const approved =
+    row?.approved ?? row?.isApproved ?? row?.deviceApproved ?? row?.ip_enabled ?? row?.ipEnabled ?? row?.mac_enabled ?? row?.macEnabled;
   return {
     id: Number.isInteger(id) ? id : null,
     userId: Number.isInteger(userId) ? userId : null,
     ipAddress: normalizeLoginRequestIp(row?.ip_address ?? row?.ipAddress),
     macAddress: normalizeLoginRequestMacAddress(row?.mac_address ?? row?.macAddress),
+    approved: Boolean(approved),
     ipEnabled: Boolean(row?.ip_enabled ?? row?.ipEnabled),
     macEnabled: Boolean(row?.mac_enabled ?? row?.macEnabled),
     lastAttemptAt,
@@ -19718,35 +19723,18 @@ function normalizeUserLoginDeviceRow(row = {}) {
   };
 }
 
-function buildUserLoginDeviceMatchDetails(row, deviceInfo = {}) {
-  const normalizedRow = normalizeUserLoginDeviceRow(row);
+function findExactUserLoginDeviceRow(rows, deviceInfo = {}) {
   const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
   const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
-  const ipMatches = Boolean(ipAddress && normalizedRow.ipAddress && ipAddress === normalizedRow.ipAddress);
-  const macMatches = Boolean(macAddress && normalizedRow.macAddress && macAddress === normalizedRow.macAddress);
+  if (!ipAddress && !macAddress) {
+    return null;
+  }
 
-  return {
-    row: normalizedRow,
-    ipMatches,
-    macMatches,
-    score: (ipMatches ? 2 : 0) + (macMatches ? 3 : 0),
-    allowed: (ipMatches && normalizedRow.ipEnabled) || (macMatches && normalizedRow.macEnabled)
-  };
-}
-
-function findBestMatchingUserLoginDeviceRow(rows, deviceInfo = {}) {
-  let bestMatch = null;
-  let bestScore = 0;
-
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const details = buildUserLoginDeviceMatchDetails(row, deviceInfo);
-    if (details.score > bestScore) {
-      bestScore = details.score;
-      bestMatch = details;
-    }
-  });
-
-  return bestScore > 0 ? bestMatch : null;
+  return (
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => normalizeUserLoginDeviceRow(row))
+      .find((row) => row.ipAddress === ipAddress && row.macAddress === macAddress) || null
+  );
 }
 
 async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
@@ -19763,7 +19751,7 @@ async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
 
   const result = await pool.query(
     `
-      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      SELECT id, user_id, ip_address, mac_address, approved, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
       FROM user_login_devices
       WHERE user_id = $1
       ORDER BY last_attempt_at DESC, id DESC
@@ -19771,16 +19759,14 @@ async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
     [normalizedUserId]
   );
 
-  const matchedDeviceDetails = findBestMatchingUserLoginDeviceRow(result.rows || [], {
+  const matchedDevice = findExactUserLoginDeviceRow(result.rows || [], {
     ipAddress,
     macAddress
   });
 
   return {
-    allowed: Boolean(matchedDeviceDetails?.allowed),
-    matchedDevice: matchedDeviceDetails?.row || null,
-    matchedByIp: Boolean(matchedDeviceDetails?.ipMatches),
-    matchedByMac: Boolean(matchedDeviceDetails?.macMatches)
+    allowed: Boolean(matchedDevice?.approved),
+    matchedDevice
   };
 }
 
@@ -19792,10 +19778,11 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
   const normalizedMacAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
   const normalizedUserAgent = String(deviceInfo?.userAgent || "").trim() || null;
   const normalizedLoginResult = normalizeUserLoginDeviceResult(loginResult);
+  if (!normalizedIpAddress && !normalizedMacAddress) return null;
 
   const existingResult = await pool.query(
     `
-      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      SELECT id, user_id, ip_address, mac_address, approved, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
       FROM user_login_devices
       WHERE user_id = $1
       ORDER BY last_attempt_at DESC, id DESC
@@ -19803,15 +19790,12 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
     [normalizedUserId]
   );
 
-  const matchedRowDetails = findBestMatchingUserLoginDeviceRow(existingResult.rows || [], {
+  const matchedRow = findExactUserLoginDeviceRow(existingResult.rows || [], {
     ipAddress: normalizedIpAddress,
     macAddress: normalizedMacAddress
   });
 
-  if (matchedRowDetails?.row && Number.isInteger(Number(matchedRowDetails.row.id))) {
-    const normalizedRow = matchedRowDetails.row;
-    const nextIpAddress = normalizedRow.ipAddress || normalizedIpAddress || null;
-    const nextMacAddress = normalizedRow.macAddress || normalizedMacAddress || null;
+  if (matchedRow && Number.isInteger(Number(matchedRow.id))) {
     await pool.query(
       `
         UPDATE user_login_devices
@@ -19823,12 +19807,12 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
             updated_at = now()
         WHERE id = $1
       `,
-      [normalizedRow.id, nextIpAddress, nextMacAddress, normalizedLoginResult, normalizedUserAgent]
+      [matchedRow.id, normalizedIpAddress || null, normalizedMacAddress || null, normalizedLoginResult, normalizedUserAgent]
     );
     return {
-      ...normalizedRow,
-      ipAddress: nextIpAddress || "",
-      macAddress: nextMacAddress || "",
+      ...matchedRow,
+      ipAddress: normalizedIpAddress || "",
+      macAddress: normalizedMacAddress || "",
       lastLoginResult: normalizedLoginResult,
       lastLoginResultText: buildUserLoginDeviceResultLabel(normalizedLoginResult),
       lastUserAgent: normalizedUserAgent || ""
@@ -19841,6 +19825,7 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
         user_id,
         ip_address,
         mac_address,
+        approved,
         ip_enabled,
         mac_enabled,
         last_attempt_at,
@@ -19849,14 +19834,14 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, false, false, now(), $4, $5, now(), now())
+      VALUES ($1, $2, $3, false, false, false, now(), $4, $5, now(), now())
     `,
     [normalizedUserId, normalizedIpAddress || null, normalizedMacAddress || null, normalizedLoginResult, normalizedUserAgent]
   );
 
   const createdResult = await pool.query(
     `
-      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      SELECT id, user_id, ip_address, mac_address, approved, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
       FROM user_login_devices
       WHERE user_id = $1
       ORDER BY id DESC
@@ -19870,7 +19855,7 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
 async function listUserLoginDevicesGroupedByUserId() {
   const result = await pool.query(
     `
-      SELECT id, user_id, ip_address, mac_address, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
+      SELECT id, user_id, ip_address, mac_address, approved, ip_enabled, mac_enabled, last_attempt_at, last_login_result, last_user_agent
       FROM user_login_devices
       ORDER BY user_id DESC, last_attempt_at DESC, id DESC
     `
@@ -19924,6 +19909,7 @@ app.get("/api/login-lock-status", async (req, res) => {
       ok: true,
       enabled: Boolean(user?.login_input_lock_enabled),
       allowedComputerEnabled: Boolean(user?.allowed_computer_enabled),
+      deviceApprovalRequired: Boolean(user?.allowed_computer_enabled),
       version: Number.isInteger(Number(user?.login_input_lock_version))
         ? Number(user.login_input_lock_version)
         : null,
@@ -19975,8 +19961,9 @@ app.post("/login", async (req, res) => {
       return renderLoginFailure(req, res, 401, "Hatalı giriş.");
     }
 
+    const deviceInfo = resolveRequestLoginDeviceInfo(req);
+
     if (Boolean(user.allowed_computer_enabled)) {
-      const deviceInfo = resolveRequestLoginDeviceInfo(req);
       const devicePermission = await isUserLoginDeviceAllowed(user.id, deviceInfo);
       await upsertUserLoginDeviceAttempt({
         userId: user.id,
@@ -19989,9 +19976,15 @@ app.post("/login", async (req, res) => {
           req,
           res,
           403,
-          "Izinli Bilgisayar acik. Bu cihaz icin Cihazlar bolumunden IP veya MAC onayi verilmeden giris basarili olmaz."
+          "Bu kullanici icin cihaz onayi zorunlu. Bu IP ve MAC adresi admin tarafinda onaylanmadan giris basarili olmaz."
         );
       }
+    } else {
+      await upsertUserLoginDeviceAttempt({
+        userId: user.id,
+        deviceInfo,
+        loginResult: "success"
+      });
     }
 
     req.session.user = {
@@ -22973,24 +22966,24 @@ app.get("/users", requireAuth, requireMenuAccess("users"), async (req, res) => {
     update_failed: "Kullanıcı güncellenemedi.",
     create_failed: "Kullanıcı oluşturulamadı.",
     login_lock_failed: "Login sabitleme ayarı güncellenemedi.",
-    allowed_computer_failed: "İzinli bilgisayar ayarı güncellenemedi.",
+    allowed_computer_failed: "Cihaz onayı ayarı güncellenemedi.",
     device_not_found: "Cihaz kaydı bulunamadı.",
-    device_update_failed: "Cihaz izinleri güncellenemedi."
+    device_update_failed: "Cihaz onayı güncellenemedi."
   };
 
   const okValue = String(req.query.ok || "").trim();
   const errValue = String(req.query.err || "").trim();
   const notice =
     okValue === "1"
-      ? "Kullanıcı oluşturuldu."
+        ? "Kullanıcı oluşturuldu."
       : okValue === "2"
         ? "Kullanıcı güncellendi."
         : okValue === "3"
           ? "Login sabitleme ayarı güncellendi."
           : okValue === "4"
-            ? "İzinli bilgisayar ayarı güncellendi."
+            ? "Cihaz onayı ayarı güncellendi."
             : okValue === "5"
-              ? "Cihaz izinleri güncellendi."
+              ? "Cihaz onayı güncellendi."
           : null;
   const error = errorMessages[errValue] || null;
   const editUserId = Number(req.query.edit);
@@ -23215,8 +23208,8 @@ app.post("/users/:userId/allowed-computer", requireAuth, requireMenuAccess("user
         ok: true,
         enabled,
         message: enabled
-          ? "Izinli Bilgisayar aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden IP veya MAC onayi verilmis kayitlarla giris yapabilir."
-          : "Izinli Bilgisayar kapatildi."
+          ? "Cihaz onayi zorunlu aktif edildi. Bu kullanici artik sadece Cihazlar bolumunden onay verilen IP ve MAC kayitlariyla giris yapabilir."
+          : "Cihaz onayi zorunlu kapatildi. Bu kullanici yeniden cihaz onayi olmadan giris yapabilir."
       });
     }
 
@@ -23243,7 +23236,7 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
   try {
     const deviceResult = await pool.query(
       `
-        SELECT id, user_id, ip_address, mac_address
+        SELECT id, user_id, ip_address, mac_address, approved
         FROM user_login_devices
         WHERE id = $1 AND user_id = $2
         OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
@@ -23258,18 +23251,18 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
     }
 
-    const ipEnabled = Boolean(deviceRow.ipAddress) && parseCheckboxBooleanValue(req.body?.ipEnabled);
-    const macEnabled = Boolean(deviceRow.macAddress) && parseCheckboxBooleanValue(req.body?.macEnabled);
+    const approved = parseCheckboxBooleanValue(req.body?.approved);
 
     const updateResult = await pool.query(
       `
         UPDATE user_login_devices
-        SET ip_enabled = $1,
-            mac_enabled = $2,
+        SET approved = $1,
+            ip_enabled = $1,
+            mac_enabled = $1,
             updated_at = now()
-        WHERE id = $3 AND user_id = $4
+        WHERE id = $2 AND user_id = $3
       `,
-      [ipEnabled, macEnabled, deviceId, userId]
+      [approved, deviceId, userId]
     );
 
     if ((updateResult?.rowCount || 0) === 0) {
@@ -23282,12 +23275,8 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
     if (requestWantsJson(req)) {
       return res.json({
         ok: true,
-        ipEnabled,
-        macEnabled,
-        message:
-          ipEnabled || macEnabled
-            ? "Cihaz giris izni guncellendi."
-            : "Cihaz giris izinleri kapatildi."
+        approved,
+        message: approved ? "Cihaz onayi verildi." : "Cihaz onayi kaldirildi."
       });
     }
 
