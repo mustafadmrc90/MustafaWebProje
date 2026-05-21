@@ -147,7 +147,7 @@
                       <% } %>
                     </div>
                     <span class="pill muted"><%= deviceItems.length %> cihaz</span>
-                    <span class="pill muted"><%= approvedDeviceCount %> onaylı</span>
+                    <span class="pill muted" data-user-approved-count="1"><%= approvedDeviceCount %> onaylı</span>
                   </div>
 
                   <% if (deviceItems.length === 0) { %>
@@ -169,7 +169,10 @@
                               <span><strong>MAC</strong><code><%= device.macAddress || '-' %></code></span>
                             </div>
                             <div class="user-device-item-meta">
-                              <span class="pill <%= device.approved ? '' : 'muted' %>">
+                              <span
+                                class="pill <%= device.approved ? '' : 'muted' %>"
+                                data-user-device-approved-label="1"
+                              >
                                 <%= device.approved ? 'Onaylı' : 'Onay Bekliyor' %>
                               </span>
                               <span class="pill user-device-result-pill is-<%= device.lastLoginResult %>">

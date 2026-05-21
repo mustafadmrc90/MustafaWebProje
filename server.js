@@ -19723,18 +19723,86 @@ function normalizeUserLoginDeviceRow(row = {}) {
   };
 }
 
-function findExactUserLoginDeviceRow(rows, deviceInfo = {}) {
+function getUserLoginDeviceRowRecencyValue(row = {}) {
+  const timestamp = row?.lastAttemptAt ? new Date(row.lastAttemptAt).getTime() : 0;
+  if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
+  const id = Number(row?.id);
+  return Number.isInteger(id) ? id : 0;
+}
+
+function buildUserLoginDeviceMatchCandidate(row, deviceInfo = {}) {
+  const normalizedRow = normalizeUserLoginDeviceRow(row);
+  const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
+  const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
+  const rowHasIp = Boolean(normalizedRow.ipAddress);
+  const rowHasMac = Boolean(normalizedRow.macAddress);
+  const requestHasIp = Boolean(ipAddress);
+  const requestHasMac = Boolean(macAddress);
+  const ipMatches = Boolean(requestHasIp && rowHasIp && normalizedRow.ipAddress === ipAddress);
+  const macMatches = Boolean(requestHasMac && rowHasMac && normalizedRow.macAddress === macAddress);
+
+  let score = 0;
+  if (requestHasIp && requestHasMac) {
+    if (rowHasIp && rowHasMac) {
+      score = ipMatches && macMatches ? 100 : 0;
+    } else if (rowHasIp && !rowHasMac) {
+      score = ipMatches ? 70 : 0;
+    } else if (!rowHasIp && rowHasMac) {
+      score = macMatches ? 70 : 0;
+    }
+  } else if (requestHasIp) {
+    score = ipMatches ? 60 : 0;
+  } else if (requestHasMac) {
+    score = macMatches ? 60 : 0;
+  }
+
+  return {
+    row: normalizedRow,
+    score,
+    ipMatches,
+    macMatches,
+    exactMatch: score >= 100
+  };
+}
+
+function findBestUserLoginDeviceRow(rows, deviceInfo = {}) {
   const ipAddress = normalizeLoginRequestIp(deviceInfo?.ipAddress);
   const macAddress = normalizeLoginRequestMacAddress(deviceInfo?.macAddress);
   if (!ipAddress && !macAddress) {
     return null;
   }
 
-  return (
-    (Array.isArray(rows) ? rows : [])
-      .map((row) => normalizeUserLoginDeviceRow(row))
-      .find((row) => row.ipAddress === ipAddress && row.macAddress === macAddress) || null
-  );
+  let bestCandidate = null;
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const candidate = buildUserLoginDeviceMatchCandidate(row, { ipAddress, macAddress });
+    if (!candidate || candidate.score <= 0) return;
+
+    if (!bestCandidate) {
+      bestCandidate = candidate;
+      return;
+    }
+
+    if (candidate.score !== bestCandidate.score) {
+      if (candidate.score > bestCandidate.score) {
+        bestCandidate = candidate;
+      }
+      return;
+    }
+
+    if (candidate.row.approved !== bestCandidate.row.approved) {
+      if (candidate.row.approved) {
+        bestCandidate = candidate;
+      }
+      return;
+    }
+
+    if (getUserLoginDeviceRowRecencyValue(candidate.row) > getUserLoginDeviceRowRecencyValue(bestCandidate.row)) {
+      bestCandidate = candidate;
+    }
+  });
+
+  return bestCandidate;
 }
 
 async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
@@ -19759,10 +19827,11 @@ async function isUserLoginDeviceAllowed(userId, deviceInfo = {}) {
     [normalizedUserId]
   );
 
-  const matchedDevice = findExactUserLoginDeviceRow(result.rows || [], {
+  const matchedDeviceCandidate = findBestUserLoginDeviceRow(result.rows || [], {
     ipAddress,
     macAddress
   });
+  const matchedDevice = matchedDeviceCandidate?.row || null;
 
   return {
     allowed: Boolean(matchedDevice?.approved),
@@ -19790,12 +19859,15 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
     [normalizedUserId]
   );
 
-  const matchedRow = findExactUserLoginDeviceRow(existingResult.rows || [], {
+  const matchedRowCandidate = findBestUserLoginDeviceRow(existingResult.rows || [], {
     ipAddress: normalizedIpAddress,
     macAddress: normalizedMacAddress
   });
+  const matchedRow = matchedRowCandidate?.row || null;
 
   if (matchedRow && Number.isInteger(Number(matchedRow.id))) {
+    const nextIpAddress = normalizedIpAddress || matchedRow.ipAddress || null;
+    const nextMacAddress = normalizedMacAddress || matchedRow.macAddress || null;
     await pool.query(
       `
         UPDATE user_login_devices
@@ -19807,12 +19879,12 @@ async function upsertUserLoginDeviceAttempt({ userId, deviceInfo = {}, loginResu
             updated_at = now()
         WHERE id = $1
       `,
-      [matchedRow.id, normalizedIpAddress || null, normalizedMacAddress || null, normalizedLoginResult, normalizedUserAgent]
+      [matchedRow.id, nextIpAddress, nextMacAddress, normalizedLoginResult, normalizedUserAgent]
     );
     return {
       ...matchedRow,
-      ipAddress: normalizedIpAddress || "",
-      macAddress: normalizedMacAddress || "",
+      ipAddress: nextIpAddress || "",
+      macAddress: nextMacAddress || "",
       lastLoginResult: normalizedLoginResult,
       lastLoginResultText: buildUserLoginDeviceResultLabel(normalizedLoginResult),
       lastUserAgent: normalizedUserAgent || ""

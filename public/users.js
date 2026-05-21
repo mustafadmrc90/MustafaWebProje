@@ -85,6 +85,25 @@
     return responseMessage || "Ayar guncellendi.";
   };
 
+  const syncApprovedDeviceUi = (form, approved) => {
+    const normalizedApproved = Boolean(approved);
+    const approvedLabel = form.querySelector("[data-user-device-approved-label='1']");
+    if (approvedLabel instanceof HTMLElement) {
+      approvedLabel.textContent = normalizedApproved ? "Onaylı" : "Onay Bekliyor";
+      approvedLabel.classList.toggle("muted", !normalizedApproved);
+    }
+
+    const panel = form.closest("[data-user-device-panel]");
+    if (!(panel instanceof HTMLElement)) return;
+    const approvedCountEl = panel.querySelector("[data-user-approved-count='1']");
+    if (!(approvedCountEl instanceof HTMLElement)) return;
+
+    const approvedCount = Array.from(
+      panel.querySelectorAll("[data-user-device-permission-toggle='1']")
+    ).filter((input) => input instanceof HTMLInputElement && input.checked).length;
+    approvedCountEl.textContent = `${approvedCount} onaylı`;
+  };
+
   const submitAjaxToggle = async (toggle) => {
     const form = toggle.closest("form");
     if (!(form instanceof HTMLFormElement)) return;
@@ -108,6 +127,10 @@
       const data = await parseJsonResponse(response);
       if (!response.ok || data?.ok === false) {
         throw new Error(String(data?.error || "Ayar guncellenemedi.").trim() || "Ayar guncellenemedi.");
+      }
+
+      if (String(toggle?.name || "").trim() === "approved") {
+        syncApprovedDeviceUi(form, data?.approved ?? toggle.checked);
       }
 
       const successMessage = buildSuccessMessageForToggle(toggle, data);
