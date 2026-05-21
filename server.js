@@ -19963,28 +19963,23 @@ app.post("/login", async (req, res) => {
 
     const deviceInfo = resolveRequestLoginDeviceInfo(req);
 
-    if (Boolean(user.allowed_computer_enabled)) {
-      const devicePermission = await isUserLoginDeviceAllowed(user.id, deviceInfo);
-      await upsertUserLoginDeviceAttempt({
-        userId: user.id,
-        deviceInfo,
-        loginResult: devicePermission.allowed ? "success" : "blocked"
-      });
+    const devicePermission = await isUserLoginDeviceAllowed(user.id, deviceInfo);
+    const deviceApprovalRequired = Boolean(user.allowed_computer_enabled);
+    const hasKnownDeviceRecord = Boolean(devicePermission.matchedDevice);
+    const shouldBlockLogin =
+      hasKnownDeviceRecord ? !devicePermission.allowed : deviceApprovalRequired;
 
-      if (!devicePermission.allowed) {
-        return renderLoginFailure(
-          req,
-          res,
-          403,
-          "Bu kullanici icin cihaz onayi zorunlu. Bu IP ve MAC adresi admin tarafinda onaylanmadan giris basarili olmaz."
-        );
-      }
-    } else {
-      await upsertUserLoginDeviceAttempt({
-        userId: user.id,
-        deviceInfo,
-        loginResult: "success"
-      });
+    await upsertUserLoginDeviceAttempt({
+      userId: user.id,
+      deviceInfo,
+      loginResult: shouldBlockLogin ? "blocked" : "success"
+    });
+
+    if (shouldBlockLogin) {
+      const errorMessage = hasKnownDeviceRecord
+        ? "Bu cihaz kaydi icin Cihaza Izin Ver pasif. Admin onayi olmadan giris basarili olmaz."
+        : "Bu kullanici icin cihaz onayi zorunlu. Bu IP ve MAC adresi admin tarafinda onaylanmadan giris basarili olmaz.";
+      return renderLoginFailure(req, res, 403, errorMessage);
     }
 
     req.session.user = {
