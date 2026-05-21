@@ -104,6 +104,41 @@
     approvedCountEl.textContent = `${approvedCount} onaylı`;
   };
 
+  const syncApprovedDeviceForms = (form, approved, updatedDeviceIds = [], approvedCount = null) => {
+    const panel = form.closest("[data-user-device-panel]");
+    const normalizedIds = Array.isArray(updatedDeviceIds)
+      ? updatedDeviceIds.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+
+    if (!(panel instanceof HTMLElement) || normalizedIds.length === 0) {
+      syncApprovedDeviceUi(form, approved);
+      if (panel instanceof HTMLElement && approvedCount !== null) {
+        const approvedCountEl = panel.querySelector("[data-user-approved-count='1']");
+        if (approvedCountEl instanceof HTMLElement) {
+          approvedCountEl.textContent = `${Number(approvedCount) || 0} onaylı`;
+        }
+      }
+      return;
+    }
+
+    normalizedIds.forEach((deviceId) => {
+      const relatedForm = panel.querySelector(`[data-user-device-id="${deviceId}"]`);
+      if (!(relatedForm instanceof HTMLFormElement)) return;
+      const checkbox = relatedForm.querySelector("[data-user-device-permission-toggle='1']");
+      if (checkbox instanceof HTMLInputElement) {
+        checkbox.checked = Boolean(approved);
+      }
+      syncApprovedDeviceUi(relatedForm, approved);
+    });
+
+    if (approvedCount !== null) {
+      const approvedCountEl = panel.querySelector("[data-user-approved-count='1']");
+      if (approvedCountEl instanceof HTMLElement) {
+        approvedCountEl.textContent = `${Number(approvedCount) || 0} onaylı`;
+      }
+    }
+  };
+
   const submitAjaxToggle = async (toggle) => {
     const form = toggle.closest("form");
     if (!(form instanceof HTMLFormElement)) return;
@@ -130,7 +165,7 @@
       }
 
       if (String(toggle?.name || "").trim() === "approved") {
-        syncApprovedDeviceUi(form, data?.approved ?? toggle.checked);
+        syncApprovedDeviceForms(form, data?.approved ?? toggle.checked, data?.updatedDeviceIds, data?.approvedCount);
       }
 
       const successMessage = buildSuccessMessageForToggle(toggle, data);

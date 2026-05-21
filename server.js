@@ -23320,6 +23320,22 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
     }
 
     const approved = parseCheckboxBooleanValue(req.body?.approved);
+    const updateConditions = [];
+    const updateParams = [approved, userId];
+
+    if (deviceRow.ipAddress) {
+      updateParams.push(deviceRow.ipAddress);
+      updateConditions.push(`ip_address = $${updateParams.length}`);
+    }
+    if (deviceRow.macAddress) {
+      updateParams.push(deviceRow.macAddress);
+      updateConditions.push(`mac_address = $${updateParams.length}`);
+    }
+
+    if (updateConditions.length === 0) {
+      updateParams.push(deviceId);
+      updateConditions.push(`id = $${updateParams.length}`);
+    }
 
     const updateResult = await pool.query(
       `
@@ -23328,9 +23344,11 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
             ip_enabled = $1,
             mac_enabled = $1,
             updated_at = now()
-        WHERE id = $2 AND user_id = $3
+        WHERE user_id = $2
+          AND (${updateConditions.join(" OR ")})
+        RETURNING id
       `,
-      [approved, deviceId, userId]
+      updateParams
     );
 
     if ((updateResult?.rowCount || 0) === 0) {
@@ -23340,10 +23358,26 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
     }
 
+    const approvedCountResult = await pool.query(
+      `
+        SELECT COUNT(*)::int AS approved_count
+        FROM user_login_devices
+        WHERE user_id = $1
+          AND approved = true
+      `,
+      [userId]
+    );
+    const approvedCount = Number(approvedCountResult.rows?.[0]?.approved_count || 0);
+    const updatedDeviceIds = (updateResult.rows || [])
+      .map((row) => Number(row?.id))
+      .filter((id) => Number.isInteger(id));
+
     if (requestWantsJson(req)) {
       return res.json({
         ok: true,
         approved,
+        approvedCount,
+        updatedDeviceIds,
         message: approved ? "Cihaz onayi verildi." : "Cihaz onayi kaldirildi."
       });
     }
