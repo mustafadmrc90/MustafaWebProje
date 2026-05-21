@@ -19961,13 +19961,14 @@ app.post("/login", async (req, res) => {
       return renderLoginFailure(req, res, 401, "Hatalı giriş.");
     }
 
+    const isAdminUser = String(user.username || "").trim().toLowerCase() === "admin";
     const deviceInfo = resolveRequestLoginDeviceInfo(req);
 
     const devicePermission = await isUserLoginDeviceAllowed(user.id, deviceInfo);
     const deviceApprovalRequired = Boolean(user.allowed_computer_enabled);
     const hasKnownDeviceRecord = Boolean(devicePermission.matchedDevice);
     const shouldBlockLogin =
-      hasKnownDeviceRecord ? !devicePermission.allowed : deviceApprovalRequired;
+      isAdminUser ? false : hasKnownDeviceRecord ? !devicePermission.allowed : deviceApprovalRequired;
 
     await upsertUserLoginDeviceAttempt({
       userId: user.id,
