@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "obus-user-deactivate-sql-proxy": "node scripts/obus-user-deactivate-sql-proxy.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

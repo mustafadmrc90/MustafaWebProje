@@ -435,6 +435,11 @@ const OBUS_USER_DEACTIVATE_SQL_USERNAME =
 const OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES = Object.freeze([
   "OBUS_USER_DEACTIVATE_SQL_PASSWORD"
 ]);
+const OBUS_USER_DEACTIVATE_SQL_PROXY_URL =
+  String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_URL || "").trim();
+const OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES = Object.freeze([
+  "OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN"
+]);
 const OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
@@ -15832,6 +15837,10 @@ function getObusUserDeactivateSqlPassword() {
   return resolveObusCredentialSecret(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES, { trim: false });
 }
 
+function getObusUserDeactivateSqlProxyToken() {
+  return resolveObusCredentialSecret(OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES, { trim: false });
+}
+
 function buildObusUserDeactivateSqlConfigurationMessage(missingItems = []) {
   const normalizedMissingItems = (Array.isArray(missingItems) ? missingItems : [])
     .map((item) => String(item || "").trim())
@@ -15861,6 +15870,9 @@ function getObusUserDeactivateSqlCredentials() {
 }
 
 function buildObusUserDeactivateSqlRequestUrl() {
+  if (OBUS_USER_DEACTIVATE_SQL_PROXY_URL) {
+    return OBUS_USER_DEACTIVATE_SQL_PROXY_URL;
+  }
   return `mssql://${OBUS_USER_DEACTIVATE_SQL_HOST}:${OBUS_USER_DEACTIVATE_SQL_PORT}/${OBUS_USER_DEACTIVATE_SQL_DATABASE}`;
 }
 
@@ -15965,6 +15977,10 @@ async function getObusUserDeactivateSqlPool() {
 }
 
 async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
+  if (OBUS_USER_DEACTIVATE_SQL_PROXY_URL) {
+    return fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter });
+  }
+
   const pool = await getObusUserDeactivateSqlPool();
   const normalizedUsernameFilter = String(usernameFilter || "").trim();
   const request = pool.request();
@@ -15975,6 +15991,49 @@ async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
     where username like @usernameFilter
   `);
   return Array.isArray(result?.recordset) ? result.recordset : [];
+}
+
+async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = {}) {
+  const requestUrl = OBUS_USER_DEACTIVATE_SQL_PROXY_URL;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS);
+  const token = getObusUserDeactivateSqlProxyToken();
+
+  try {
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        usernameFilter: String(usernameFilter || "").trim()
+      }),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    const payload = parseJsonSafe(raw);
+    if (!response.ok || !payload?.ok) {
+      const message =
+        (payload && typeof payload === "object" && String(payload.error || payload.message || "").trim()) ||
+        response.statusText ||
+        "SQL proxy yanıtı başarısız.";
+      throw new Error(`SQL proxy HTTP ${response.status}: ${message}`);
+    }
+    return Array.isArray(payload.rows) ? payload.rows : [];
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error("SQL proxy isteği zaman aşımına uğradı.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeObusUserDeactivateSqlRow(row = {}) {
