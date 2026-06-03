@@ -7,6 +7,7 @@ const { execFileSync } = require("child_process");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
+const mssql = require("mssql");
 const { createDatabasePool } = require("./db");
 
 function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
@@ -423,6 +424,19 @@ const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "8", 10) || 8;
+const OBUS_USER_DEACTIVATE_SQL_HOST =
+  String(process.env.OBUS_USER_DEACTIVATE_SQL_HOST || "3.66.204.108").trim() || "3.66.204.108";
+const OBUS_USER_DEACTIVATE_SQL_PORT =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_PORT || "1433", 10) || 1433;
+const OBUS_USER_DEACTIVATE_SQL_DATABASE =
+  String(process.env.OBUS_USER_DEACTIVATE_SQL_DATABASE || "b2b-production").trim() || "b2b-production";
+const OBUS_USER_DEACTIVATE_SQL_USERNAME =
+  String(process.env.OBUS_USER_DEACTIVATE_SQL_USERNAME || "ors_mdemirci").trim() || "ors_mdemirci";
+const OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES = Object.freeze([
+  "OBUS_USER_DEACTIVATE_SQL_PASSWORD"
+]);
+const OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
   String(process.env.OBUS_USER_DEACTIVATE_REQUEST_DATE || "2026-05-13 08:30:02").trim() || "2026-05-13 08:30:02";
 const OBUS_USER_DELETE_REQUEST_DATE =
@@ -15814,6 +15828,206 @@ function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") 
   );
 }
 
+function getObusUserDeactivateSqlPassword() {
+  return resolveObusCredentialSecret(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES, { trim: false });
+}
+
+function buildObusUserDeactivateSqlConfigurationMessage(missingItems = []) {
+  const normalizedMissingItems = (Array.isArray(missingItems) ? missingItems : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (normalizedMissingItems.length === 0) {
+    return "Obus kullanıcı listeleme SQL bağlantı bilgileri eksik.";
+  }
+  return `Obus kullanıcı listeleme SQL bağlantı bilgileri eksik: ${normalizedMissingItems.join(", ")}.`;
+}
+
+function getObusUserDeactivateSqlCredentials() {
+  const password = getObusUserDeactivateSqlPassword();
+  const missingItems = [];
+  if (!OBUS_USER_DEACTIVATE_SQL_HOST) missingItems.push("OBUS_USER_DEACTIVATE_SQL_HOST");
+  if (!OBUS_USER_DEACTIVATE_SQL_DATABASE) missingItems.push("OBUS_USER_DEACTIVATE_SQL_DATABASE");
+  if (!OBUS_USER_DEACTIVATE_SQL_USERNAME) missingItems.push("OBUS_USER_DEACTIVATE_SQL_USERNAME");
+  if (!password) missingItems.push(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES[0]);
+
+  return {
+    host: OBUS_USER_DEACTIVATE_SQL_HOST,
+    port: OBUS_USER_DEACTIVATE_SQL_PORT,
+    database: OBUS_USER_DEACTIVATE_SQL_DATABASE,
+    username: OBUS_USER_DEACTIVATE_SQL_USERNAME,
+    password,
+    error: missingItems.length > 0 ? buildObusUserDeactivateSqlConfigurationMessage(missingItems) : ""
+  };
+}
+
+function buildObusUserDeactivateSqlRequestUrl() {
+  return `mssql://${OBUS_USER_DEACTIVATE_SQL_HOST}:${OBUS_USER_DEACTIVATE_SQL_PORT}/${OBUS_USER_DEACTIVATE_SQL_DATABASE}`;
+}
+
+function buildObusUserDeactivateSqlRequestBody(usernameFilter = "") {
+  return JSON.stringify(
+    {
+      query: [
+        "select u.ID, p.Code,u.Username from b2b.[user] u",
+        "left join partner p on p.ID = u.PartnerId",
+        "where username like @usernameFilter"
+      ].join("\n"),
+      usernameFilter: `%${String(usernameFilter || "").trim()}%`
+    },
+    null,
+    2
+  );
+}
+
+function buildObusUserDeactivateSqlPreview({
+  usernameFilter = "",
+  status = null,
+  responseBody = "",
+  error = ""
+} = {}) {
+  return buildObusRequestPreviewFromTrace(
+    buildObusServiceTraceEntry({
+      service: "SQL Kullanıcı Listeleme",
+      url: buildObusUserDeactivateSqlRequestUrl(),
+      status,
+      requestBody: buildObusUserDeactivateSqlRequestBody(usernameFilter),
+      responseBody: responseBody || error || "",
+      error
+    })
+  );
+}
+
+let obusUserDeactivateSqlPoolPromise = null;
+let obusUserDeactivateSqlPoolKey = "";
+
+async function getObusUserDeactivateSqlPool() {
+  const credentials = getObusUserDeactivateSqlCredentials();
+  if (credentials.error) {
+    throw new Error(credentials.error);
+  }
+
+  const poolKey = [
+    credentials.host,
+    credentials.port,
+    credentials.database,
+    credentials.username,
+    credentials.password
+  ].join("\u0000");
+  if (obusUserDeactivateSqlPoolPromise && obusUserDeactivateSqlPoolKey === poolKey) {
+    return obusUserDeactivateSqlPoolPromise;
+  }
+
+  const sqlEncryptRaw = String(process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT || "").trim().toLowerCase();
+  const encrypt =
+    sqlEncryptRaw === "true" || sqlEncryptRaw === "1" || sqlEncryptRaw === "yes"
+      ? true
+      : sqlEncryptRaw === "false" || sqlEncryptRaw === "0" || sqlEncryptRaw === "no"
+        ? false
+        : !net.isIP(credentials.host);
+
+  const pool = new mssql.ConnectionPool({
+    user: credentials.username,
+    password: credentials.password,
+    server: credentials.host,
+    port: Number(credentials.port || 1433),
+    database: credentials.database,
+    connectionTimeout: OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS,
+    requestTimeout: OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS,
+    pool: {
+      min: 0,
+      max: 4,
+      idleTimeoutMillis: 30000
+    },
+    options: {
+      encrypt,
+      trustServerCertificate: true,
+      ...(net.isIP(credentials.host)
+        ? {
+            servername: "",
+            serverName: "",
+            cryptoCredentialsDetails: {
+              servername: ""
+            }
+          }
+        : {})
+    }
+  });
+
+  obusUserDeactivateSqlPoolKey = poolKey;
+  obusUserDeactivateSqlPoolPromise = pool.connect().catch((err) => {
+    if (obusUserDeactivateSqlPoolKey === poolKey) {
+      obusUserDeactivateSqlPoolPromise = null;
+      obusUserDeactivateSqlPoolKey = "";
+    }
+    throw err;
+  });
+  return obusUserDeactivateSqlPoolPromise;
+}
+
+async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
+  const pool = await getObusUserDeactivateSqlPool();
+  const normalizedUsernameFilter = String(usernameFilter || "").trim();
+  const request = pool.request();
+  request.input("usernameFilter", mssql.NVarChar, `%${normalizedUsernameFilter}%`);
+  const result = await request.query(`
+    select u.ID, p.Code,u.Username from b2b.[user] u
+    left join partner p on p.ID = u.PartnerId
+    where username like @usernameFilter
+  `);
+  return Array.isArray(result?.recordset) ? result.recordset : [];
+}
+
+function normalizeObusUserDeactivateSqlRow(row = {}) {
+  const userId = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["ID", "id", "user-id", "userId"])).trim();
+  const code = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Code", "code"])).trim();
+  const username = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Username", "username"])).trim();
+  if (!userId || !code || !username) return null;
+  return {
+    userId,
+    code,
+    username
+  };
+}
+
+function normalizeObusUserDeactivateSqlCode(value) {
+  return String(value || "").trim().toLocaleLowerCase("tr");
+}
+
+function buildObusUserDeactivateSqlCompanyLookup(partnerItems = []) {
+  const byCode = new Map();
+  (Array.isArray(partnerItems) ? partnerItems : []).forEach((company) => {
+    const code = String(company?.code || "").trim();
+    const codeKey = normalizeObusUserDeactivateSqlCode(code);
+    if (!codeKey || byCode.has(codeKey)) return;
+    byCode.set(codeKey, company);
+  });
+  return byCode;
+}
+
+function buildObusUserDeactivateListedRowFromSql(row = {}, company = {}) {
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
+    "cluster4";
+  const requestUrl = buildMembershipGetUsersWithoutPermissionsUrl(
+    buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
+    clusterLabel
+  );
+
+  return {
+    userId: String(row?.userId || "").trim(),
+    partnerId: String(company?.id || "").trim(),
+    code: String(row?.code || company?.code || "").trim(),
+    username: String(row?.username || "").trim(),
+    fullName: "",
+    clusterUrl: requestUrl,
+    clusterLabel,
+    isActive: true,
+    isActiveText: "true"
+  };
+}
+
 async function fetchObusUserDeactivateCompanyResult({
   company,
   loginCredentials = {},
@@ -16414,23 +16628,14 @@ function buildObusUserDeactivateMatchEventKey(row = {}) {
   ].join("|||");
 }
 
-async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
-  const loginCredentials = getObusUserCreateLoginCredentials();
-  if (!loginCredentials.username || !loginCredentials.password) {
-    finishObusLiveJob(
-      job,
-      buildObusServiceLoginConfigurationMessage(loginCredentials)
-    );
-    return;
-  }
-
+async function runObusUserDeactivateSearchJob(job, { partnerItems = [], usernameFilter = "" }) {
   const normalizedCompanies = Array.isArray(partnerItems) ? partnerItems : [];
   if (normalizedCompanies.length === 0) {
     finishObusLiveJob(job, "Sorgulanacak firma listesi bulunamadı.");
     return;
   }
 
-  const sessionCache = new Map();
+  const normalizedUsernameFilter = String(usernameFilter || "").trim();
   let listedUserCount = 0;
   let totalUserCount = 0;
   let activeUserCount = 0;
@@ -16438,45 +16643,183 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
   let firstRequestPreview = null;
   let latestFailedRequestPreview = null;
   job.totalCount = normalizedCompanies.length;
+  const requestBodyPreview = buildObusUserDeactivateSqlRequestBody(normalizedUsernameFilter);
 
-  setObusLiveJobSummary(job, {
-    scannedCompanyCount: normalizedCompanies.length,
-    successCompanyCount: 0,
-    failureCompanyCount: 0,
-    listedUserCount: 0,
-    matchedUserCount: 0,
-    totalUserCount: 0,
-    activeUserCount: 0,
-    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
-    debugPreview: {
-      firstRequest: null,
-      failedRequest: null
-    }
+  const updateSummary = () => {
+    setObusLiveJobSummary(job, {
+      scannedCompanyCount: normalizedCompanies.length,
+      successCompanyCount: Number(job.successCount || 0),
+      failureCompanyCount: Number(job.failureCount || 0),
+      listedUserCount,
+      matchedUserCount: listedUserCount,
+      totalUserCount,
+      activeUserCount,
+      failureSamples,
+      requestBody: requestBodyPreview,
+      debugPreview: {
+        firstRequest: firstRequestPreview,
+        failedRequest: latestFailedRequestPreview
+      }
+    });
+  };
+
+  updateSummary();
+
+  normalizedCompanies.forEach((company) => {
+    const eventKey = buildObusUserDeactivateCompanyEventKey(company);
+    const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
+    const clusterLabel =
+      normalizeObusClusterLabel(company?.cluster || "") ||
+      normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+      "cluster";
+
+    pushObusLiveJobEvent(job, {
+      key: eventKey,
+      label: eventLabel,
+      statusKind: "pending",
+      message: "Firma SQL sorgusuna hazırlanıyor.",
+      detailText: [
+        `cluster=${clusterLabel}`,
+        `sql=${truncateObusDebugText(buildObusUserDeactivateSqlRequestUrl(), 120)}`
+      ]
+        .filter(Boolean)
+        .join(" | "),
+      meta: {
+        type: "company",
+        code: String(company?.code || "").trim(),
+        partnerId: String(company?.id || "").trim(),
+        clusterLabel
+      }
+    });
   });
 
-  await runWithConcurrency(
-    normalizedCompanies,
-    OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
-    async (company) => {
+  try {
+    const sqlRows = await fetchObusUserDeactivateSqlRows({ usernameFilter: normalizedUsernameFilter });
+    firstRequestPreview = buildObusUserDeactivateSqlPreview({
+      usernameFilter: normalizedUsernameFilter,
+      status: 200,
+      responseBody: `${Array.isArray(sqlRows) ? sqlRows.length : 0} SQL satırı döndü.`
+    });
+
+    const companyByCode = buildObusUserDeactivateSqlCompanyLookup(normalizedCompanies);
+    const listedRowsByCompanyKey = new Map();
+    (Array.isArray(sqlRows) ? sqlRows : []).forEach((rawRow) => {
+      const normalizedRow = normalizeObusUserDeactivateSqlRow(rawRow);
+      if (!normalizedRow) return;
+
+      const matchedCompany = companyByCode.get(normalizeObusUserDeactivateSqlCode(normalizedRow.code));
+      if (!matchedCompany) return;
+
+      const listedRow = buildObusUserDeactivateListedRowFromSql(normalizedRow, matchedCompany);
+      if (!listedRow.userId || !listedRow.username || !listedRow.code || !listedRow.partnerId) return;
+
+      const companyKey = buildObusUserDeactivateCompanyEventKey(matchedCompany);
+      const rows = listedRowsByCompanyKey.get(companyKey) || [];
+      rows.push(listedRow);
+      listedRowsByCompanyKey.set(companyKey, rows);
+    });
+
+    totalUserCount = Array.from(listedRowsByCompanyKey.values()).reduce(
+      (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
+      0
+    );
+    activeUserCount = totalUserCount;
+
+    normalizedCompanies.forEach((company) => {
       const eventKey = buildObusUserDeactivateCompanyEventKey(company);
       const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
       const clusterLabel =
         normalizeObusClusterLabel(company?.cluster || "") ||
         normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
         "cluster";
-      const requestUrl = buildMembershipGetUsersWithoutPermissionsUrl(
-        buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
-        clusterLabel
-      );
+      const listedRows = listedRowsByCompanyKey.get(eventKey) || [];
+
+      listedRows.forEach((row) => {
+        listedUserCount += 1;
+        pushObusLiveJobEvent(job, {
+          key: buildObusUserDeactivateMatchEventKey(row),
+          label: `${String(row?.code || "").trim() || "Firma"} / ${String(row?.username || "").trim() || "-"}`,
+          statusKind: "info",
+          message: "Kullanıcı listelendi.",
+          detailText: [
+            `cluster=${clusterLabel}`,
+            String(row?.partnerId || "").trim() ? `partner-id=${String(row.partnerId).trim()}` : "",
+            String(row?.isActiveText || "").trim() ? `is-active=${String(row.isActiveText).trim()}` : ""
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          meta: {
+            type: "user",
+            userId: String(row?.userId || "").trim(),
+            partnerId: String(row?.partnerId || "").trim(),
+            code: String(row?.code || "").trim(),
+            username: String(row?.username || "").trim(),
+            fullName: String(row?.fullName || "").trim(),
+            clusterUrl: String(row?.clusterUrl || "").trim(),
+            clusterLabel,
+            isActive: true,
+            isActiveText: "true"
+          }
+        });
+      });
 
       pushObusLiveJobEvent(job, {
         key: eventKey,
         label: eventLabel,
-        statusKind: "pending",
-        message: "Firma sorgulanıyor.",
+        statusKind: "success",
+        ok: true,
+        message:
+          listedRows.length > 0
+            ? `${listedRows.length} kullanıcı listelendi.`
+            : "Kullanıcı bulunamadı.",
         detailText: [
           `cluster=${clusterLabel}`,
-          requestUrl ? `url=${truncateObusDebugText(String(requestUrl || "").trim(), 120)}` : ""
+          "status=200",
+          `kullanıcı=${listedRows.length}`,
+          `aktif=${listedRows.length}`
+        ]
+          .filter(Boolean)
+          .join(" | "),
+        meta: {
+          type: "company",
+          code: String(company?.code || "").trim(),
+          partnerId: String(company?.id || "").trim(),
+          clusterLabel,
+          listedUserCount: listedRows.length,
+          totalUserCount: listedRows.length,
+          activeUserCount: listedRows.length
+        }
+      });
+
+      updateSummary();
+    });
+
+    updateSummary();
+    finishObusLiveJob(job);
+  } catch (err) {
+    const errorMessage = err?.message || "SQL kullanıcı listeleme tamamlanamadı.";
+    latestFailedRequestPreview = buildObusUserDeactivateSqlPreview({
+      usernameFilter: normalizedUsernameFilter,
+      error: errorMessage
+    });
+
+    normalizedCompanies.forEach((company) => {
+      const eventKey = buildObusUserDeactivateCompanyEventKey(company);
+      const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
+      const clusterLabel =
+        normalizeObusClusterLabel(company?.cluster || "") ||
+        normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+        "cluster";
+
+      pushObusLiveJobEvent(job, {
+        key: eventKey,
+        label: eventLabel,
+        statusKind: "failure",
+        ok: false,
+        error: errorMessage,
+        detailText: [
+          `cluster=${clusterLabel}`,
+          `sql=${truncateObusDebugText(buildObusUserDeactivateSqlRequestUrl(), 120)}`
         ]
           .filter(Boolean)
           .join(" | "),
@@ -16488,142 +16831,18 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
         }
       });
 
-      const result = await fetchObusUserDeactivateCompanyResult({
-        company,
-        loginCredentials,
-        sessionCache
+      pushObusUserCreateSample(failureSamples, {
+        company: String(company?.code || "Firma").trim(),
+        error: errorMessage
       });
-      if (!firstRequestPreview && result?.firstRequestPreview) {
-        firstRequestPreview = result.firstRequestPreview;
-      }
-      if (result?.failedRequestPreview) {
-        latestFailedRequestPreview = {
-          ...result.failedRequestPreview,
-          companyCode: String(result?.code || company?.code || "").trim(),
-          partnerId: String(result?.partnerId || company?.id || "").trim(),
-          clusterLabel,
-          companyLabel: buildObusUserDeactivateCompanyEventLabel({
-            code: String(result?.code || company?.code || "").trim(),
-            id: String(result?.partnerId || company?.id || "").trim(),
-            cluster: clusterLabel
-          })
-        };
-      }
+    });
 
-      if (result.ok) {
-        totalUserCount += Number(result.totalUserCount || 0);
-        activeUserCount += Number(result.activeUserCount || 0);
-
-        const listedRows = Array.isArray(result.listedRows) ? result.listedRows : [];
-        listedRows.forEach((row) => {
-          listedUserCount += 1;
-          pushObusLiveJobEvent(job, {
-            key: buildObusUserDeactivateMatchEventKey(row),
-            label: `${String(row?.code || "").trim() || "Firma"} / ${String(row?.username || "").trim() || "-"}`,
-            statusKind: "info",
-            message: "Kullanıcı listelendi.",
-            detailText: [
-              `cluster=${clusterLabel}`,
-              String(row?.partnerId || "").trim() ? `partner-id=${String(row.partnerId).trim()}` : "",
-              String(row?.isActiveText || "").trim() ? `is-active=${String(row.isActiveText).trim()}` : ""
-            ]
-              .filter(Boolean)
-              .join(" | "),
-            meta: {
-              type: "user",
-              userId: String(row?.userId || "").trim(),
-              partnerId: String(row?.partnerId || "").trim(),
-              code: String(row?.code || "").trim(),
-              username: String(row?.username || "").trim(),
-              fullName: String(row?.fullName || "").trim(),
-              clusterUrl: String(row?.clusterUrl || result?.requestUrl || "").trim(),
-              clusterLabel,
-              isActive: row?.isActive === true,
-              isActiveText: String(row?.isActiveText || "").trim() || "true"
-            }
-          });
-        });
-
-        pushObusLiveJobEvent(job, {
-          key: eventKey,
-          label: eventLabel,
-          statusKind: "success",
-          ok: true,
-          message:
-            listedRows.length > 0
-              ? `${listedRows.length} kullanıcı listelendi.`
-              : "Kullanıcı bulunamadı.",
-          detailText: [
-            `cluster=${clusterLabel}`,
-            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
-            `kullanıcı=${Number(result.totalUserCount || 0)}`,
-            `aktif=${Number(result.activeUserCount || 0)}`
-          ]
-            .filter(Boolean)
-            .join(" | "),
-          meta: {
-            type: "company",
-            code: String(result?.code || "").trim(),
-            partnerId: String(result?.partnerId || "").trim(),
-            clusterLabel,
-            listedUserCount: listedRows.length,
-            totalUserCount: Number(result.totalUserCount || 0),
-            activeUserCount: Number(result.activeUserCount || 0)
-          }
-        });
-      } else {
-        pushObusLiveJobEvent(job, {
-          key: eventKey,
-          label: eventLabel,
-          statusKind: "failure",
-          ok: false,
-          error: String(result.error || "Firma sorgusu başarısız.").trim(),
-          errorDetail: String(result.errorDetail || "").trim(),
-          detailText: [
-            `cluster=${clusterLabel}`,
-            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
-            String(result?.requestUrl || "").trim()
-              ? `url=${truncateObusDebugText(String(result.requestUrl || "").trim(), 120)}`
-              : ""
-          ]
-            .filter(Boolean)
-            .join(" | "),
-          meta: {
-            type: "company",
-            code: String(result?.code || "").trim(),
-            partnerId: String(result?.partnerId || "").trim(),
-            clusterLabel
-          }
-        });
-
-        pushObusUserCreateSample(failureSamples, {
-          company: String(result?.code || "Firma").trim(),
-          error: String(result?.error || "Firma sorgusu başarısız.").trim()
-        });
-      }
-
-      setObusLiveJobSummary(job, {
-        scannedCompanyCount: normalizedCompanies.length,
-        successCompanyCount: Number(job.successCount || 0),
-        failureCompanyCount: Number(job.failureCount || 0),
-        listedUserCount,
-        matchedUserCount: listedUserCount,
-        totalUserCount,
-        activeUserCount,
-        failureSamples,
-        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
-        debugPreview: {
-          firstRequest: firstRequestPreview,
-          failedRequest: latestFailedRequestPreview
-        }
-      });
-    }
-  );
-
-  finishObusLiveJob(job);
+    updateSummary();
+    finishObusLiveJob(job, `SQL kullanıcı listeleme tamamlanamadı: ${errorMessage}`);
+  }
 }
 
-async function startObusUserDeactivateSearchJob({ companies = ["all"], ownerUserId = 0 }) {
+async function startObusUserDeactivateSearchJob({ companies = ["all"], usernameFilter = "", ownerUserId = 0 }) {
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
   if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
     return {
@@ -16659,15 +16878,6 @@ async function startObusUserDeactivateSearchJob({ companies = ["all"], ownerUser
     };
   }
 
-  const loginCredentials = getObusUserCreateLoginCredentials();
-  if (!loginCredentials.username || !loginCredentials.password) {
-    return {
-      ok: false,
-      statusCode: 400,
-      error: buildObusServiceLoginConfigurationMessage(loginCredentials)
-    };
-  }
-
   const job = createObusLiveJob({
     type: "obus-user-deactivate",
     ownerUserId: Number(ownerUserId || 0),
@@ -16676,7 +16886,8 @@ async function startObusUserDeactivateSearchJob({ companies = ["all"], ownerUser
 
   setImmediate(() => {
     runObusUserDeactivateSearchJob(job, {
-      partnerItems: selectedPartnerItems
+      partnerItems: selectedPartnerItems,
+      usernameFilter: String(usernameFilter || "").trim()
     }).catch((err) => {
       finishObusLiveJob(job, `Kullanıcı listeleme tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
     });
@@ -20665,8 +20876,10 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {
     const companies = Array.isArray(req.body?.companies) ? req.body.companies : [];
+    const usernameFilter = String(req.body?.usernameFilter || "").trim();
     const startResult = await startObusUserDeactivateSearchJob({
       companies,
+      usernameFilter,
       ownerUserId: req.session?.user?.id || 0
     });
 
@@ -23320,22 +23533,26 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
     }
 
     const approved = parseCheckboxBooleanValue(req.body?.approved);
-    const updateConditions = [];
-    const updateParams = [approved, userId];
+    const matchConditions = [];
+    const matchParams = [userId];
 
     if (deviceRow.ipAddress) {
-      updateParams.push(deviceRow.ipAddress);
-      updateConditions.push(`ip_address = $${updateParams.length}`);
+      matchParams.push(deviceRow.ipAddress);
+      matchConditions.push(`ip_address = $${matchParams.length}`);
     }
     if (deviceRow.macAddress) {
-      updateParams.push(deviceRow.macAddress);
-      updateConditions.push(`mac_address = $${updateParams.length}`);
+      matchParams.push(deviceRow.macAddress);
+      matchConditions.push(`mac_address = $${matchParams.length}`);
     }
 
-    if (updateConditions.length === 0) {
-      updateParams.push(deviceId);
-      updateConditions.push(`id = $${updateParams.length}`);
+    if (matchConditions.length === 0) {
+      matchParams.push(deviceId);
+      matchConditions.push(`id = $${matchParams.length}`);
     }
+
+    const matchWhereSql = `user_id = $1 AND (${matchConditions.join(" OR ")})`;
+    const updateParams = [approved, ...matchParams];
+    const updateWhereSql = matchWhereSql.replace(/\$([0-9]+)/g, (_, value) => `$${Number(value) + 1}`);
 
     const updateResult = await pool.query(
       `
@@ -23344,9 +23561,7 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
             ip_enabled = $1,
             mac_enabled = $1,
             updated_at = now()
-        WHERE user_id = $2
-          AND (${updateConditions.join(" OR ")})
-        RETURNING id
+        WHERE ${updateWhereSql}
       `,
       updateParams
     );
@@ -23358,6 +23573,15 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
       return res.redirect(`/users?devices=${userId}&err=device_not_found`);
     }
 
+    const updatedDevicesResult = await pool.query(
+      `
+        SELECT id
+        FROM user_login_devices
+        WHERE ${matchWhereSql}
+      `,
+      matchParams
+    );
+
     const approvedCountResult = await pool.query(
       `
         SELECT COUNT(*)::int AS approved_count
@@ -23368,7 +23592,7 @@ app.post("/users/:userId/login-devices/:deviceId/update", requireAuth, requireMe
       [userId]
     );
     const approvedCount = Number(approvedCountResult.rows?.[0]?.approved_count || 0);
-    const updatedDeviceIds = (updateResult.rows || [])
+    const updatedDeviceIds = (updatedDevicesResult.rows || [])
       .map((row) => Number(row?.id))
       .filter((id) => Number.isInteger(id));
 

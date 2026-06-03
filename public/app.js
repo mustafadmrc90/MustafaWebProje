@@ -1886,7 +1886,10 @@
             Accept: "application/json"
           },
           credentials: "same-origin",
-          body: JSON.stringify({ companies })
+          body: JSON.stringify({
+            companies,
+            usernameFilter: String(usernameFilterInput?.value || "").trim()
+          })
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
