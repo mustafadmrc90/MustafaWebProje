@@ -75,9 +75,10 @@ const SQL_USERNAME = readEnv("OBUS_USER_DEACTIVATE_SQL_USERNAME", "ors_mdemirci"
 const SQL_PASSWORD = String(process.env.OBUS_USER_DEACTIVATE_SQL_PASSWORD || "");
 const SQL_TIMEOUT_MS = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS, 45000);
 const SQL_ENCRYPT = parseBooleanFlag(process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT, !net.isIP(SQL_HOST));
-const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "0.0.0.0");
+const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "127.0.0.1");
 const PROXY_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT, 3015);
 const PROXY_TOKEN = String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN || "");
+const PROXY_ALLOWED_ORIGIN = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "*");
 
 let poolPromise = null;
 let poolKey = "";
@@ -157,8 +158,14 @@ function normalizeRows(rows = []) {
   }));
 }
 
+function isLoopbackAddress(address = "") {
+  const value = String(address || "").trim();
+  return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1";
+}
+
 function requireProxyToken(req, res, next) {
   if (!PROXY_TOKEN) return next();
+  if (isLoopbackAddress(req.socket?.remoteAddress)) return next();
   const authHeader = String(req.get("authorization") || "").trim();
   const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (bearerToken === PROXY_TOKEN) return next();
@@ -166,6 +173,15 @@ function requireProxyToken(req, res, next) {
 }
 
 const app = express();
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", PROXY_ALLOWED_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  return next();
+});
 app.use(express.json({ limit: "64kb" }));
 
 app.get("/health", (req, res) => {
@@ -192,6 +208,13 @@ app.post("/obus-user-deactivate/users", requireProxyToken, async (req, res) => {
   }
 });
 
-app.listen(PROXY_PORT, PROXY_HOST, () => {
+const server = app.listen(PROXY_PORT, PROXY_HOST, () => {
   console.log(`Obus user deactivate SQL proxy listening on ${PROXY_HOST}:${PROXY_PORT}`);
+});
+
+server.on("error", (err) => {
+  console.error(
+    `Obus user deactivate SQL proxy could not listen on ${PROXY_HOST}:${PROXY_PORT}: ${err?.message || "unknown error"}`
+  );
+  process.exit(1);
 });

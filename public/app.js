@@ -1106,6 +1106,108 @@
       }
     };
 
+    const localSqlProxyUrls = [
+      "http://127.0.0.1:3015/obus-user-deactivate/users",
+      "http://localhost:3015/obus-user-deactivate/users"
+    ];
+
+    const normalizeLocalSqlProxyCode = (value) => String(value || "").trim().toLocaleLowerCase("tr");
+
+    const fetchLocalSqlProxyJson = async (url, payload, timeoutMs = 3500) => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify(payload || {}),
+          signal: controller.signal
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Yerel SQL proxy listeleme yapamadı"));
+        }
+        return data;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    const readSelectedCompanyMetas = () =>
+      companyCheckboxes
+        .filter((item) => item.checked)
+        .map((item) => ({
+          value: String(item.value || "").trim(),
+          code: String(item.dataset.companyCode || "").trim(),
+          id: String(item.dataset.companyId || "").trim(),
+          cluster: String(item.dataset.companyCluster || "").trim(),
+          branchId: String(item.dataset.companyBranchId || "").trim(),
+          url: String(item.dataset.companyUrl || "").trim()
+        }))
+        .filter((item) => item.value && item.code && item.id);
+
+    const buildLocalSqlProxyRows = (rows, selectedCompanyMetas) => {
+      const companyByCode = new Map();
+      selectedCompanyMetas.forEach((company) => {
+        const codeKey = normalizeLocalSqlProxyCode(company.code);
+        if (codeKey && !companyByCode.has(codeKey)) {
+          companyByCode.set(codeKey, company);
+        }
+      });
+
+      const dedupedRows = new Map();
+      (Array.isArray(rows) ? rows : []).forEach((rawRow) => {
+        const userId = String(rawRow?.ID ?? rawRow?.Id ?? rawRow?.id ?? rawRow?.userId ?? "").trim();
+        const code = String(rawRow?.Code ?? rawRow?.code ?? "").trim();
+        const username = String(rawRow?.Username ?? rawRow?.username ?? "").trim();
+        const company = companyByCode.get(normalizeLocalSqlProxyCode(code));
+        if (!userId || !code || !username || !company) return;
+
+        const clusterLabel = String(company.cluster || "").trim();
+        const key = ["local-sql", code, company.id, clusterLabel, userId, username].join("|||");
+        if (dedupedRows.has(key)) return;
+        dedupedRows.set(key, {
+          key,
+          userId,
+          partnerId: company.id,
+          username,
+          fullName: "",
+          isActive: true,
+          isActiveText: "true",
+          code,
+          clusterUrl: company.url,
+          clusterLabel
+        });
+      });
+
+      return Array.from(dedupedRows.values());
+    };
+
+    const fetchLocalSqlProxyRows = async ({ usernameFilter = "", selectedCompanyMetas = [] } = {}) => {
+      let lastError = null;
+      for (const url of localSqlProxyUrls) {
+        try {
+          const data = await fetchLocalSqlProxyJson(url, { usernameFilter });
+          return {
+            ok: true,
+            url,
+            rows: buildLocalSqlProxyRows(data.rows, selectedCompanyMetas),
+            rawCount: Number(data.count || (Array.isArray(data.rows) ? data.rows.length : 0)) || 0
+          };
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      return {
+        ok: false,
+        error: `${lastError?.message || "Yerel SQL proxy bulunamadı."} Denenen adresler: ${localSqlProxyUrls.join(", ")}`
+      };
+    };
+
     const updatePageUrl = () => {
       try {
         const url = new URL(window.location.href);
@@ -1218,6 +1320,7 @@
     let activeJobPollTimerId = 0;
     let activeJobTimerId = 0;
     let activeJobFailureCount = 0;
+    let localSqlListingActive = false;
     let deleteInProgress = false;
     let appliedUsernameFilter = "";
     let companyTypeAheadText = "";
@@ -1350,7 +1453,7 @@
         : done
           ? `HTTP ${snapshot.failureCount > 0 ? 207 : 200}`
           : "HTTP -";
-      const hasDuration = activeJobId && activeJobCreatedAt > 0;
+      const hasDuration = (activeJobId || localSqlListingActive) && activeJobCreatedAt > 0;
       const durationEndTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
       const durationText = hasDuration ? `Süre ${formatElapsedTime(durationEndTime - activeJobCreatedAt)}` : "Süre -";
       if (httpPill) httpPill.textContent = httpText;
@@ -1376,7 +1479,7 @@
         summaryEl.appendChild(line);
       };
 
-      if (!activeJobId) {
+      if (!activeJobId && !localSqlListingActive) {
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
         appendLine("Kullanıcı kayıtları geldikçe sağdaki tabloya eklenecek.");
         return;
@@ -1465,7 +1568,7 @@
         return;
       }
 
-      if (activeJobId) {
+      if (activeJobId || localSqlListingActive) {
         emptyEl.textContent = snapshot.done
           ? "Listelenecek kullanıcı bulunamadı."
           : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
@@ -1513,7 +1616,7 @@
     };
 
     const syncRunningStatus = () => {
-      if (!activeJobId || !activeJobCreatedAt) {
+      if ((!activeJobId && !localSqlListingActive) || !activeJobCreatedAt) {
         setStatus("Soldaki firma listesinden seçim yapın ve listelemeyi başlatın.");
         renderPills();
         return;
@@ -1567,6 +1670,7 @@
 
     const resetJobState = () => {
       stopTimers();
+      localSqlListingActive = false;
       activeJobCursor = 0;
       activeJobCreatedAt = 0;
       activeJobFinishedAt = 0;
@@ -1651,6 +1755,51 @@
           clusterLabel: String(meta.clusterLabel || "").trim()
         });
       });
+    };
+
+    const applyLocalSqlProxyResult = ({ rows = [], selectedCompanyMetas = [], rawCount = 0, sourceUrl = "" } = {}) => {
+      stopTimers();
+      activeJobId = "";
+      localSqlListingActive = true;
+      activeJobCreatedAt = Date.now();
+      activeJobFinishedAt = Date.now();
+      activeJobCursor = 0;
+      activeJobFailureCount = 0;
+      selectedUserKeys.clear();
+      listedRowsByKey.clear();
+
+      const selectedCompanyCount = Array.isArray(selectedCompanyMetas) ? selectedCompanyMetas.length : 0;
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const key = String(row?.key || "").trim();
+        if (!key || listedRowsByKey.has(key)) return;
+        listedRowsByKey.set(key, {
+          key,
+          userId: String(row?.userId || "").trim(),
+          partnerId: String(row?.partnerId || "").trim(),
+          username: String(row?.username || "").trim(),
+          fullName: String(row?.fullName || "").trim(),
+          isActive: row?.isActive !== false,
+          isActiveText: String(row?.isActiveText || "true").trim() || "true",
+          code: String(row?.code || "").trim(),
+          clusterUrl: String(row?.clusterUrl || sourceUrl || "").trim(),
+          clusterLabel: String(row?.clusterLabel || "").trim()
+        });
+      });
+
+      snapshot.done = true;
+      snapshot.error = "";
+      snapshot.totalCount = selectedCompanyCount;
+      snapshot.processedCount = selectedCompanyCount;
+      snapshot.successCount = selectedCompanyCount;
+      snapshot.failureCount = 0;
+      snapshot.scannedCompanyCount = selectedCompanyCount;
+      snapshot.successCompanyCount = selectedCompanyCount;
+      snapshot.failureCompanyCount = 0;
+      snapshot.totalUserCount = Math.max(Number(rawCount || 0), listedRowsByKey.size);
+      snapshot.activeUserCount = listedRowsByKey.size;
+      snapshot.listedUserCount = listedRowsByKey.size;
+      snapshot.failureSamples = [];
+      snapshot.failedRequestPreview = null;
     };
 
     const finalizeRender = ({ preserveStatus = false } = {}) => {
@@ -1875,39 +2024,41 @@
       updatePageUrl();
       finalizeRender();
       setBusy(true);
-      setStatus("Listeleme başlatılıyor...");
+      setStatus("Yerel VPN SQL proxy ile listeleme başlatılıyor...");
       closeDropdown();
 
       try {
-        const response = await fetch("/api/obus-user-deactivate/run", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json"
-          },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            companies,
-            usernameFilter: String(usernameFilterInput?.value || "").trim()
-          })
+        const selectedCompanyMetas = readSelectedCompanyMetas();
+        const localResult = await fetchLocalSqlProxyRows({
+          usernameFilter: String(usernameFilterInput?.value || "").trim(),
+          selectedCompanyMetas
         });
-        const data = await parseJsonResponse(response);
-        if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "Kullanıcı listeleme başlatılamadı"));
+
+        if (!localResult.ok) {
+          throw new Error(
+            `${String(localResult.error || "Yerel SQL proxy erişilemedi.").trim()} VPN açık local PC'de SQL proxy çalışıyor olmalı.`
+          );
         }
 
-        activeJobId = String(data.jobId || "").trim();
-        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
-        snapshot.totalCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : companies.length;
-        snapshot.scannedCompanyCount = snapshot.totalCount;
+        applyLocalSqlProxyResult({
+          rows: localResult.rows,
+          selectedCompanyMetas,
+          rawCount: localResult.rawCount,
+          sourceUrl: localResult.url
+        });
         updatePageUrl();
-        finalizeRender();
-        startStatusTimer();
-        void pollActiveJob();
-      } catch (err) {
         setBusy(false);
-        snapshot.error = err?.message || "Kullanıcı listeleme başlatılamadı.";
         finalizeRender();
+        setStatus(
+          `Yerel VPN SQL proxy ile listeleme tamamlandı. Listelenen kullanıcı: ${listedRowsByKey.size}`,
+          "success"
+        );
+        return;
+      } catch (localErr) {
+        setBusy(false);
+        snapshot.error = localErr?.message || "Yerel SQL proxy ile kullanıcı listeleme başlatılamadı.";
+        finalizeRender();
+        return;
       }
     });
 
