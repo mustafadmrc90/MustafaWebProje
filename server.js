@@ -339,6 +339,10 @@ const PARTNERS_SESSION_API_URL =
   "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession";
 const PARTNERS_API_AUTH =
   process.env.PARTNERS_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
+const OBUS_SESSION_CONNECTION_IP_ADDRESS =
+  String(process.env.OBUS_SESSION_CONNECTION_IP_ADDRESS || process.env.OBUS_CONNECTION_IP_ADDRESS || "").trim();
+const OBUS_SESSION_CONNECTION_PORT =
+  String(process.env.OBUS_SESSION_CONNECTION_PORT || "5117").trim() || "5117";
 const REPORTING_API_URL =
   process.env.REPORTING_API_URL ||
   "https://api-coreprod-cluster0.obus.com.tr/api/reporting/obiletsalesreport";
@@ -437,6 +441,8 @@ const OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES = Object.freeze([
 ]);
 const OBUS_USER_DEACTIVATE_SQL_PROXY_URL =
   String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_URL || "").trim();
+const OBUS_USER_DEACTIVATE_SQL_PROXY_PORT =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT || "3015", 10) || 3015;
 const OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES = Object.freeze([
   "OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN"
 ]);
@@ -7597,21 +7603,90 @@ async function savePartnerCodesCache(partners) {
   }
 }
 
-async function fetchPartnerSessionCredentials(
-  sessionUrl,
-  signal,
-  authorization = PARTNERS_API_AUTH
-) {
-  const payload = {
+let localMachineIpAddressCache = null;
+
+function isUsableLocalIpv4Address(value = "") {
+  const address = String(value || "").trim();
+  if (net.isIP(address) !== 4) return false;
+
+  const [firstOctetRaw, secondOctetRaw] = address.split(".");
+  const firstOctet = Number.parseInt(firstOctetRaw, 10);
+  const secondOctet = Number.parseInt(secondOctetRaw, 10);
+  if (firstOctet === 0 || firstOctet === 127) return false;
+  if (firstOctet === 169 && secondOctet === 254) return false;
+  return true;
+}
+
+function getPrimaryLocalMachineIpAddress() {
+  if (localMachineIpAddressCache !== null) {
+    return localMachineIpAddressCache;
+  }
+
+  const candidates = [];
+  const networkMap = os.networkInterfaces();
+  Object.values(networkMap || {}).forEach((items) => {
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item || item.internal) return;
+      const address = String(item.address || "").trim();
+      const family = String(item.family || "").toLowerCase();
+      if ((family === "ipv4" || item.family === 4) && isUsableLocalIpv4Address(address)) {
+        candidates.push(address);
+      }
+    });
+  });
+
+  localMachineIpAddressCache = candidates[0] || "127.0.0.1";
+  return localMachineIpAddressCache;
+}
+
+function getObusSessionConnectionIpAddress() {
+  return OBUS_SESSION_CONNECTION_IP_ADDRESS || getPrimaryLocalMachineIpAddress();
+}
+
+function buildObusSessionRequestBody() {
+  return {
     type: 1,
     connection: {
-      "ip-address": "212.156.219.182",
-      port: "5117"
+      "ip-address": getObusSessionConnectionIpAddress(),
+      port: OBUS_SESSION_CONNECTION_PORT
     },
     browser: {
       name: "Chrome"
     }
   };
+}
+
+function buildObusSessionRequestBodyText() {
+  return JSON.stringify(buildObusSessionRequestBody(), null, 2);
+}
+
+function buildExecuteRequestBody(body) {
+  const bodyText = typeof body === "string" ? body : JSON.stringify(body);
+  const parsedBody = parseJsonSafe(bodyText);
+  if (!parsedBody || typeof parsedBody !== "object" || Array.isArray(parsedBody)) {
+    return bodyText;
+  }
+
+  const connection = parsedBody.connection;
+  if (
+    !connection ||
+    typeof connection !== "object" ||
+    Array.isArray(connection) ||
+    !Object.prototype.hasOwnProperty.call(connection, "ip-address")
+  ) {
+    return bodyText;
+  }
+
+  connection["ip-address"] = getObusSessionConnectionIpAddress();
+  return JSON.stringify(parsedBody);
+}
+
+async function fetchPartnerSessionCredentials(
+  sessionUrl,
+  signal,
+  authorization = PARTNERS_API_AUTH
+) {
+  const payload = buildObusSessionRequestBody();
 
   try {
     const response = await fetch(sessionUrl, {
@@ -16020,8 +16095,11 @@ function buildObusUserDeactivateSqlProxyFetchError(err, requestUrl = "") {
   return parts.join(" | ");
 }
 
-async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = {}) {
-  const requestUrl = OBUS_USER_DEACTIVATE_SQL_PROXY_URL;
+async function fetchObusUserDeactivateSqlRowsViaProxy({
+  usernameFilter = "",
+  requestUrl = OBUS_USER_DEACTIVATE_SQL_PROXY_URL
+} = {}) {
+  const normalizedRequestUrl = String(requestUrl || "").trim();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS);
   const token = getObusUserDeactivateSqlProxyToken();
@@ -16035,7 +16113,7 @@ async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = 
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(requestUrl, {
+    const response = await fetch(normalizedRequestUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -16056,16 +16134,50 @@ async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = 
   } catch (err) {
     if (err?.name === "AbortError") {
       throw new Error(
-        `SQL proxy isteği zaman aşımına uğradı: ${sanitizeObusUserDeactivateSqlProxyUrl(requestUrl)}`
+        `SQL proxy isteği zaman aşımına uğradı: ${sanitizeObusUserDeactivateSqlProxyUrl(normalizedRequestUrl)}`
       );
     }
     if (String(err?.message || "").startsWith("SQL proxy HTTP")) {
       throw err;
     }
-    throw new Error(buildObusUserDeactivateSqlProxyFetchError(err, requestUrl));
+    throw new Error(buildObusUserDeactivateSqlProxyFetchError(err, normalizedRequestUrl));
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function buildObusUserDeactivateLocalSqlProxyUrls() {
+  return Array.from(
+    new Set(
+      [
+        OBUS_USER_DEACTIVATE_SQL_PROXY_URL,
+        `http://127.0.0.1:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/obus-user-deactivate/users`,
+        `http://localhost:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/obus-user-deactivate/users`
+      ]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+async function fetchObusUserDeactivateLocalSqlProxyRows({ usernameFilter = "" } = {}) {
+  const requestUrls = buildObusUserDeactivateLocalSqlProxyUrls();
+  let lastError = null;
+
+  for (const requestUrl of requestUrls) {
+    try {
+      const rows = await fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter, requestUrl });
+      return {
+        rows,
+        sourceUrl: requestUrl
+      };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const triedUrls = requestUrls.map((item) => sanitizeObusUserDeactivateSqlProxyUrl(item)).join(", ");
+  throw new Error(`${lastError?.message || "SQL proxy erişilemedi."} Denenen adresler: ${triedUrls}`);
 }
 
 function normalizeObusUserDeactivateSqlRow(row = {}) {
@@ -20400,7 +20512,8 @@ app.get("/dashboard", requireAuth, requireMenuAccess("dashboard"), (req, res) =>
   res.render("dashboard", {
     user: req.session.user,
     active: "dashboard",
-    loginSuccess: req.query.login === "1"
+    loginSuccess: req.query.login === "1",
+    defaultEndpointBody: buildObusSessionRequestBodyText()
   });
 });
 
@@ -20995,6 +21108,31 @@ app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-u
     });
   }
 });
+
+app.post(
+  "/api/obus-user-deactivate/local-sql-users",
+  requireAuth,
+  requireMenuAccess("obus-user-deactivate"),
+  async (req, res) => {
+    const usernameFilter = String(req.body?.usernameFilter || "").trim();
+    try {
+      const result = await fetchObusUserDeactivateLocalSqlProxyRows({ usernameFilter });
+      const rows = Array.isArray(result.rows) ? result.rows : [];
+      return res.json({
+        ok: true,
+        count: rows.length,
+        sourceUrl: result.sourceUrl || buildObusUserDeactivateSqlRequestUrl(),
+        rows
+      });
+    } catch (err) {
+      return res.status(502).json({
+        ok: false,
+        error: err?.message || "Yerel SQL proxy ile kullanıcı listeleme yapılamadı.",
+        sourceUrl: buildObusUserDeactivateLocalSqlProxyUrls()[0] || buildObusUserDeactivateSqlRequestUrl()
+      });
+    }
+  }
+);
 
 app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {
@@ -24374,6 +24512,7 @@ app.post("/api/execute", requireAuth, async (req, res) => {
     }
   }
 
+  const requestBody = hasBody ? buildExecuteRequestBody(body) : undefined;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   const startedAt = Date.now();
@@ -24382,7 +24521,7 @@ app.post("/api/execute", requireAuth, async (req, res) => {
     const response = await fetch(url.toString(), {
       method: httpMethod,
       headers: finalHeaders,
-      body: hasBody ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+      body: requestBody,
       signal: controller.signal
     });
 
@@ -24402,7 +24541,7 @@ app.post("/api/execute", requireAuth, async (req, res) => {
           url.pathname,
           JSON.stringify(finalHeaders),
           params ? JSON.stringify(params) : "{}",
-          body ? String(body) : "",
+          requestBody || "",
           response.status,
           text,
           JSON.stringify(Object.fromEntries(response.headers.entries())),
@@ -24436,7 +24575,7 @@ app.post("/api/execute", requireAuth, async (req, res) => {
           url.pathname,
           JSON.stringify(finalHeaders),
           params ? JSON.stringify(params) : "{}",
-          body ? String(body) : "",
+          requestBody || "",
           null,
           err.message || "İstek hatası.",
           "{}",

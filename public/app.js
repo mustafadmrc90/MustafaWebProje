@@ -358,7 +358,32 @@
     }
   };
 
-  const defaultBody = `{\n  \"type\": 1,\n  \"connection\": {\n    \"ip-address\": \"212.156.219.182\",\n    \"port\": \"5117\"\n  },\n  \"browser\": {\n    \"name\": \"Chrome\"\n  }\n}`;
+  const resolveDefaultConnectionIpAddress = () => {
+    try {
+      const host = String(window.location.hostname || "").trim().replace(/^\[|\]$/g, "");
+      if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) && host !== "127.0.0.1") {
+        return host;
+      }
+    } catch (err) {
+      // Fall through to the placeholder; the server replaces it before sending.
+    }
+    return "{{APP_PC_IP}}";
+  };
+
+  const defaultBody = JSON.stringify(
+    {
+      type: 1,
+      connection: {
+        "ip-address": resolveDefaultConnectionIpAddress(),
+        port: "5117"
+      },
+      browser: {
+        name: "Chrome"
+      }
+    },
+    null,
+    2
+  );
   const defaultHeaders = "{\n  \"Content-Type\": \"application/json\"\n}";
   const defaultParams = "{}";
   const loginProfilesStorageKey = "obus_userlogin_profiles_v1";
@@ -1106,10 +1131,23 @@
       }
     };
 
-    const localSqlProxyUrls = [
-      "http://127.0.0.1:3015/obus-user-deactivate/users",
-      "http://localhost:3015/obus-user-deactivate/users"
-    ];
+    const buildLocalSqlProxyUrls = () => {
+      const urls = ["/api/obus-user-deactivate/local-sql-users"];
+      try {
+        const protocol = "http:";
+        const host = String(window.location.hostname || "").trim();
+        const normalizedHost = host.replace(/^\[|\]$/g, "").toLowerCase();
+        if (host && normalizedHost !== "localhost" && normalizedHost !== "127.0.0.1" && normalizedHost !== "::1") {
+          const hostForUrl = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+          urls.push(`${protocol}//${hostForUrl}:3015/obus-user-deactivate/users`);
+        }
+      } catch (err) {
+        // Keep the relative app endpoint and loopback fallbacks.
+      }
+      urls.push("http://127.0.0.1:3015/obus-user-deactivate/users");
+      urls.push("http://localhost:3015/obus-user-deactivate/users");
+      return Array.from(new Set(urls));
+    };
 
     const normalizeLocalSqlProxyCode = (value) => String(value || "").trim().toLocaleLowerCase("tr");
 
@@ -1188,12 +1226,14 @@
 
     const fetchLocalSqlProxyRows = async ({ usernameFilter = "", selectedCompanyMetas = [] } = {}) => {
       let lastError = null;
+      const localSqlProxyUrls = buildLocalSqlProxyUrls();
       for (const url of localSqlProxyUrls) {
         try {
           const data = await fetchLocalSqlProxyJson(url, { usernameFilter });
+          const sourceUrl = String(data?.sourceUrl || url || "").trim();
           return {
             ok: true,
-            url,
+            url: sourceUrl || url,
             rows: buildLocalSqlProxyRows(data.rows, selectedCompanyMetas),
             rawCount: Number(data.count || (Array.isArray(data.rows) ? data.rows.length : 0)) || 0
           };
