@@ -15993,6 +15993,33 @@ async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
   return Array.isArray(result?.recordset) ? result.recordset : [];
 }
 
+function sanitizeObusUserDeactivateSqlProxyUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "SQL proxy URL";
+  try {
+    const parsed = new URL(raw);
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString();
+  } catch (err) {
+    return raw;
+  }
+}
+
+function buildObusUserDeactivateSqlProxyFetchError(err, requestUrl = "") {
+  const cause = err?.cause && typeof err.cause === "object" ? err.cause : null;
+  const parts = [`SQL proxy erişilemedi: ${sanitizeObusUserDeactivateSqlProxyUrl(requestUrl)}`];
+  const code = String(cause?.code || err?.code || "").trim();
+  const address = String(cause?.address || "").trim();
+  const port = String(cause?.port || "").trim();
+  const detail = String(cause?.message || err?.message || "").trim();
+
+  if (code) parts.push(`kod=${code}`);
+  if (address || port) parts.push(`adres=${[address, port].filter(Boolean).join(":")}`);
+  if (detail) parts.push(`detay=${detail}`);
+  return parts.join(" | ");
+}
+
 async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = {}) {
   const requestUrl = OBUS_USER_DEACTIVATE_SQL_PROXY_URL;
   const controller = new AbortController();
@@ -16028,9 +16055,14 @@ async function fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter = "" } = 
     return Array.isArray(payload.rows) ? payload.rows : [];
   } catch (err) {
     if (err?.name === "AbortError") {
-      throw new Error("SQL proxy isteği zaman aşımına uğradı.");
+      throw new Error(
+        `SQL proxy isteği zaman aşımına uğradı: ${sanitizeObusUserDeactivateSqlProxyUrl(requestUrl)}`
+      );
     }
-    throw err;
+    if (String(err?.message || "").startsWith("SQL proxy HTTP")) {
+      throw err;
+    }
+    throw new Error(buildObusUserDeactivateSqlProxyFetchError(err, requestUrl));
   } finally {
     clearTimeout(timeout);
   }
