@@ -1157,7 +1157,7 @@
       return err;
     };
 
-    const fetchLocalSqlProxyJson = async (url, payload, timeoutMs = 3500) => {
+    const fetchLocalSqlProxyJson = async (url, payload, timeoutMs = 45000) => {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -1180,6 +1180,11 @@
           });
         }
         return data;
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          throw createLocalSqlProxyError(`Yerel SQL proxy ${Math.round(timeoutMs / 1000)} saniye içinde yanıt vermedi.`);
+        }
+        throw err;
       } finally {
         window.clearTimeout(timeout);
       }

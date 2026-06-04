@@ -54,7 +54,7 @@ npm run obus-user-deactivate-sql-proxy
 
 Varsayılan proxy adresi: `http://127.0.0.1:3015/obus-user-deactivate/users`
 
-Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
+Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır ve `https://*.onrender.com` gibi wildcard origin kabul eder. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
 
 ### macOS Keychain Secret'lari
 

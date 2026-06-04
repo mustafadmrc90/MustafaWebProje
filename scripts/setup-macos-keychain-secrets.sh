@@ -27,6 +27,19 @@ save_secret() {
     -w "$secret_value" >/dev/null
 }
 
+read_hidden_optional() {
+  local prompt="$1"
+  local value=""
+
+  printf "%s" "$prompt" >&2
+  stty -echo
+  read -r value
+  restore_tty
+  printf "\n" >&2
+
+  printf "%s" "$value"
+}
+
 printf "OBUS kullanici adini girin [busproductapp]: "
 read -r obus_username
 obus_username="${obus_username:-busproductapp}"
@@ -51,7 +64,21 @@ save_secret "OBUS_JOB_FIXED_PASSWORD" "$obus_password"
 save_secret "OBUS_USER_CREATE_LOGIN_USERNAME" "$obus_username"
 save_secret "OBUS_USER_CREATE_LOGIN_PASSWORD" "$obus_password"
 
+saved_count=8
+
+sql_password="$(read_hidden_optional "Obus user deactivate SQL sifresini girin [bos birak=atla]: ")"
+if [[ -n "$sql_password" ]]; then
+  save_secret "OBUS_USER_DEACTIVATE_SQL_PASSWORD" "$sql_password"
+  saved_count=$((saved_count + 1))
+fi
+
+sql_proxy_token="$(read_hidden_optional "Obus user deactivate SQL proxy token girin [bos birak=atla]: ")"
+if [[ -n "$sql_proxy_token" ]]; then
+  save_secret "OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN" "$sql_proxy_token"
+  saved_count=$((saved_count + 1))
+fi
+
 trap - EXIT INT TERM
 
-echo "8 secret macOS Keychain'e kaydedildi."
+echo "$saved_count secret macOS Keychain'e kaydedildi."
 echo "Uygulamayi yeniden baslatin."

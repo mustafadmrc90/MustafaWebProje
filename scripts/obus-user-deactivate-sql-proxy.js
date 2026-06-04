@@ -216,7 +216,9 @@ const SQL_ENCRYPT = parseBooleanFlag(
 const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "127.0.0.1");
 const PROXY_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT, 3015);
 const PROXY_TOKEN = resolveSecret("OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN", { trim: false });
-const PROXY_ALLOWED_ORIGINS = parseAllowedOrigins(readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "*"));
+const PROXY_ALLOWED_ORIGINS = parseAllowedOrigins(
+  readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "http://localhost:3000,https://*.onrender.com")
+);
 
 function parseAllowedOrigins(value = "") {
   const origins = String(value || "")
@@ -226,10 +228,68 @@ function parseAllowedOrigins(value = "") {
   return origins.length > 0 ? origins : ["*"];
 }
 
+function parseOriginUrl(value = "") {
+  try {
+    return new URL(String(value || "").trim());
+  } catch (err) {
+    return null;
+  }
+}
+
+function isLoopbackOrigin(origin = "") {
+  const parsed = parseOriginUrl(origin);
+  const hostname = String(parsed?.hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function isDefaultTrustedBrowserOrigin(origin = "") {
+  const parsed = parseOriginUrl(origin);
+  if (!parsed) return false;
+  const protocol = String(parsed.protocol || "").toLowerCase();
+  const hostname = String(parsed.hostname || "").toLowerCase();
+  if (isLoopbackOrigin(origin)) return true;
+  return (protocol === "https:" || protocol === "http:") && hostname.endsWith(".onrender.com");
+}
+
+function matchesAllowedOriginPattern(origin = "", pattern = "") {
+  const normalizedOrigin = String(origin || "").trim();
+  const normalizedPattern = String(pattern || "").trim();
+  if (!normalizedOrigin || !normalizedPattern) return false;
+  if (normalizedPattern === "*") return true;
+  if (normalizedPattern === normalizedOrigin) return true;
+
+  const wildcardMatch = normalizedPattern.match(/^(https?:)\/\/\*\.(.+)$/i);
+  if (!wildcardMatch) return false;
+
+  const parsedOrigin = parseOriginUrl(normalizedOrigin);
+  if (!parsedOrigin) return false;
+
+  const expectedProtocol = wildcardMatch[1].toLowerCase();
+  const expectedHostSuffix = wildcardMatch[2].replace(/\/+$/, "").toLowerCase();
+  const hostname = String(parsedOrigin.hostname || "").toLowerCase();
+  return (
+    String(parsedOrigin.protocol || "").toLowerCase() === expectedProtocol &&
+    (hostname === expectedHostSuffix || hostname.endsWith(`.${expectedHostSuffix}`))
+  );
+}
+
+const deniedCorsOrigins = new Set();
+
 function resolveAllowedOrigin(requestOrigin = "") {
   const origin = String(requestOrigin || "").trim();
-  if (PROXY_ALLOWED_ORIGINS.includes("*")) return "*";
-  if (origin && PROXY_ALLOWED_ORIGINS.includes(origin)) return origin;
+  if (!origin) return "";
+  if (PROXY_ALLOWED_ORIGINS.some((allowedOrigin) => matchesAllowedOriginPattern(origin, allowedOrigin))) {
+    return origin;
+  }
+  if (isDefaultTrustedBrowserOrigin(origin)) return origin;
+
+  if (!deniedCorsOrigins.has(origin)) {
+    deniedCorsOrigins.add(origin);
+    console.warn(
+      `Obus user deactivate SQL proxy CORS origin rejected: ${origin}. ` +
+        "Set OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN=* or include this origin."
+    );
+  }
   return "";
 }
 

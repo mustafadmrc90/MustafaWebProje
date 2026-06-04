@@ -419,6 +419,110 @@ const OBUS_USER_CREATE_LOGIN_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_CREATE_LOGIN_CONCURRENCY || "6", 10) || 6;
 const OBUS_USER_CREATE_REQUEST_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_CREATE_REQUEST_CONCURRENCY || "10", 10) || 10;
+
+function parseObusUserDeactivateBooleanFlag(value, fallback = false) {
+  if (value === undefined || value === null || String(value).trim() === "") return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  return fallback;
+}
+
+function parseObusUserDeactivatePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isObusUserDeactivatePlaceholderConfigValue(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return (
+    normalized === "change-me" ||
+    normalized === "your-password" ||
+    normalized === "your-token" ||
+    normalized === "password" ||
+    normalized.startsWith("your-")
+  );
+}
+
+function readObusUserDeactivateConfigValue(name, fallback = "") {
+  const value = String(process.env[name] || "").trim();
+  if (value && !isObusUserDeactivatePlaceholderConfigValue(value)) return value;
+  const fallbackValue = String(fallback || "").trim();
+  return fallbackValue && !isObusUserDeactivatePlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
+}
+
+function parseObusUserDeactivateMssqlDatabaseUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return {};
+
+  if (/^(mssql|sqlserver):\/\//i.test(text)) {
+    try {
+      const parsed = new URL(text);
+      const host = String(parsed.hostname || "").trim();
+      if (!host) return {};
+      const encryptRaw = parsed.searchParams.get("encrypt") || parsed.searchParams.get("ssl");
+      return {
+        host,
+        port: parseObusUserDeactivatePositiveInt(parsed.port, 1433),
+        database: String(parsed.pathname || "").replace(/^\//, "") || "",
+        username: decodeURIComponent(parsed.username || ""),
+        password: decodeURIComponent(parsed.password || ""),
+        encrypt: parseObusUserDeactivateBooleanFlag(encryptRaw, !net.isIP(host))
+      };
+    } catch (err) {
+      return {};
+    }
+  }
+
+  if (!/^[a-z0-9 _-]+\s*=/i.test(text) || !text.includes(";")) return {};
+
+  const config = {};
+  String(text)
+    .split(";")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      const eqIndex = part.indexOf("=");
+      if (eqIndex <= 0) return;
+      const key = part.slice(0, eqIndex).replace(/\s+/g, " ").trim().toLowerCase();
+      const itemValue = part.slice(eqIndex + 1).trim();
+      if (!itemValue) return;
+
+      if (key === "server" || key === "data source" || key === "addr" || key === "address") {
+        let host = "";
+        let portRaw = "";
+        if (itemValue.includes(",")) {
+          [host, portRaw] = itemValue.split(",");
+        } else if (/^[^:]+:\d+$/.test(itemValue)) {
+          [host, portRaw] = itemValue.split(":");
+        } else {
+          host = itemValue;
+        }
+        config.host = String(host || "").replace(/^tcp:/i, "").trim();
+        if (portRaw) config.port = parseObusUserDeactivatePositiveInt(portRaw, 0);
+        return;
+      }
+      if (key === "database" || key === "initial catalog") {
+        config.database = itemValue;
+        return;
+      }
+      if (key === "user id" || key === "uid" || key === "user") {
+        config.username = itemValue;
+        return;
+      }
+      if (key === "password" || key === "pwd") {
+        config.password = itemValue;
+        return;
+      }
+      if (key === "encrypt") {
+        config.encrypt = parseObusUserDeactivateBooleanFlag(itemValue, null);
+      }
+    });
+
+  return config;
+}
+
+const OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG = parseObusUserDeactivateMssqlDatabaseUrl(process.env.DATABASE_URL);
 const OBUS_USER_DEACTIVATE_API_URL =
   process.env.OBUS_USER_DEACTIVATE_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/Membership/GetUsersWithoutPermissions";
@@ -429,13 +533,22 @@ const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "8", 10) || 8;
 const OBUS_USER_DEACTIVATE_SQL_HOST =
-  String(process.env.OBUS_USER_DEACTIVATE_SQL_HOST || "3.66.204.108").trim() || "3.66.204.108";
+  readObusUserDeactivateConfigValue("OBUS_USER_DEACTIVATE_SQL_HOST", OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.host || "");
 const OBUS_USER_DEACTIVATE_SQL_PORT =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_PORT || "1433", 10) || 1433;
+  parseObusUserDeactivatePositiveInt(
+    process.env.OBUS_USER_DEACTIVATE_SQL_PORT,
+    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.port || 1433
+  );
 const OBUS_USER_DEACTIVATE_SQL_DATABASE =
-  String(process.env.OBUS_USER_DEACTIVATE_SQL_DATABASE || "b2b-production").trim() || "b2b-production";
+  readObusUserDeactivateConfigValue(
+    "OBUS_USER_DEACTIVATE_SQL_DATABASE",
+    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.database || ""
+  );
 const OBUS_USER_DEACTIVATE_SQL_USERNAME =
-  String(process.env.OBUS_USER_DEACTIVATE_SQL_USERNAME || "ors_mdemirci").trim() || "ors_mdemirci";
+  readObusUserDeactivateConfigValue(
+    "OBUS_USER_DEACTIVATE_SQL_USERNAME",
+    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.username || ""
+  );
 const OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES = Object.freeze([
   "OBUS_USER_DEACTIVATE_SQL_PASSWORD"
 ]);
@@ -15909,11 +16022,35 @@ function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") 
 }
 
 function getObusUserDeactivateSqlPassword() {
-  return resolveObusCredentialSecret(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES, { trim: false });
+  return resolveObusUserDeactivateSecret(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES, {
+    trim: false,
+    fallback: OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.password || ""
+  });
 }
 
 function getObusUserDeactivateSqlProxyToken() {
-  return resolveObusCredentialSecret(OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES, { trim: false });
+  return resolveObusUserDeactivateSecret(OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES, { trim: false });
+}
+
+function resolveObusUserDeactivateSecret(secretNames = [], { trim = true, fallback = "" } = {}) {
+  const names = (Array.isArray(secretNames) ? secretNames : [secretNames])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  if (names.length === 0) return "";
+
+  for (const secretName of names) {
+    const keychainValue = readMacOsKeychainSecret(secretName, { trim });
+    if (keychainValue && !isObusUserDeactivatePlaceholderConfigValue(keychainValue)) return keychainValue;
+  }
+
+  const legacyValue = readLegacyLocalSecret(names, { trim });
+  if (legacyValue && !isObusUserDeactivatePlaceholderConfigValue(legacyValue)) {
+    writeMacOsKeychainSecret(names[0], legacyValue, { trim });
+    return legacyValue;
+  }
+
+  const fallbackValue = normalizeMacOsKeychainSecretValue(fallback, trim);
+  return fallbackValue && !isObusUserDeactivatePlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
 }
 
 function buildObusUserDeactivateSqlConfigurationMessage(missingItems = []) {
@@ -16004,13 +16141,12 @@ async function getObusUserDeactivateSqlPool() {
     return obusUserDeactivateSqlPoolPromise;
   }
 
-  const sqlEncryptRaw = String(process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT || "").trim().toLowerCase();
-  const encrypt =
-    sqlEncryptRaw === "true" || sqlEncryptRaw === "1" || sqlEncryptRaw === "yes"
-      ? true
-      : sqlEncryptRaw === "false" || sqlEncryptRaw === "0" || sqlEncryptRaw === "no"
-        ? false
-        : !net.isIP(credentials.host);
+  const encrypt = parseObusUserDeactivateBooleanFlag(
+    process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
+    typeof OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt === "boolean"
+      ? OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt
+      : !net.isIP(credentials.host)
+  );
 
   const pool = new mssql.ConnectionPool({
     user: credentials.username,
