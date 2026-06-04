@@ -44,6 +44,18 @@ cp .env.example .env
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
 
+### Obus Kullanıcı Pasife Al / Yerel SQL Proxy
+
+`/general/obus-user-deactivate` ekranında kullanıcı listeleme için VPN erişimi olan bilgisayarda yerel SQL proxy çalışmalıdır:
+
+```bash
+npm run obus-user-deactivate-sql-proxy
+```
+
+Varsayılan proxy adresi: `http://127.0.0.1:3015/obus-user-deactivate/users`
+
+Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
+
 ### macOS Keychain Secret'lari
 
 Asagidaki login bilgileri `.env` dosyasindan degil, macOS Keychain'den okunur:
