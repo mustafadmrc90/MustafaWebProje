@@ -1521,6 +1521,10 @@
 
       if (!activeJobId && !localSqlListingActive) {
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
+        if (snapshot.error) {
+          appendLine(snapshot.error);
+          return;
+        }
         appendLine("Kullanıcı kayıtları geldikçe sağdaki tabloya eklenecek.");
         return;
       }
@@ -1657,7 +1661,11 @@
 
     const syncRunningStatus = () => {
       if ((!activeJobId && !localSqlListingActive) || !activeJobCreatedAt) {
-        setStatus("Soldaki firma listesinden seçim yapın ve listelemeyi başlatın.");
+        if (snapshot.error) {
+          setStatus(snapshot.error, "error");
+        } else {
+          setStatus("Soldaki firma listesinden seçim yapın ve listelemeyi başlatın.");
+        }
         renderPills();
         return;
       }
