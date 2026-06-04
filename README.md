@@ -54,11 +54,11 @@ npm run obus-user-deactivate-sql-proxy
 
 Varsayılan proxy adresi: `http://127.0.0.1:3015/obus-user-deactivate/users`
 
-Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
+Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
 
 ### macOS Keychain Secret'lari
 
-Asagidaki login bilgileri `.env` dosyasindan degil, macOS Keychain'den okunur:
+Normal kullanimda asagidaki hassas bilgiler `.env` yerine macOS Keychain'den okunur:
 
 - `MustafaWebProje/OBUS_SERVICE_LOGIN_USERNAME`
 - `MustafaWebProje/OBUS_SERVICE_LOGIN_PASSWORD`
@@ -68,8 +68,10 @@ Asagidaki login bilgileri `.env` dosyasindan degil, macOS Keychain'den okunur:
 - `MustafaWebProje/OBUS_JOB_FIXED_PASSWORD`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_USERNAME`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_PASSWORD`
+- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PASSWORD`
+- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN` (opsiyonel)
 
-Uygulama kaynak kodunda OBUS servis sifresi plaintext tutulmaz. Runtime'da gercek sifre macOS Keychain'den okunur; kod tarafinda yalnizca bcrypt hash ile dogrulama yapilir.
+Uygulama kaynak kodunda OBUS servis sifresi ve OBUS kullanıcı pasife alma SQL sifresi plaintext tutulmaz. Runtime'da gercek sifre macOS Keychain'den okunur; kod tarafinda yalnizca bcrypt hash ile dogrulama yapilir.
 
 Kurulum icin:
 

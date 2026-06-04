@@ -3,8 +3,12 @@
 const fs = require("fs");
 const path = require("path");
 const net = require("net");
+const { execFileSync } = require("child_process");
 const express = require("express");
 const mssql = require("mssql");
+
+const MACOS_KEYCHAIN_ACCOUNT = "default";
+const MACOS_KEYCHAIN_SERVICE_PREFIX = "MustafaWebProje";
 
 function loadLocalEnvFile(filePath = path.join(__dirname, "..", ".env")) {
   try {
@@ -63,21 +67,155 @@ function parsePositiveInt(value, fallback) {
 
 function readEnv(name, fallback = "") {
   const value = String(process.env[name] || "").trim();
-  return value || fallback;
+  if (value && !isPlaceholderConfigValue(value)) return value;
+  const fallbackValue = String(fallback || "").trim();
+  return fallbackValue && !isPlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
+}
+
+function parseMssqlDatabaseUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return {};
+
+  if (/^(mssql|sqlserver):\/\//i.test(text)) {
+    try {
+      const parsed = new URL(text);
+      const host = String(parsed.hostname || "").trim();
+      if (!host) return {};
+      const encryptRaw = parsed.searchParams.get("encrypt") || parsed.searchParams.get("ssl");
+      return {
+        host,
+        port: parsePositiveInt(parsed.port, 1433),
+        database: String(parsed.pathname || "").replace(/^\//, "") || "",
+        username: decodeURIComponent(parsed.username || ""),
+        password: decodeURIComponent(parsed.password || ""),
+        encrypt: parseBooleanFlag(encryptRaw, !net.isIP(host))
+      };
+    } catch (err) {
+      return {};
+    }
+  }
+
+  if (!/^[a-z0-9 _-]+\s*=/i.test(text) || !text.includes(";")) return {};
+
+  const config = {};
+  text.split(";").forEach((part) => {
+    const eqIndex = part.indexOf("=");
+    if (eqIndex <= 0) return;
+    const key = part.slice(0, eqIndex).replace(/\s+/g, " ").trim().toLowerCase();
+    const itemValue = part.slice(eqIndex + 1).trim();
+    if (!itemValue) return;
+
+    if (key === "server" || key === "data source" || key === "addr" || key === "address") {
+      let host = "";
+      let portRaw = "";
+      if (itemValue.includes(",")) {
+        [host, portRaw] = itemValue.split(",");
+      } else if (/^[^:]+:\d+$/.test(itemValue)) {
+        [host, portRaw] = itemValue.split(":");
+      } else {
+        host = itemValue;
+      }
+      config.host = String(host || "").replace(/^tcp:/i, "").trim();
+      if (portRaw) config.port = parsePositiveInt(portRaw, 0);
+      return;
+    }
+    if (key === "database" || key === "initial catalog") {
+      config.database = itemValue;
+      return;
+    }
+    if (key === "user id" || key === "uid" || key === "user") {
+      config.username = itemValue;
+      return;
+    }
+    if (key === "password" || key === "pwd") {
+      config.password = itemValue;
+      return;
+    }
+    if (key === "encrypt") {
+      config.encrypt = parseBooleanFlag(itemValue, null);
+    }
+  });
+
+  return config;
+}
+
+function normalizeSecretValue(rawValue, { trim = true } = {}) {
+  const text = String(rawValue == null ? "" : rawValue).replace(/\r?\n$/, "");
+  return trim ? text.trim() : text;
+}
+
+function isPlaceholderConfigValue(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return (
+    normalized === "change-me" ||
+    normalized === "your-password" ||
+    normalized === "your-token" ||
+    normalized === "password" ||
+    normalized.startsWith("your-")
+  );
+}
+
+function readMacOsKeychainSecret(secretName, { trim = true } = {}) {
+  if (process.platform !== "darwin") return "";
+  const normalizedSecretName = String(secretName || "").trim();
+  if (!normalizedSecretName) return "";
+
+  try {
+    return normalizeSecretValue(
+      execFileSync(
+        "/usr/bin/security",
+        [
+          "find-generic-password",
+          "-a",
+          MACOS_KEYCHAIN_ACCOUNT,
+          "-s",
+          `${MACOS_KEYCHAIN_SERVICE_PREFIX}/${normalizedSecretName}`,
+          "-w"
+        ],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      ),
+      { trim }
+    );
+  } catch (err) {
+    return "";
+  }
+}
+
+function resolveSecret(name, { trim = true, fallback = "" } = {}) {
+  const keychainValue = readMacOsKeychainSecret(name, { trim });
+  if (keychainValue && !isPlaceholderConfigValue(keychainValue)) return keychainValue;
+
+  const envValue = normalizeSecretValue(process.env[name], { trim });
+  if (envValue && !isPlaceholderConfigValue(envValue)) return envValue;
+
+  const fallbackValue = normalizeSecretValue(fallback, { trim });
+  if (fallbackValue && !isPlaceholderConfigValue(fallbackValue)) return fallbackValue;
+
+  return "";
 }
 
 loadLocalEnvFile();
 
-const SQL_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_HOST", "3.66.204.108");
-const SQL_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PORT, 1433);
-const SQL_DATABASE = readEnv("OBUS_USER_DEACTIVATE_SQL_DATABASE", "b2b-production");
-const SQL_USERNAME = readEnv("OBUS_USER_DEACTIVATE_SQL_USERNAME", "ors_mdemirci");
-const SQL_PASSWORD = String(process.env.OBUS_USER_DEACTIVATE_SQL_PASSWORD || "");
+const DATABASE_MSSQL_CONFIG = parseMssqlDatabaseUrl(process.env.DATABASE_URL);
+const SQL_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_HOST", DATABASE_MSSQL_CONFIG.host || "");
+const SQL_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PORT, DATABASE_MSSQL_CONFIG.port || 1433);
+const SQL_DATABASE = readEnv("OBUS_USER_DEACTIVATE_SQL_DATABASE", DATABASE_MSSQL_CONFIG.database || "");
+const SQL_USERNAME = readEnv("OBUS_USER_DEACTIVATE_SQL_USERNAME", DATABASE_MSSQL_CONFIG.username || "");
+const SQL_PASSWORD = resolveSecret("OBUS_USER_DEACTIVATE_SQL_PASSWORD", {
+  trim: false,
+  fallback: DATABASE_MSSQL_CONFIG.password || ""
+});
 const SQL_TIMEOUT_MS = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS, 45000);
-const SQL_ENCRYPT = parseBooleanFlag(process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT, !net.isIP(SQL_HOST));
+const SQL_ENCRYPT = parseBooleanFlag(
+  process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
+  typeof DATABASE_MSSQL_CONFIG.encrypt === "boolean" ? DATABASE_MSSQL_CONFIG.encrypt : !net.isIP(SQL_HOST)
+);
 const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "127.0.0.1");
 const PROXY_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT, 3015);
-const PROXY_TOKEN = String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN || "");
+const PROXY_TOKEN = resolveSecret("OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN", { trim: false });
 const PROXY_ALLOWED_ORIGINS = parseAllowedOrigins(readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "*"));
 
 function parseAllowedOrigins(value = "") {
@@ -105,6 +243,12 @@ function getRequiredSqlConfigError() {
   if (!SQL_USERNAME) missing.push("OBUS_USER_DEACTIVATE_SQL_USERNAME");
   if (!SQL_PASSWORD) missing.push("OBUS_USER_DEACTIVATE_SQL_PASSWORD");
   return missing.length > 0 ? `Missing SQL config: ${missing.join(", ")}` : "";
+}
+
+function maskSecretForLog(value = "") {
+  const text = String(value || "");
+  if (!text) return "missing";
+  return `${text.length} chars`;
 }
 
 async function getSqlPool() {
@@ -257,6 +401,14 @@ app.post("/obus-user-deactivate/users", requireProxyToken, async (req, res) => {
 
 const server = app.listen(PROXY_PORT, PROXY_HOST, () => {
   console.log(`Obus user deactivate SQL proxy listening on ${PROXY_HOST}:${PROXY_PORT}`);
+  console.log(
+    [
+      `SQL target ${SQL_HOST}:${SQL_PORT}/${SQL_DATABASE}`,
+      `user=${SQL_USERNAME || "missing"}`,
+      `password=${maskSecretForLog(SQL_PASSWORD)}`,
+      `encrypt=${SQL_ENCRYPT ? "true" : "false"}`
+    ].join(" | ")
+  );
 });
 
 server.on("error", (err) => {
