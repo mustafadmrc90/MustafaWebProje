@@ -1149,6 +1149,14 @@
 
     const normalizeLocalSqlProxyCode = (value) => String(value || "").trim().toLocaleLowerCase("tr");
 
+    const createLocalSqlProxyError = (message, { retryable = true, status = 0, errorType = "" } = {}) => {
+      const err = new Error(String(message || "").trim() || "Yerel SQL proxy hatası.");
+      err.retryable = retryable;
+      err.status = status;
+      err.errorType = errorType;
+      return err;
+    };
+
     const fetchLocalSqlProxyJson = async (url, payload, timeoutMs = 3500) => {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -1164,7 +1172,12 @@
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "Yerel SQL proxy listeleme yapamadı"));
+          const errorType = String(data?.errorType || "").trim();
+          throw createLocalSqlProxyError(getApiErrorMessage(response, data, "Yerel SQL proxy listeleme yapamadı"), {
+            retryable: data?.retryable !== false && errorType !== "sql-auth" && errorType !== "sql-config",
+            status: response.status,
+            errorType
+          });
         }
         return data;
       } finally {
@@ -1237,11 +1250,19 @@
           };
         } catch (err) {
           lastError = err;
+          if (err?.retryable === false) {
+            return {
+              ok: false,
+              retryable: false,
+              error: err?.message || "Yerel SQL proxy SQL bağlantı hatası verdi."
+            };
+          }
         }
       }
 
       return {
         ok: false,
+        retryable: true,
         error: `${lastError?.message || "Yerel SQL proxy bulunamadı."} Denenen adresler: ${localSqlProxyUrls.join(", ")}`
       };
     };
@@ -2081,8 +2102,10 @@
         });
 
         if (!localResult.ok) {
+          const proxyReachabilityHint =
+            localResult.retryable === false ? "" : " VPN açık local PC'de SQL proxy çalışıyor olmalı.";
           throw new Error(
-            `${String(localResult.error || "Yerel SQL proxy erişilemedi.").trim()} VPN açık local PC'de SQL proxy çalışıyor olmalı.`
+            `${String(localResult.error || "Yerel SQL proxy erişilemedi.").trim()}${proxyReachabilityHint}`
           );
         }
 

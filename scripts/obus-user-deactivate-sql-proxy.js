@@ -187,6 +187,27 @@ function requireProxyToken(req, res, next) {
   return res.status(401).json({ ok: false, error: "Unauthorized." });
 }
 
+function readSqlErrorCode(err = {}) {
+  const candidates = [
+    err?.code,
+    err?.number,
+    err?.originalError?.code,
+    err?.originalError?.number,
+    ...(Array.isArray(err?.precedingErrors)
+      ? err.precedingErrors.flatMap((item) => [item?.code, item?.number])
+      : [])
+  ];
+  return candidates.map((item) => String(item || "").trim()).find(Boolean) || "";
+}
+
+function classifySqlProxyError(err = {}) {
+  const message = String(err?.message || "").trim();
+  const code = readSqlErrorCode(err);
+  if (/missing sql config/i.test(message)) return "sql-config";
+  if (code === "ELOGIN" || /login failed for user/i.test(message)) return "sql-auth";
+  return "sql-error";
+}
+
 const app = express();
 app.use((req, res, next) => {
   const allowedOrigin = resolveAllowedOrigin(req.get("origin"));
@@ -223,9 +244,13 @@ app.post("/obus-user-deactivate/users", requireProxyToken, async (req, res) => {
       rows
     });
   } catch (err) {
+    const errorType = classifySqlProxyError(err);
     return res.status(500).json({
       ok: false,
-      error: err?.message || "SQL user listing failed."
+      error: err?.message || "SQL user listing failed.",
+      errorType,
+      errorCode: readSqlErrorCode(err),
+      retryable: errorType !== "sql-auth" && errorType !== "sql-config"
     });
   }
 });
