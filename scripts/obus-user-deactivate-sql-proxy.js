@@ -78,7 +78,22 @@ const SQL_ENCRYPT = parseBooleanFlag(process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYP
 const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "127.0.0.1");
 const PROXY_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT, 3015);
 const PROXY_TOKEN = String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN || "");
-const PROXY_ALLOWED_ORIGIN = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "*");
+const PROXY_ALLOWED_ORIGINS = parseAllowedOrigins(readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "*"));
+
+function parseAllowedOrigins(value = "") {
+  const origins = String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return origins.length > 0 ? origins : ["*"];
+}
+
+function resolveAllowedOrigin(requestOrigin = "") {
+  const origin = String(requestOrigin || "").trim();
+  if (PROXY_ALLOWED_ORIGINS.includes("*")) return "*";
+  if (origin && PROXY_ALLOWED_ORIGINS.includes(origin)) return origin;
+  return "";
+}
 
 let poolPromise = null;
 let poolKey = "";
@@ -174,7 +189,13 @@ function requireProxyToken(req, res, next) {
 
 const app = express();
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", PROXY_ALLOWED_ORIGIN);
+  const allowedOrigin = resolveAllowedOrigin(req.get("origin"));
+  if (allowedOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    if (allowedOrigin !== "*") {
+      res.setHeader("Vary", "Origin");
+    }
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
   res.setHeader("Access-Control-Allow-Private-Network", "true");

@@ -1132,17 +1132,15 @@
     };
 
     const buildLocalSqlProxyUrls = () => {
-      const urls = ["/api/obus-user-deactivate/local-sql-users"];
+      const urls = [];
       try {
-        const protocol = "http:";
         const host = String(window.location.hostname || "").trim();
         const normalizedHost = host.replace(/^\[|\]$/g, "").toLowerCase();
-        if (host && normalizedHost !== "localhost" && normalizedHost !== "127.0.0.1" && normalizedHost !== "::1") {
-          const hostForUrl = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-          urls.push(`${protocol}//${hostForUrl}:3015/obus-user-deactivate/users`);
+        if (!host || normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1") {
+          urls.push("/api/obus-user-deactivate/local-sql-users");
         }
       } catch (err) {
-        // Keep the relative app endpoint and loopback fallbacks.
+        // Keep the loopback fallbacks.
       }
       urls.push("http://127.0.0.1:3015/obus-user-deactivate/users");
       urls.push("http://localhost:3015/obus-user-deactivate/users");
