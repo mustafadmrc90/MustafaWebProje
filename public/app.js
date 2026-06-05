@@ -1204,20 +1204,39 @@
         .filter((item) => item.value && item.code && item.id);
 
     const buildLocalSqlProxyRows = (rows, selectedCompanyMetas) => {
-      const companyByCode = new Map();
+      const companiesByCode = new Map();
       selectedCompanyMetas.forEach((company) => {
         const codeKey = normalizeLocalSqlProxyCode(company.code);
-        if (codeKey && !companyByCode.has(codeKey)) {
-          companyByCode.set(codeKey, company);
-        }
+        if (!codeKey) return;
+        const companies = companiesByCode.get(codeKey) || [];
+        companies.push(company);
+        companiesByCode.set(codeKey, companies);
       });
+
+      const findCompanyForSqlRow = ({ code = "", partnerId = "" } = {}) => {
+        const candidates = companiesByCode.get(normalizeLocalSqlProxyCode(code)) || [];
+        const normalizedPartnerId = String(partnerId || "").trim();
+        if (normalizedPartnerId) {
+          return candidates.find((company) => String(company?.id || "").trim() === normalizedPartnerId) || null;
+        }
+        return candidates.length > 0 ? candidates[0] : null;
+      };
 
       const dedupedRows = new Map();
       (Array.isArray(rows) ? rows : []).forEach((rawRow) => {
         const userId = String(rawRow?.ID ?? rawRow?.Id ?? rawRow?.id ?? rawRow?.userId ?? "").trim();
+        const partnerId = String(
+          rawRow?.PartnerId ??
+            rawRow?.PartnerID ??
+            rawRow?.partnerId ??
+            rawRow?.partnerID ??
+            rawRow?.partner_id ??
+            rawRow?.["partner-id"] ??
+            ""
+        ).trim();
         const code = String(rawRow?.Code ?? rawRow?.code ?? "").trim();
         const username = String(rawRow?.Username ?? rawRow?.username ?? "").trim();
-        const company = companyByCode.get(normalizeLocalSqlProxyCode(code));
+        const company = findCompanyForSqlRow({ code, partnerId });
         if (!userId || !code || !username || !company) return;
 
         const clusterLabel = String(company.cluster || "").trim();
@@ -2091,8 +2110,10 @@
         return;
       }
 
+      const usernameFilterForListing = String(usernameFilterInput?.value || "").trim();
       resetJobState();
       activeJobId = "";
+      appliedUsernameFilter = usernameFilterForListing;
       updatePageUrl();
       finalizeRender();
       setBusy(true);
@@ -2102,7 +2123,7 @@
       try {
         const selectedCompanyMetas = readSelectedCompanyMetas();
         const localResult = await fetchLocalSqlProxyRows({
-          usernameFilter: String(usernameFilterInput?.value || "").trim(),
+          usernameFilter: usernameFilterForListing,
           selectedCompanyMetas
         });
 

@@ -16092,7 +16092,7 @@ function buildObusUserDeactivateSqlRequestBody(usernameFilter = "") {
   return JSON.stringify(
     {
       query: [
-        "select u.ID, p.Code,u.Username from b2b.[user] u",
+        "select u.ID, u.PartnerId, p.Code, u.Username from b2b.[user] u",
         "left join partner p on p.ID = u.PartnerId",
         "where username like @usernameFilter"
       ].join("\n"),
@@ -16197,7 +16197,7 @@ async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
   const request = pool.request();
   request.input("usernameFilter", mssql.NVarChar, `%${normalizedUsernameFilter}%`);
   const result = await request.query(`
-    select u.ID, p.Code,u.Username from b2b.[user] u
+    select u.ID, u.PartnerId, p.Code, u.Username from b2b.[user] u
     left join partner p on p.ID = u.PartnerId
     where username like @usernameFilter
   `);
@@ -16318,11 +16318,15 @@ async function fetchObusUserDeactivateLocalSqlProxyRows({ usernameFilter = "" } 
 
 function normalizeObusUserDeactivateSqlRow(row = {}) {
   const userId = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["ID", "id", "user-id", "userId"])).trim();
+  const partnerId = formatPartnerCellValue(
+    readPartnerRawValueByAliases(row, ["PartnerId", "PartnerID", "partner-id", "partner_id", "partnerId", "partnerid"])
+  ).trim();
   const code = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Code", "code"])).trim();
   const username = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Username", "username"])).trim();
   if (!userId || !code || !username) return null;
   return {
     userId,
+    partnerId,
     code,
     username
   };
@@ -16334,13 +16338,44 @@ function normalizeObusUserDeactivateSqlCode(value) {
 
 function buildObusUserDeactivateSqlCompanyLookup(partnerItems = []) {
   const byCode = new Map();
+  const byCodeAndPartnerId = new Map();
   (Array.isArray(partnerItems) ? partnerItems : []).forEach((company) => {
     const code = String(company?.code || "").trim();
     const codeKey = normalizeObusUserDeactivateSqlCode(code);
-    if (!codeKey || byCode.has(codeKey)) return;
-    byCode.set(codeKey, company);
+    const partnerId = String(company?.id || "").trim();
+    if (!codeKey) return;
+
+    const codeItems = byCode.get(codeKey) || [];
+    codeItems.push(company);
+    byCode.set(codeKey, codeItems);
+
+    if (partnerId) {
+      const partnerKey = `${codeKey}|||${partnerId}`;
+      const partnerItems = byCodeAndPartnerId.get(partnerKey) || [];
+      partnerItems.push(company);
+      byCodeAndPartnerId.set(partnerKey, partnerItems);
+    }
   });
-  return byCode;
+  return {
+    byCode,
+    byCodeAndPartnerId
+  };
+}
+
+function findObusUserDeactivateSqlCompany(companyLookup, row = {}) {
+  const codeKey = normalizeObusUserDeactivateSqlCode(row?.code);
+  const partnerId = String(row?.partnerId || "").trim();
+  if (!codeKey || !companyLookup || typeof companyLookup !== "object") return null;
+
+  if (partnerId && companyLookup.byCodeAndPartnerId instanceof Map) {
+    const directCandidates = companyLookup.byCodeAndPartnerId.get(`${codeKey}|||${partnerId}`) || [];
+    if (directCandidates.length > 0) return directCandidates[0];
+  }
+
+  const candidates = companyLookup.byCode instanceof Map ? companyLookup.byCode.get(codeKey) || [] : [];
+  if (candidates.length === 1) return candidates[0];
+  if (!partnerId && candidates.length > 0) return candidates[0];
+  return null;
 }
 
 function buildObusUserDeactivateListedRowFromSql(row = {}, company = {}) {
@@ -16356,7 +16391,7 @@ function buildObusUserDeactivateListedRowFromSql(row = {}, company = {}) {
 
   return {
     userId: String(row?.userId || "").trim(),
-    partnerId: String(company?.id || "").trim(),
+    partnerId: String(company?.id || row?.partnerId || "").trim(),
     code: String(row?.code || company?.code || "").trim(),
     username: String(row?.username || "").trim(),
     fullName: "",
@@ -17040,13 +17075,13 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
       responseBody: `${Array.isArray(sqlRows) ? sqlRows.length : 0} SQL satırı döndü.`
     });
 
-    const companyByCode = buildObusUserDeactivateSqlCompanyLookup(normalizedCompanies);
+    const companyLookup = buildObusUserDeactivateSqlCompanyLookup(normalizedCompanies);
     const listedRowsByCompanyKey = new Map();
     (Array.isArray(sqlRows) ? sqlRows : []).forEach((rawRow) => {
       const normalizedRow = normalizeObusUserDeactivateSqlRow(rawRow);
       if (!normalizedRow) return;
 
-      const matchedCompany = companyByCode.get(normalizeObusUserDeactivateSqlCode(normalizedRow.code));
+      const matchedCompany = findObusUserDeactivateSqlCompany(companyLookup, normalizedRow);
       if (!matchedCompany) return;
 
       const listedRow = buildObusUserDeactivateListedRowFromSql(normalizedRow, matchedCompany);

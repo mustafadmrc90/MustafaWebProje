@@ -362,7 +362,7 @@ async function fetchUserRows(usernameFilter = "") {
   const request = pool.request();
   request.input("usernameFilter", mssql.NVarChar, `%${String(usernameFilter || "").trim()}%`);
   const result = await request.query(`
-    select u.ID, p.Code,u.Username from b2b.[user] u
+    select u.ID, u.PartnerId, p.Code, u.Username from b2b.[user] u
     left join partner p on p.ID = u.PartnerId
     where username like @usernameFilter
   `);
@@ -372,6 +372,7 @@ async function fetchUserRows(usernameFilter = "") {
 function normalizeRows(rows = []) {
   return (Array.isArray(rows) ? rows : []).map((row) => ({
     ID: row?.ID ?? row?.Id ?? row?.id ?? "",
+    PartnerId: row?.PartnerId ?? row?.PartnerID ?? row?.partnerId ?? row?.partnerID ?? row?.partner_id ?? "",
     Code: row?.Code ?? row?.code ?? "",
     Username: row?.Username ?? row?.username ?? ""
   }));
