@@ -1463,8 +1463,8 @@
 
     const getTotalListedRowCount = () => Math.max(Number(snapshot.listedUserCount || 0), listedRowsByKey.size);
 
-    const getVisibleListedRows = () => {
-      const normalizedFilter = normalizeDeactivateUsernameFilter(appliedUsernameFilter);
+    const getListedRowsMatchingUsernameFilter = (usernameFilter = "") => {
+      const normalizedFilter = normalizeDeactivateUsernameFilter(usernameFilter);
       const rows = Array.from(listedRowsByKey.values()).sort(compareListedRows);
       if (!normalizedFilter) return rows;
       return rows.filter((row) =>
@@ -1472,14 +1472,14 @@
       );
     };
 
+    const getVisibleListedRows = () => getListedRowsMatchingUsernameFilter(appliedUsernameFilter);
+
     const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
 
-    const getSelectableVisibleRows = () => getVisibleListedRows().filter((row) => isListedRowActive(row));
+    const getSelectableRowsForUsernameFilter = (usernameFilter = "") =>
+      getListedRowsMatchingUsernameFilter(usernameFilter).filter((row) => isListedRowActive(row));
 
-    const isUsernameFilterAppliedForDeactivate = () => {
-      const currentInputValue = String(usernameFilterInput?.value || "").trim();
-      return Boolean(appliedUsernameFilter && currentInputValue === appliedUsernameFilter);
-    };
+    const getSelectableVisibleRows = () => getSelectableRowsForUsernameFilter(appliedUsernameFilter);
 
     const syncSelectionControls = () => {
       if (!resultSelectAllCheckbox) return;
@@ -1494,9 +1494,9 @@
     const syncDeactivateButtonState = () => {
       if (!deactivateButton) return;
       const isListingBusy = Boolean(activeJobId && snapshot.done !== true);
-      const hasAppliedFilter = isUsernameFilterAppliedForDeactivate();
-      const hasSelectableRows = getSelectableVisibleRows().length > 0;
-      deactivateButton.disabled = deleteInProgress || isListingBusy || !hasAppliedFilter || !hasSelectableRows;
+      const currentInputValue = String(usernameFilterInput?.value || "").trim();
+      const hasSelectableRows = getSelectableRowsForUsernameFilter(currentInputValue).length > 0;
+      deactivateButton.disabled = deleteInProgress || isListingBusy || !currentInputValue || !hasSelectableRows;
       deactivateButton.textContent = deleteInProgress ? deactivateLoadingLabel : deactivateDefaultLabel;
     };
 
@@ -2035,21 +2035,28 @@
       deactivateButton.addEventListener("click", async () => {
         if (deleteInProgress) return;
 
-        if (!isUsernameFilterAppliedForDeactivate()) {
-          setStatus("Pasife alma için önce kullanıcı adı filtresi uygulayın.", "error");
+        const currentUsernameFilter = String(usernameFilterInput?.value || "").trim();
+        if (!currentUsernameFilter) {
+          setStatus("Pasife alma için kullanıcı adı girin.", "error");
           return;
+        }
+        if (currentUsernameFilter !== appliedUsernameFilter) {
+          appliedUsernameFilter = currentUsernameFilter;
+          selectedUserKeys.clear();
+          finalizeRender({ preserveStatus: true });
         }
 
         const selectedRows = readSelectedUserRows();
-        if (selectedRows.length === 0) {
-          setStatus("Pasife alınacak kullanıcı seçmelisiniz.", "error");
+        const targetRows = selectedRows.length > 0 ? selectedRows : getSelectableVisibleRows();
+        if (targetRows.length === 0) {
+          setStatus("Pasife alınacak kullanıcı bulunamadı.", "error");
           return;
         }
 
         let responseData = null;
         deleteInProgress = true;
         finalizeRender({ preserveStatus: true });
-        setStatus(`${selectedRows.length} kullanıcı pasife alınıyor...`, "muted");
+        setStatus(`${targetRows.length} kullanıcı pasife alınıyor...`, "muted");
 
         try {
           const response = await fetch("/api/obus-user-deactivate/deactivate", {
@@ -2061,7 +2068,7 @@
             credentials: "same-origin",
             body: JSON.stringify({
               usernameFilter: appliedUsernameFilter,
-              users: selectedRows.map((row) => ({
+              users: targetRows.map((row) => ({
                 key: String(row?.key || "").trim(),
                 userId: String(row?.userId || "").trim(),
                 username: String(row?.username || "").trim(),
