@@ -1259,10 +1259,13 @@
       return Array.from(dedupedRows.values());
     };
 
-    const fetchLocalSqlProxyRows = async ({ usernameFilter = "", selectedCompanyMetas = [] } = {}) => {
+    const fetchLocalSqlProxyRows = async ({ usernameFilter = "", selectedCompanyMetas = [], onAttempt = null } = {}) => {
       let lastError = null;
       const localSqlProxyUrls = buildLocalSqlProxyUrls();
       for (const url of localSqlProxyUrls) {
+        if (typeof onAttempt === "function") {
+          onAttempt(url);
+        }
         try {
           const data = await fetchLocalSqlProxyJson(url, { usernameFilter });
           const sourceUrl = String(data?.sourceUrl || url || "").trim();
@@ -2131,7 +2134,10 @@
         const selectedCompanyMetas = readSelectedCompanyMetas();
         const localResult = await fetchLocalSqlProxyRows({
           usernameFilter: usernameFilterForListing,
-          selectedCompanyMetas
+          selectedCompanyMetas,
+          onAttempt: (url) => {
+            setStatus(`Yerel SQL proxy deneniyor: ${url}`, "muted");
+          }
         });
 
         if (!localResult.ok) {

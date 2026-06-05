@@ -320,6 +320,9 @@ function getObusUserCreateLoginCredentials() {
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
+const APP_ASSET_VERSION = String(
+  process.env.RENDER_GIT_COMMIT || process.env.APP_VERSION || Date.now()
+).trim();
 const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "5mb").trim() || "5mb";
 const REQUEST_BODY_PARAMETER_LIMIT =
   Number.parseInt(process.env.REQUEST_BODY_PARAMETER_LIMIT || "50000", 10) || 50000;
@@ -21804,6 +21807,7 @@ app.get("/general/obus-user-deactivate", requireAuth, requireMenuAccess("obus-us
     active: "obus-user-deactivate",
     partnerError,
     companyOptions,
+    assetVersion: APP_ASSET_VERSION,
     liveJob: liveJob
       ? {
           id: String(liveJob.id || "").trim(),
