@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const net = require("net");
+const os = require("os");
 const { execFileSync } = require("child_process");
 const express = require("express");
 const mssql = require("mssql");
@@ -197,6 +198,20 @@ function resolveSecret(name, { trim = true, fallback = "" } = {}) {
   return "";
 }
 
+function resolveFirstSecret(names = [], { trim = true, fallback = "" } = {}) {
+  const normalizedNames = (Array.isArray(names) ? names : [names])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  for (const name of normalizedNames) {
+    const value = resolveSecret(name, { trim });
+    if (value && !isPlaceholderConfigValue(value)) return value;
+  }
+
+  const fallbackValue = normalizeSecretValue(fallback, { trim });
+  return fallbackValue && !isPlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
+}
+
 loadLocalEnvFile();
 
 const DATABASE_MSSQL_CONFIG = parseMssqlDatabaseUrl(process.env.DATABASE_URL);
@@ -209,16 +224,43 @@ const SQL_PASSWORD = resolveSecret("OBUS_USER_DEACTIVATE_SQL_PASSWORD", {
   fallback: DATABASE_MSSQL_CONFIG.password || ""
 });
 const SQL_TIMEOUT_MS = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS, 45000);
-const SQL_ENCRYPT = parseBooleanFlag(
-  process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
-  typeof DATABASE_MSSQL_CONFIG.encrypt === "boolean" ? DATABASE_MSSQL_CONFIG.encrypt : !net.isIP(SQL_HOST)
-);
+const SQL_ENCRYPT =
+  SQL_HOST && net.isIP(SQL_HOST)
+    ? false
+    : parseBooleanFlag(
+        process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
+        typeof DATABASE_MSSQL_CONFIG.encrypt === "boolean" ? DATABASE_MSSQL_CONFIG.encrypt : true
+      );
 const PROXY_HOST = readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_HOST", "127.0.0.1");
 const PROXY_PORT = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT, 3015);
 const PROXY_TOKEN = resolveSecret("OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN", { trim: false });
 const PROXY_ALLOWED_ORIGINS = parseAllowedOrigins(
   readEnv("OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN", "http://localhost:3000,https://*.onrender.com")
 );
+const OBUS_API_AUTH = readEnv(
+  "OBUS_USER_DEACTIVATE_API_AUTH",
+  readEnv("PARTNERS_API_AUTH", "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt")
+);
+const PARTNERS_SESSION_API_URL = readEnv(
+  "PARTNERS_SESSION_API_URL",
+  "https://api-coreprod-cluster0.obus.com.tr/api/client/getsession"
+);
+const OBUS_SESSION_CONNECTION_IP_ADDRESS = readEnv(
+  "OBUS_SESSION_CONNECTION_IP_ADDRESS",
+  process.env.OBUS_CONNECTION_IP_ADDRESS || ""
+);
+const OBUS_SESSION_CONNECTION_PORT = readEnv("OBUS_SESSION_CONNECTION_PORT", "5117");
+const OBUS_USER_DELETE_REQUEST_DATE =
+  readEnv("OBUS_USER_DELETE_REQUEST_DATE", "2016-03-11T11:33:00") || "2016-03-11T11:33:00";
+const OBUS_USER_DEACTIVATE_TIMEOUT_MS = parsePositiveInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS, 45000);
+const OBUS_LOGIN_USERNAME =
+  resolveFirstSecret(["OBUS_SERVICE_LOGIN_USERNAME", "OBUS_USER_CREATE_LOGIN_USERNAME"], {
+    trim: true,
+    fallback: "busproductapp"
+  }) || "busproductapp";
+const OBUS_LOGIN_PASSWORD = resolveFirstSecret(["OBUS_SERVICE_LOGIN_PASSWORD", "OBUS_USER_CREATE_LOGIN_PASSWORD"], {
+  trim: false
+});
 
 function parseAllowedOrigins(value = "") {
   const origins = String(value || "")
@@ -413,6 +455,500 @@ function classifySqlProxyError(err = {}) {
   return "sql-error";
 }
 
+function parseJsonSafe(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
+
+function normalizeTargetUrl(input) {
+  let raw = String(input || "").trim();
+  if (!raw) return "";
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = `https://${raw}`;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    parsed.hash = "";
+    const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname.replace(/\/+$/, "") : "";
+    return `${parsed.origin}${pathname}${parsed.search || ""}`;
+  } catch (err) {
+    return "";
+  }
+}
+
+function normalizeTokenName(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function findNestedValue(node, normalizedKeys) {
+  if (node === null || node === undefined) return "";
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findNestedValue(item, normalizedKeys);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof node !== "object") return "";
+
+  for (const [key, value] of Object.entries(node)) {
+    if (normalizedKeys.has(normalizeTokenName(key)) && value !== undefined && value !== null) {
+      const text = String(value).trim();
+      if (text) return text;
+    }
+  }
+  for (const value of Object.values(node)) {
+    const found = findNestedValue(value, normalizedKeys);
+    if (found) return found;
+  }
+  return "";
+}
+
+function isUsableLocalIpv4Address(address = "") {
+  const value = String(address || "").trim();
+  return Boolean(value && value !== "127.0.0.1" && !value.startsWith("169.254.") && net.isIPv4(value));
+}
+
+let localMachineIpAddressCache = "";
+
+function getPrimaryLocalMachineIpAddress() {
+  if (localMachineIpAddressCache) return localMachineIpAddressCache;
+  const candidates = [];
+  Object.values(os.networkInterfaces()).forEach((items) => {
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      const address = String(item?.address || "").trim();
+      if (!item?.internal && isUsableLocalIpv4Address(address)) candidates.push(address);
+    });
+  });
+  localMachineIpAddressCache = candidates[0] || "127.0.0.1";
+  return localMachineIpAddressCache;
+}
+
+function getObusSessionConnectionIpAddress() {
+  return OBUS_SESSION_CONNECTION_IP_ADDRESS || getPrimaryLocalMachineIpAddress();
+}
+
+function buildObusSessionRequestBody() {
+  return {
+    type: 1,
+    connection: {
+      "ip-address": getObusSessionConnectionIpAddress(),
+      port: OBUS_SESSION_CONNECTION_PORT
+    },
+    browser: {
+      name: "Chrome"
+    }
+  };
+}
+
+function extractClusterLabel(value = "") {
+  const match = String(value || "").match(/cluster\d+/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
+function normalizeObusClusterLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return /^cluster\d+$/.test(normalized) ? normalized : "";
+}
+
+function buildUrlForCluster(baseUrl = "", clusterLabel = "") {
+  const raw = String(baseUrl || "").trim();
+  const cluster = normalizeObusClusterLabel(clusterLabel);
+  if (!raw || !cluster) return raw;
+  return /cluster\d+/i.test(raw) ? raw.replace(/cluster\d+/i, cluster) : raw;
+}
+
+function buildFallbackBaseUrlForCluster(clusterLabel = "") {
+  const cluster = normalizeObusClusterLabel(clusterLabel) || "cluster4";
+  return `https://api-coreprod-${cluster}.obus.com.tr/api`;
+}
+
+function buildSessionUrlForPartnerUrl(partnerUrl = "", clusterLabel = "") {
+  const cluster =
+    normalizeObusClusterLabel(clusterLabel) ||
+    normalizeObusClusterLabel(extractClusterLabel(partnerUrl)) ||
+    "cluster4";
+  const clusteredSessionUrl = normalizeTargetUrl(buildUrlForCluster(PARTNERS_SESSION_API_URL, cluster));
+  if (clusteredSessionUrl) return clusteredSessionUrl;
+
+  try {
+    const parsed = new URL(String(partnerUrl || buildFallbackBaseUrlForCluster(cluster)));
+    parsed.pathname = "/api/client/getsession";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildMembershipUserLoginUrl(baseUrl = "") {
+  try {
+    const parsed = new URL(String(baseUrl || ""));
+    parsed.pathname = "/api/membership/userlogin";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildMembershipDeleteUserUrl(baseUrl = "", clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    parsed.pathname = "/api/membership/deleteuser";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
+function buildObusUserDeleteRequestBody({ userIds = [], sessionId = "", deviceId = "", token = "" } = {}) {
+  return {
+    data: userIds.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0),
+    "device-session": {
+      "session-id": String(sessionId || "").trim(),
+      "device-id": String(deviceId || "").trim()
+    },
+    token: String(token || "").trim(),
+    date: OBUS_USER_DELETE_REQUEST_DATE,
+    language: "tr-TR"
+  };
+}
+
+function extractTokenFromHeaders(headers = {}) {
+  const source = headers && typeof headers === "object" ? headers : {};
+  const direct =
+    String(
+      source.token ||
+        source["x-token"] ||
+        source["x-auth-token"] ||
+        source["access-token"] ||
+        source["authorization-token"] ||
+        ""
+    ).trim();
+  if (direct) return direct.replace(/^Bearer\s+/i, "").trim();
+
+  const authorization = String(source.authorization || source["x-authorization"] || "").trim();
+  const bearerMatch = authorization.match(/Bearer\s+(.+)$/i);
+  if (bearerMatch) return String(bearerMatch[1] || "").trim();
+  return authorization.length > 20 ? authorization : "";
+}
+
+function extractTokenFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const direct =
+    String(payload?.token?.data || "").trim() ||
+    String(payload?.token?.token || "").trim() ||
+    String(payload?.token || "").trim() ||
+    String(payload?.data?.token?.data || "").trim() ||
+    findNestedValue(payload, new Set(["accesstoken", "authorizationtoken", "bearertoken", "jwttoken"]));
+  if (direct) return direct;
+
+  const queue = [payload];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (Array.isArray(current)) {
+      current.forEach((item) => queue.push(item));
+      continue;
+    }
+    for (const [key, value] of Object.entries(current)) {
+      const normalizedKey = normalizeTokenName(key);
+      if (normalizedKey.includes("token")) {
+        if (value && typeof value === "object") {
+          const nested = String(value.data || value.value || value.token || "").trim();
+          if (nested && nested.length > 7) return nested;
+          queue.push(value);
+        } else {
+          const text = String(value || "").trim();
+          if (text && text.length > 7 && !/\s/.test(text)) return text;
+        }
+      } else if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+  return "";
+}
+
+function isSuccessStatusPayload(payload) {
+  if (!payload || typeof payload !== "object") return true;
+  if (payload.success === false || payload.ok === false) return false;
+  const statusValue = payload.status ?? payload.Status ?? payload["status-code"] ?? payload.statusCode;
+  if (statusValue === undefined || statusValue === null || statusValue === "") return true;
+  if (typeof statusValue === "boolean") return statusValue;
+  const text = String(statusValue).trim().toLowerCase();
+  if (["true", "success", "ok", "200", "0", "1"].includes(text)) return true;
+  if (["false", "error", "fail", "failed"].includes(text)) return false;
+  const numberValue = Number.parseInt(text, 10);
+  return Number.isFinite(numberValue) ? numberValue >= 200 && numberValue < 300 : true;
+}
+
+function sanitizeDebugBody(value) {
+  const parsed = typeof value === "string" ? parseJsonSafe(value) : value;
+  if (!parsed || typeof parsed !== "object") return String(value || "").trim();
+  const sanitize = (node) => {
+    if (Array.isArray(node)) return node.map((item) => sanitize(item));
+    if (!node || typeof node !== "object") return node;
+    const output = {};
+    Object.entries(node).forEach(([key, itemValue]) => {
+      output[key] = /password|token|authorization|cookie|secret/i.test(key) ? "***" : sanitize(itemValue);
+    });
+    return output;
+  };
+  return JSON.stringify(sanitize(parsed), null, 2);
+}
+
+function buildFailedRequestPreview({ service = "", requestUrl = "", status = null, requestBody = {}, responseBody = "", error = "", companyLabel = "" } = {}) {
+  return {
+    service,
+    status: Number.isFinite(Number(status)) ? Number(status) : null,
+    requestUrl: String(requestUrl || "").trim(),
+    requestBody: sanitizeDebugBody(requestBody || {}),
+    responseBody: sanitizeDebugBody(responseBody || error || "-") || "-",
+    companyLabel: String(companyLabel || "").trim()
+  };
+}
+
+function normalizeDeactivateUser(row = {}) {
+  const userId = Number.parseInt(String(row?.userId || "").trim(), 10);
+  const code = String(row?.code || "").trim();
+  const partnerId = String(row?.partnerId || "").trim();
+  const clusterLabel = normalizeObusClusterLabel(row?.clusterLabel || extractClusterLabel(row?.clusterUrl || ""));
+  if (!Number.isInteger(userId) || userId <= 0 || !code || !partnerId || !clusterLabel) return null;
+  return {
+    key: String(row?.key || "").trim(),
+    userId,
+    username: String(row?.username || "").trim(),
+    code,
+    partnerId,
+    branchId: String(row?.branchId || partnerId).trim(),
+    clusterLabel,
+    clusterUrl: normalizeTargetUrl(row?.clusterUrl || buildFallbackBaseUrlForCluster(clusterLabel))
+  };
+}
+
+function groupDeactivateUsersByCompany(users = []) {
+  const groups = new Map();
+  (Array.isArray(users) ? users : []).forEach((row) => {
+    const user = normalizeDeactivateUser(row);
+    if (!user) return;
+    const key = [user.code, user.partnerId, user.branchId, user.clusterLabel, user.clusterUrl].join("|||");
+    if (!groups.has(key)) {
+      groups.set(key, {
+        company: {
+          code: user.code,
+          partnerId: user.partnerId,
+          branchId: user.branchId,
+          clusterLabel: user.clusterLabel,
+          clusterUrl: user.clusterUrl
+        },
+        users: []
+      });
+    }
+    groups.get(key).users.push(user);
+  });
+  return Array.from(groups.values());
+}
+
+async function fetchObusSessionForCompany(company = {}, signal) {
+  const sessionUrl = buildSessionUrlForPartnerUrl(company.clusterUrl, company.clusterLabel);
+  const requestBody = buildObusSessionRequestBody();
+  const response = await fetch(sessionUrl, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: OBUS_API_AUTH
+    },
+    body: JSON.stringify(requestBody),
+    signal
+  });
+  const raw = await response.text();
+  const parsed = parseJsonSafe(raw);
+  if (!response.ok) {
+    throw Object.assign(new Error(`GetSession HTTP ${response.status}: ${response.statusText || "Hata"}`), {
+      failedRequestPreview: buildFailedRequestPreview({
+        service: "GetSession",
+        requestUrl: sessionUrl,
+        status: response.status,
+        requestBody,
+        responseBody: parsed ?? raw,
+        companyLabel: `${company.code} / ${company.partnerId} / ${company.clusterLabel}`
+      })
+    });
+  }
+
+  const sessionId = findNestedValue(parsed, new Set(["sessionid"]));
+  const deviceId = findNestedValue(parsed, new Set(["deviceid"]));
+  if (!sessionId || !deviceId) {
+    throw Object.assign(new Error("GetSession yanıtında session-id veya device-id bulunamadı."), {
+      failedRequestPreview: buildFailedRequestPreview({
+        service: "GetSession",
+        requestUrl: sessionUrl,
+        status: response.status,
+        requestBody,
+        responseBody: parsed ?? raw,
+        companyLabel: `${company.code} / ${company.partnerId} / ${company.clusterLabel}`
+      })
+    });
+  }
+
+  return { sessionId, deviceId };
+}
+
+async function loginObusForCompany(company = {}, signal) {
+  if (!OBUS_LOGIN_USERNAME || !OBUS_LOGIN_PASSWORD) {
+    throw new Error("Local proxy Obus login bilgileri eksik: OBUS_SERVICE_LOGIN_USERNAME / OBUS_SERVICE_LOGIN_PASSWORD.");
+  }
+
+  const baseUrl = normalizeTargetUrl(company.clusterUrl || buildFallbackBaseUrlForCluster(company.clusterLabel));
+  const loginUrl = buildMembershipUserLoginUrl(baseUrl);
+  const session = await fetchObusSessionForCompany(company, signal);
+  const requestBody = {
+    data: {
+      username: OBUS_LOGIN_USERNAME,
+      password: OBUS_LOGIN_PASSWORD,
+      "remember-me": 0,
+      "partner-code": company.code,
+      ...(company.branchId ? { "branch-id": company.branchId } : {})
+    },
+    "device-session": {
+      "session-id": session.sessionId,
+      "device-id": session.deviceId
+    },
+    date: "2020-02-24T18:03:00",
+    language: "tr-TR"
+  };
+
+  const response = await fetch(loginUrl, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: OBUS_API_AUTH
+    },
+    body: JSON.stringify(requestBody),
+    signal
+  });
+  const raw = await response.text();
+  const parsed = parseJsonSafe(raw);
+  const responseHeaders = {};
+  response.headers.forEach((value, key) => {
+    responseHeaders[String(key || "").toLowerCase()] = String(value || "");
+  });
+
+  if (!response.ok) {
+    throw Object.assign(new Error(`UserLogin HTTP ${response.status}: ${response.statusText || "Hata"}`), {
+      failedRequestPreview: buildFailedRequestPreview({
+        service: "Membership UserLogin",
+        requestUrl: loginUrl,
+        status: response.status,
+        requestBody,
+        responseBody: parsed ?? raw,
+        companyLabel: `${company.code} / ${company.partnerId} / ${company.clusterLabel}`
+      })
+    });
+  }
+
+  const token = extractTokenFromPayload(parsed) || extractTokenFromHeaders(responseHeaders);
+  if (!token) {
+    throw Object.assign(new Error("UserLogin token bulunamadı."), {
+      failedRequestPreview: buildFailedRequestPreview({
+        service: "Membership UserLogin",
+        requestUrl: loginUrl,
+        status: response.status,
+        requestBody,
+        responseBody: parsed ?? raw,
+        companyLabel: `${company.code} / ${company.partnerId} / ${company.clusterLabel}`
+      })
+    });
+  }
+
+  return { ...session, token, loginUrl };
+}
+
+async function deactivateObusUsersLocally(group = {}) {
+  const company = group.company || {};
+  const users = Array.isArray(group.users) ? group.users : [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
+  const companyLabel = `${company.code || "-"} / ${company.partnerId || "-"} / ${company.clusterLabel || "-"}`;
+  try {
+    const login = await loginObusForCompany(company, controller.signal);
+    const requestUrl = buildMembershipDeleteUserUrl(company.clusterUrl || buildFallbackBaseUrlForCluster(company.clusterLabel), company.clusterLabel);
+    const requestBody = buildObusUserDeleteRequestBody({
+      userIds: users.map((item) => item.userId),
+      sessionId: login.sessionId,
+      deviceId: login.deviceId,
+      token: login.token
+    });
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: OBUS_API_AUTH
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    const parsed = parseJsonSafe(raw);
+
+    if (!response.ok || !isSuccessStatusPayload(parsed)) {
+      const reason =
+        (parsed && typeof parsed === "object" && String(parsed["user-message"] || parsed.message || parsed.error || "").trim()) ||
+        response.statusText ||
+        "DeleteUser başarısız.";
+      return {
+        ok: false,
+        company,
+        users,
+        status: response.status,
+        error: `DeleteUser HTTP ${response.status}: ${reason}`,
+        failedRequestPreview: buildFailedRequestPreview({
+          service: "Membership DeleteUser",
+          requestUrl,
+          status: response.status,
+          requestBody,
+          responseBody: parsed ?? raw,
+          companyLabel
+        })
+      };
+    }
+
+    return {
+      ok: true,
+      company,
+      users,
+      status: response.status,
+      responseBody: parsed ?? raw
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      company,
+      users,
+      status: null,
+      error: err?.name === "AbortError" ? "Local Obus isteği zaman aşımına uğradı." : err?.message || "Local Obus isteği başarısız.",
+      failedRequestPreview: err?.failedRequestPreview || null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const app = express();
 app.use((req, res, next) => {
   const allowedOrigin = resolveAllowedOrigin(req.get("origin"));
@@ -456,6 +992,83 @@ app.post("/obus-user-deactivate/users", requireProxyToken, async (req, res) => {
       errorType,
       errorCode: readSqlErrorCode(err),
       retryable: errorType !== "sql-auth" && errorType !== "sql-config"
+    });
+  }
+});
+
+app.post("/obus-user-deactivate/deactivate", requireProxyToken, async (req, res) => {
+  try {
+    const selectedUsers = Array.isArray(req.body?.users) ? req.body.users : [];
+    const groupedTargets = groupDeactivateUsersByCompany(selectedUsers);
+    if (selectedUsers.length === 0 || groupedTargets.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Pasife alınacak geçerli kullanıcı bulunamadı.",
+        retryable: false
+      });
+    }
+
+    const results = [];
+    for (const group of groupedTargets) {
+      // Local VPN/IP akışında sırayla çalıştırıyoruz; aynı local proxy üzerinde oturum çakışması riskini azaltır.
+      results.push(await deactivateObusUsersLocally(group));
+    }
+
+    const successResults = results.filter((item) => item?.ok === true);
+    const failureResults = results.filter((item) => item?.ok !== true);
+    const updatedRows = successResults.flatMap((item) =>
+      (Array.isArray(item.users) ? item.users : []).map((user) => ({
+        key: String(user?.key || "").trim(),
+        userId: String(user?.userId || "").trim(),
+        username: String(user?.username || "").trim(),
+        code: String(item?.company?.code || "").trim(),
+        partnerId: String(item?.company?.partnerId || "").trim(),
+        clusterLabel: String(item?.company?.clusterLabel || "").trim(),
+        isActive: false,
+        isActiveText: "false"
+      }))
+    );
+    const failures = failureResults.flatMap((item) =>
+      (Array.isArray(item.users) ? item.users : []).map((user) => ({
+        key: String(user?.key || "").trim(),
+        userId: String(user?.userId || "").trim(),
+        username: String(user?.username || "").trim(),
+        code: String(item?.company?.code || "").trim(),
+        partnerId: String(item?.company?.partnerId || "").trim(),
+        clusterLabel: String(item?.company?.clusterLabel || "").trim(),
+        status: Number.isFinite(Number(item?.status)) ? Number(item.status) : null,
+        error: String(item?.error || "Local Obus DeleteUser başarısız.").trim()
+      }))
+    );
+    const failedRequestPreview =
+      failureResults.find((item) => item?.failedRequestPreview)?.failedRequestPreview || null;
+
+    if (updatedRows.length === 0) {
+      return res.status(502).json({
+        ok: false,
+        error: String(failureResults[0]?.error || "Seçilen kullanıcılar local Obus proxy ile pasife alınamadı.").trim(),
+        failures,
+        failedRequestPreview
+      });
+    }
+
+    return res.status(failures.length > 0 ? 207 : 200).json({
+      ok: true,
+      successCount: updatedRows.length,
+      failureCount: failures.length,
+      updatedRows,
+      failures,
+      failedRequestPreview,
+      userMessage:
+        failures.length > 0
+          ? `${updatedRows.length} kullanıcı local VPN proxy ile pasife alındı. ${failures.length} kullanıcı için hata oluştu.`
+          : `${updatedRows.length} kullanıcı local VPN proxy ile pasife alındı.`
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Local Obus pasife alma işlemi tamamlanamadı.",
+      retryable: true
     });
   }
 });

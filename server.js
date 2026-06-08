@@ -3,7 +3,7 @@ const os = require("os");
 const net = require("net");
 const fsSync = require("fs");
 const fs = require("fs/promises");
-const { execFileSync } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
@@ -570,6 +570,13 @@ const OBUS_USER_DELETE_REQUEST_DATE =
   String(process.env.OBUS_USER_DELETE_REQUEST_DATE || "2016-03-11T11:33:00").trim() || "2016-03-11T11:33:00";
 const OBUS_USER_DELETE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DELETE_COMPANY_CONCURRENCY || "4", 10) || 4;
+const OBUS_USER_DEACTIVATE_SQL_PROXY_HOST =
+  String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_HOST || "127.0.0.1").trim() || "127.0.0.1";
+const OBUS_USER_DEACTIVATE_SQL_PROXY_SCRIPT_PATH = path.join(
+  __dirname,
+  "scripts",
+  "obus-user-deactivate-sql-proxy.js"
+);
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
@@ -591,6 +598,130 @@ const STATION_PASSENGER_INFO_REQUEST_LANGUAGE =
   String(process.env.STATION_PASSENGER_INFO_REQUEST_LANGUAGE || "tr-TR").trim() || "tr-TR";
 const STATION_PASSENGER_INFO_TIMEOUT_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_TIMEOUT_MS || "45000", 10) || 45000;
+
+let obusUserDeactivateProxyProcess = null;
+let obusUserDeactivateProxyLastOutput = "";
+
+function appendObusUserDeactivateProxyOutput(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return;
+  obusUserDeactivateProxyLastOutput = `${obusUserDeactivateProxyLastOutput}\n${text}`
+    .trim()
+    .slice(-2000);
+}
+
+function isObusUserDeactivateProxyProcessRunning() {
+  return Boolean(obusUserDeactivateProxyProcess && obusUserDeactivateProxyProcess.exitCode === null);
+}
+
+function isLoopbackAddress(value = "") {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/^\[|\]$/g, "")
+    .replace(/^::ffff:/i, "")
+    .toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
+function isLocalObusUserDeactivateProxyStartRequest(req) {
+  if (String(process.env.OBUS_USER_DEACTIVATE_ALLOW_PROXY_AUTOSTART || "").trim().toLowerCase() === "true") {
+    return true;
+  }
+  if (isProd) return false;
+  return (
+    isLoopbackAddress(req.hostname) ||
+    isLoopbackAddress(req.ip) ||
+    isLoopbackAddress(req.socket?.remoteAddress)
+  );
+}
+
+function buildObusUserDeactivateProxyHealthUrl() {
+  return `http://${OBUS_USER_DEACTIVATE_SQL_PROXY_HOST}:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/health`;
+}
+
+async function readObusUserDeactivateProxyHealth(timeoutMs = 1200) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(buildObusUserDeactivateProxyHealthUrl(), {
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    const data = parseJsonSafe(await response.text());
+    return {
+      ok: response.ok && data?.ok === true,
+      status: response.status,
+      data
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      error: err?.message || "Proxy health okunamadı."
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function waitForObusUserDeactivateProxyHealth({ attempts = 12, delayMs = 350 } = {}) {
+  for (let index = 0; index < attempts; index += 1) {
+    const health = await readObusUserDeactivateProxyHealth();
+    if (health.ok) return health;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return readObusUserDeactivateProxyHealth();
+}
+
+async function ensureObusUserDeactivateProxyStarted() {
+  const health = await readObusUserDeactivateProxyHealth();
+  if (health.ok) {
+    return {
+      ok: true,
+      alreadyRunning: true,
+      message: "Yerel Obus proxy zaten çalışıyor.",
+      health
+    };
+  }
+
+  if (isObusUserDeactivateProxyProcessRunning()) {
+    const nextHealth = await waitForObusUserDeactivateProxyHealth();
+    return {
+      ok: nextHealth.ok,
+      alreadyRunning: true,
+      message: nextHealth.ok ? "Yerel Obus proxy çalışıyor." : "Yerel Obus proxy başlatıldı ama health yanıtı alınamadı.",
+      health: nextHealth,
+      output: obusUserDeactivateProxyLastOutput
+    };
+  }
+
+  obusUserDeactivateProxyLastOutput = "";
+  obusUserDeactivateProxyProcess = spawn(process.execPath, [OBUS_USER_DEACTIVATE_SQL_PROXY_SCRIPT_PATH], {
+    cwd: __dirname,
+    env: {
+      ...process.env,
+      OBUS_USER_DEACTIVATE_SQL_PROXY_HOST,
+      OBUS_USER_DEACTIVATE_SQL_PROXY_PORT: String(OBUS_USER_DEACTIVATE_SQL_PROXY_PORT)
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  obusUserDeactivateProxyProcess.stdout?.on("data", (chunk) => appendObusUserDeactivateProxyOutput(chunk));
+  obusUserDeactivateProxyProcess.stderr?.on("data", (chunk) => appendObusUserDeactivateProxyOutput(chunk));
+  obusUserDeactivateProxyProcess.on("exit", (code, signal) => {
+    appendObusUserDeactivateProxyOutput(`proxy exited code=${code ?? ""} signal=${signal ?? ""}`);
+    obusUserDeactivateProxyProcess = null;
+  });
+
+  const startedHealth = await waitForObusUserDeactivateProxyHealth();
+  return {
+    ok: startedHealth.ok,
+    alreadyRunning: false,
+    message: startedHealth.ok ? "Yerel Obus proxy otomatik başlatıldı." : "Yerel Obus proxy başlatılamadı.",
+    health: startedHealth,
+    output: obusUserDeactivateProxyLastOutput
+  };
+}
 const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
   String(
     process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
@@ -776,7 +907,7 @@ const SIDEBAR_MENU_REGISTRY = [
   {
     key: "obus-user-deactivate",
     type: "item",
-    label: "Obus Kullanıcı Pasife Al",
+    label: "Obus Kullanıcılarını Pasife al",
     parentKey: "general",
     route: "/general/obus-user-deactivate",
     routeKey: "obus-user-deactivate",
@@ -16144,12 +16275,15 @@ async function getObusUserDeactivateSqlPool() {
     return obusUserDeactivateSqlPoolPromise;
   }
 
-  const encrypt = parseObusUserDeactivateBooleanFlag(
-    process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
-    typeof OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt === "boolean"
-      ? OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt
-      : !net.isIP(credentials.host)
-  );
+  const encrypt =
+    credentials.host && net.isIP(credentials.host)
+      ? false
+      : parseObusUserDeactivateBooleanFlag(
+          process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
+          typeof OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt === "boolean"
+            ? OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt
+            : true
+        );
 
   const pool = new mssql.ConnectionPool({
     user: credentials.username,
@@ -21250,6 +21384,40 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
   }
   return res.json(readObusLiveJobSnapshot(job, cursor));
 });
+
+app.post(
+  "/api/obus-user-deactivate/proxy/start",
+  requireAuth,
+  requireMenuAccess("obus-user-deactivate"),
+  async (req, res) => {
+    if (!isLocalObusUserDeactivateProxyStartRequest(req)) {
+      return res.status(403).json({
+        ok: false,
+        autoStartAllowed: false,
+        error:
+          "Proxy otomatik başlatma sadece local çalışan web sunucusunda yapılabilir. Render ekranından local Mac'te process başlatılamaz."
+      });
+    }
+
+    try {
+      const result = await ensureObusUserDeactivateProxyStarted();
+      return res.status(result.ok ? 200 : 502).json({
+        ok: result.ok,
+        autoStartAllowed: true,
+        alreadyRunning: Boolean(result.alreadyRunning),
+        message: result.message,
+        healthUrl: buildObusUserDeactivateProxyHealthUrl(),
+        output: result.ok ? "" : String(result.output || "").trim()
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        autoStartAllowed: true,
+        error: err?.message || "Yerel Obus proxy otomatik başlatılamadı."
+      });
+    }
+  }
+);
 
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {

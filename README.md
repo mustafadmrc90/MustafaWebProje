@@ -44,17 +44,22 @@ cp .env.example .env
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
 
-### Obus Kullanıcı Pasife Al / Yerel SQL Proxy
+### Obus Kullanıcılarını Pasife al / Yerel VPN Proxy
 
-`/general/obus-user-deactivate` ekranında kullanıcı listeleme için VPN erişimi olan bilgisayarda yerel SQL proxy çalışmalıdır:
+`/general/obus-user-deactivate` ekranında kullanıcı listeleme ve pasife alma için VPN erişimi olan bilgisayarda yerel proxy çalışmalıdır. Render sunucusu Obus'a doğrudan istek atmaz; tarayıcı local proxy'ye gider, local proxy VPN içinden SQL ve Obus servislerine bağlanır:
 
 ```bash
 npm run obus-user-deactivate-sql-proxy
 ```
 
-Varsayılan proxy adresi: `http://127.0.0.1:3015/obus-user-deactivate/users`
+Ekran local web sunucusundan (`localhost` / `127.0.0.1`) açılırsa proxy otomatik başlatılmaya çalışılır ve durum bilgisi ekranda yazılır. Aynı ekrandaki `Proxy'i Başlat` butonu ile manuel başlatma tekrar denenebilir. Render'dan açılan sayfa local Mac'te process başlatamaz; bu durumda proxy manuel başlatılmalıdır.
 
-Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*` ve `OBUS_USER_DEACTIVATE_SQL_PROXY_*` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır ve `https://*.onrender.com` gibi wildcard origin kabul eder. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
+Varsayılan proxy adresleri:
+
+- Listeleme: `http://127.0.0.1:3015/obus-user-deactivate/users`
+- Pasife alma: `http://127.0.0.1:3015/obus-user-deactivate/deactivate`
+
+Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*`, `OBUS_USER_DEACTIVATE_SQL_PROXY_*`, `OBUS_SERVICE_LOGIN_*` ve `PARTNERS_SESSION_API_URL` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password, Obus login bilgileri ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır ve `https://*.onrender.com` gibi wildcard origin kabul eder. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
 
 ### macOS Keychain Secret'lari
 

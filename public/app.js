@@ -1026,6 +1026,7 @@
     const filterButton = root.querySelector("[data-obus-user-deactivate-filter-submit='1']");
     const deactivateButton = root.querySelector("[data-obus-user-deactivate-deactivate='1']");
     const submitButton = root.querySelector("[data-obus-user-deactivate-submit='1']");
+    const proxyStartButton = root.querySelector("[data-obus-user-deactivate-proxy-start='1']");
     const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
     const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
     const resultSelectAllCheckbox = root.querySelector("[data-obus-user-deactivate-result-select-all='1']");
@@ -1073,6 +1074,11 @@
       "Pasife Al";
     const deactivateLoadingLabel =
       String(deactivateButton?.getAttribute("data-loading-label") || "").trim() || "Pasife Alınıyor...";
+    const proxyStartDefaultLabel =
+      String(proxyStartButton?.getAttribute("data-default-label") || proxyStartButton?.textContent || "").trim() ||
+      "Proxy'i Başlat";
+    const proxyStartLoadingLabel =
+      String(proxyStartButton?.getAttribute("data-loading-label") || "").trim() || "Proxy Başlatılıyor...";
 
     const readSelectedValues = () =>
       companyCheckboxes
@@ -1147,6 +1153,22 @@
       return Array.from(new Set(urls));
     };
 
+    const buildLocalObusDeactivateProxyUrls = () =>
+      Array.from(
+        new Set([
+          "http://127.0.0.1:3015/obus-user-deactivate/deactivate",
+          "http://localhost:3015/obus-user-deactivate/deactivate"
+        ])
+      );
+
+    const buildLocalObusProxyHealthUrls = () =>
+      Array.from(new Set(["http://127.0.0.1:3015/health", "http://localhost:3015/health"]));
+
+    const isLoopbackBrowserHost = () => {
+      const hostname = String(window.location.hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
+      return !hostname || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    };
+
     const normalizeLocalSqlProxyCode = (value) => String(value || "").trim().toLocaleLowerCase("tr");
 
     const createLocalSqlProxyError = (message, { retryable = true, status = 0, errorType = "" } = {}) => {
@@ -1187,6 +1209,100 @@
         throw err;
       } finally {
         window.clearTimeout(timeout);
+      }
+    };
+
+    const fetchLocalObusProxyHealth = async () => {
+      const healthUrls = buildLocalObusProxyHealthUrls();
+      let lastError = null;
+
+      for (const url of healthUrls) {
+        try {
+          const response = await fetch(url, {
+            headers: { Accept: "application/json" },
+            cache: "no-store"
+          });
+          const data = await parseJsonResponse(response);
+          if (response.ok && data?.ok) {
+            return { ok: true, url, data };
+          }
+          lastError = new Error(getApiErrorMessage(response, data, "Yerel Obus proxy health başarısız"));
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      return {
+        ok: false,
+        error: lastError?.message || "Yerel Obus proxy health yanıtı alınamadı.",
+        urls: healthUrls
+      };
+    };
+
+    const requestServerObusProxyStart = async () => {
+      const response = await fetch("/api/obus-user-deactivate/proxy/start", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin"
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok || !data?.ok) {
+        throw new Error(getApiErrorMessage(response, data, "Yerel Obus proxy otomatik başlatılamadı"));
+      }
+      return data;
+    };
+
+    const ensureLocalObusProxyOnPageOpen = async () => {
+      setStatus("Yerel Obus proxy durumu kontrol ediliyor...", "muted");
+      const health = await fetchLocalObusProxyHealth();
+      if (health.ok) {
+        setStatus(`Yerel Obus proxy çalışıyor: ${health.url}`, "success");
+        return;
+      }
+
+      if (!isLoopbackBrowserHost()) {
+        setStatus(
+          `Yerel Obus proxy otomatik başlatılamaz. Terminalde npm run obus-user-deactivate-sql-proxy çalıştırın. Denenen: ${health.urls.join(", ")}`,
+          "error"
+        );
+        return;
+      }
+
+      try {
+        setStatus("Yerel Obus proxy otomatik başlatılıyor...", "muted");
+        const startResult = await requestServerObusProxyStart();
+        setStatus(String(startResult.message || "Yerel Obus proxy çalışıyor.").trim(), "success");
+      } catch (err) {
+        setStatus(err?.message || "Yerel Obus proxy otomatik başlatılamadı.", "error");
+      }
+    };
+
+    const startLocalObusProxyFromButton = async () => {
+      if (proxyStartInProgress) return;
+      setProxyStartBusy(true);
+      setStatus("Yerel Obus proxy kontrol ediliyor...", "muted");
+      try {
+        const health = await fetchLocalObusProxyHealth();
+        if (health.ok) {
+          setStatus(`Yerel Obus proxy çalışıyor: ${health.url}`, "success");
+          return;
+        }
+
+        if (!isLoopbackBrowserHost()) {
+          setStatus(
+            `Proxy bu ekrandan başlatılamaz. Local app'i http://localhost:3000 üzerinden açın veya terminalde npm run obus-user-deactivate-sql-proxy çalıştırın. Denenen: ${health.urls.join(", ")}`,
+            "error"
+          );
+          return;
+        }
+
+        setStatus("Yerel Obus proxy başlatılıyor...", "muted");
+        const startResult = await requestServerObusProxyStart();
+        setStatus(String(startResult.message || "Yerel Obus proxy çalışıyor.").trim(), "success");
+      } catch (err) {
+        setStatus(err?.message || "Yerel Obus proxy başlatılamadı.", "error");
+      } finally {
+        setProxyStartBusy(false);
       }
     };
 
@@ -1251,6 +1367,7 @@
           isActive: true,
           isActiveText: "true",
           code,
+          branchId: company.branchId,
           clusterUrl: company.url,
           clusterLabel
         });
@@ -1292,6 +1409,28 @@
         retryable: true,
         error: `${lastError?.message || "Yerel SQL proxy bulunamadı."} Denenen adresler: ${localSqlProxyUrls.join(", ")}`
       };
+    };
+
+    const fetchLocalObusDeactivateResult = async ({ users = [], usernameFilter = "", onAttempt = null } = {}) => {
+      const localObusProxyUrls = buildLocalObusDeactivateProxyUrls();
+      let lastError = null;
+
+      for (const url of localObusProxyUrls) {
+        if (typeof onAttempt === "function") {
+          onAttempt(url);
+        }
+        try {
+          return await fetchLocalSqlProxyJson(url, { users, usernameFilter }, 90000);
+        } catch (err) {
+          lastError = err;
+          if (err?.retryable === false) throw err;
+        }
+      }
+
+      throw createLocalSqlProxyError(
+        `${lastError?.message || "Yerel Obus proxy bulunamadı."} Denenen adresler: ${localObusProxyUrls.join(", ")}`,
+        { retryable: true }
+      );
     };
 
     const updatePageUrl = () => {
@@ -1408,6 +1547,7 @@
     let activeJobFailureCount = 0;
     let localSqlListingActive = false;
     let deleteInProgress = false;
+    let proxyStartInProgress = false;
     let appliedUsernameFilter = "";
     let companyTypeAheadText = "";
     let companyTypeAheadTimerId = null;
@@ -1454,6 +1594,13 @@
       if (loadingMessage) {
         loadingMessage.hidden = !busy;
       }
+    };
+
+    const setProxyStartBusy = (busy) => {
+      proxyStartInProgress = Boolean(busy);
+      if (!proxyStartButton) return;
+      proxyStartButton.disabled = proxyStartInProgress;
+      proxyStartButton.textContent = proxyStartInProgress ? proxyStartLoadingLabel : proxyStartDefaultLabel;
     };
 
     const compareListedRows = (a, b) => {
@@ -1845,6 +1992,7 @@
           isActive: meta.isActive === true,
           isActiveText: String(meta.isActiveText || "").trim(),
           code: String(meta.code || "").trim(),
+          branchId: String(meta.branchId || "").trim(),
           clusterUrl: String(meta.clusterUrl || "").trim(),
           clusterLabel: String(meta.clusterLabel || "").trim()
         });
@@ -1875,6 +2023,7 @@
           isActive: row?.isActive !== false,
           isActiveText: String(row?.isActiveText || "true").trim() || "true",
           code: String(row?.code || "").trim(),
+          branchId: String(row?.branchId || "").trim(),
           clusterUrl: String(row?.clusterUrl || sourceUrl || "").trim(),
           clusterLabel: String(row?.clusterLabel || "").trim()
         });
@@ -2062,33 +2211,28 @@
         setStatus(`${targetRows.length} kullanıcı pasife alınıyor...`, "muted");
 
         try {
-          const response = await fetch("/api/obus-user-deactivate/deactivate", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json"
-            },
-            credentials: "same-origin",
-            body: JSON.stringify({
-              usernameFilter: appliedUsernameFilter,
-              users: targetRows.map((row) => ({
-                key: String(row?.key || "").trim(),
-                userId: String(row?.userId || "").trim(),
-                username: String(row?.username || "").trim(),
-                code: String(row?.code || "").trim(),
-                partnerId: String(row?.partnerId || "").trim(),
-                clusterLabel: String(row?.clusterLabel || "").trim(),
-                clusterUrl: String(row?.clusterUrl || "").trim()
-              }))
-            })
+          responseData = await fetchLocalObusDeactivateResult({
+            usernameFilter: appliedUsernameFilter,
+            users: targetRows.map((row) => ({
+              key: String(row?.key || "").trim(),
+              userId: String(row?.userId || "").trim(),
+              username: String(row?.username || "").trim(),
+              code: String(row?.code || "").trim(),
+              partnerId: String(row?.partnerId || "").trim(),
+              branchId: String(row?.branchId || "").trim(),
+              clusterLabel: String(row?.clusterLabel || "").trim(),
+              clusterUrl: String(row?.clusterUrl || "").trim()
+            })),
+            onAttempt: (url) => {
+              setStatus(`Yerel Obus proxy pasife alma deneniyor: ${url}`, "muted");
+            }
           });
-          responseData = await parseJsonResponse(response);
 
-          if (!response.ok || !responseData?.ok) {
+          if (!responseData?.ok) {
             if (responseData?.failedRequestPreview && typeof responseData.failedRequestPreview === "object") {
               snapshot.failedRequestPreview = responseData.failedRequestPreview;
             }
-            throw new Error(getApiErrorMessage(response, responseData, "Kullanıcılar pasife alınamadı"));
+            throw new Error(String(responseData?.error || "Kullanıcılar pasife alınamadı.").trim());
           }
 
           applyDeactivateResults(responseData);
@@ -2107,6 +2251,12 @@
           deleteInProgress = false;
           finalizeRender({ preserveStatus: true });
         }
+      });
+    }
+
+    if (proxyStartButton) {
+      proxyStartButton.addEventListener("click", () => {
+        void startLocalObusProxyFromButton();
       });
     }
 
@@ -2173,6 +2323,7 @@
     syncSelectedCompanies();
     setBusy(activeJobId && snapshot.done !== true);
     finalizeRender();
+    void ensureLocalObusProxyOnPageOpen();
 
     if (activeJobId) {
       updatePageUrl();

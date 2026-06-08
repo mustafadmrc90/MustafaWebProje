@@ -21,7 +21,7 @@
                 <path d="M16 11h6"></path>
               </svg>
             </span>
-            <span>Obus Kullanıcı Pasife Al</span>
+            <span>Obus Kullanıcılarını Pasife al</span>
           </h1>
           <p>Seçilen firmalar için kullanıcılar listelenir. İsterseniz <code>Hepsi</code> ile tüm firmaları aynı anda taratabilirsiniz.</p>
         </div>
@@ -93,6 +93,18 @@
               </div>
               <small class="muted">Liste Tüm Firmalar ekranındaki SQL verisinden gelir. Çoklu seçim yapılabilir.</small>
             </label>
+
+            <div class="allowed-lines-actions">
+              <button
+                type="button"
+                class="ghost"
+                data-obus-user-deactivate-proxy-start="1"
+                data-default-label="Proxy'i Başlat"
+                data-loading-label="Proxy Başlatılıyor..."
+              >
+                Proxy'i Başlat
+              </button>
+            </div>
 
             <div class="allowed-lines-actions">
               <button
