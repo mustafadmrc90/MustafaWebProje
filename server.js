@@ -3,11 +3,10 @@ const os = require("os");
 const net = require("net");
 const fsSync = require("fs");
 const fs = require("fs/promises");
-const { execFileSync, spawn } = require("child_process");
+const { execFileSync } = require("child_process");
 const express = require("express");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
-const mssql = require("mssql");
 const { createDatabasePool } = require("./db");
 
 function loadLocalEnvFile(filePath = path.join(__dirname, ".env")) {
@@ -423,109 +422,6 @@ const OBUS_USER_CREATE_LOGIN_CONCURRENCY =
 const OBUS_USER_CREATE_REQUEST_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_CREATE_REQUEST_CONCURRENCY || "10", 10) || 10;
 
-function parseObusUserDeactivateBooleanFlag(value, fallback = false) {
-  if (value === undefined || value === null || String(value).trim() === "") return fallback;
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
-  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
-  return fallback;
-}
-
-function parseObusUserDeactivatePositiveInt(value, fallback) {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function isObusUserDeactivatePlaceholderConfigValue(value = "") {
-  const normalized = String(value || "").trim().toLowerCase();
-  return (
-    normalized === "change-me" ||
-    normalized === "your-password" ||
-    normalized === "your-token" ||
-    normalized === "password" ||
-    normalized.startsWith("your-")
-  );
-}
-
-function readObusUserDeactivateConfigValue(name, fallback = "") {
-  const value = String(process.env[name] || "").trim();
-  if (value && !isObusUserDeactivatePlaceholderConfigValue(value)) return value;
-  const fallbackValue = String(fallback || "").trim();
-  return fallbackValue && !isObusUserDeactivatePlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
-}
-
-function parseObusUserDeactivateMssqlDatabaseUrl(value = "") {
-  const text = String(value || "").trim();
-  if (!text) return {};
-
-  if (/^(mssql|sqlserver):\/\//i.test(text)) {
-    try {
-      const parsed = new URL(text);
-      const host = String(parsed.hostname || "").trim();
-      if (!host) return {};
-      const encryptRaw = parsed.searchParams.get("encrypt") || parsed.searchParams.get("ssl");
-      return {
-        host,
-        port: parseObusUserDeactivatePositiveInt(parsed.port, 1433),
-        database: String(parsed.pathname || "").replace(/^\//, "") || "",
-        username: decodeURIComponent(parsed.username || ""),
-        password: decodeURIComponent(parsed.password || ""),
-        encrypt: parseObusUserDeactivateBooleanFlag(encryptRaw, !net.isIP(host))
-      };
-    } catch (err) {
-      return {};
-    }
-  }
-
-  if (!/^[a-z0-9 _-]+\s*=/i.test(text) || !text.includes(";")) return {};
-
-  const config = {};
-  String(text)
-    .split(";")
-    .map((part) => String(part || "").trim())
-    .filter(Boolean)
-    .forEach((part) => {
-      const eqIndex = part.indexOf("=");
-      if (eqIndex <= 0) return;
-      const key = part.slice(0, eqIndex).replace(/\s+/g, " ").trim().toLowerCase();
-      const itemValue = part.slice(eqIndex + 1).trim();
-      if (!itemValue) return;
-
-      if (key === "server" || key === "data source" || key === "addr" || key === "address") {
-        let host = "";
-        let portRaw = "";
-        if (itemValue.includes(",")) {
-          [host, portRaw] = itemValue.split(",");
-        } else if (/^[^:]+:\d+$/.test(itemValue)) {
-          [host, portRaw] = itemValue.split(":");
-        } else {
-          host = itemValue;
-        }
-        config.host = String(host || "").replace(/^tcp:/i, "").trim();
-        if (portRaw) config.port = parseObusUserDeactivatePositiveInt(portRaw, 0);
-        return;
-      }
-      if (key === "database" || key === "initial catalog") {
-        config.database = itemValue;
-        return;
-      }
-      if (key === "user id" || key === "uid" || key === "user") {
-        config.username = itemValue;
-        return;
-      }
-      if (key === "password" || key === "pwd") {
-        config.password = itemValue;
-        return;
-      }
-      if (key === "encrypt") {
-        config.encrypt = parseObusUserDeactivateBooleanFlag(itemValue, null);
-      }
-    });
-
-  return config;
-}
-
-const OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG = parseObusUserDeactivateMssqlDatabaseUrl(process.env.DATABASE_URL);
 const OBUS_USER_DEACTIVATE_API_URL =
   process.env.OBUS_USER_DEACTIVATE_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/Membership/GetUsersWithoutPermissions";
@@ -535,48 +431,12 @@ const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "8", 10) || 8;
-const OBUS_USER_DEACTIVATE_SQL_HOST =
-  readObusUserDeactivateConfigValue("OBUS_USER_DEACTIVATE_SQL_HOST", OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.host || "");
-const OBUS_USER_DEACTIVATE_SQL_PORT =
-  parseObusUserDeactivatePositiveInt(
-    process.env.OBUS_USER_DEACTIVATE_SQL_PORT,
-    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.port || 1433
-  );
-const OBUS_USER_DEACTIVATE_SQL_DATABASE =
-  readObusUserDeactivateConfigValue(
-    "OBUS_USER_DEACTIVATE_SQL_DATABASE",
-    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.database || ""
-  );
-const OBUS_USER_DEACTIVATE_SQL_USERNAME =
-  readObusUserDeactivateConfigValue(
-    "OBUS_USER_DEACTIVATE_SQL_USERNAME",
-    OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.username || ""
-  );
-const OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES = Object.freeze([
-  "OBUS_USER_DEACTIVATE_SQL_PASSWORD"
-]);
-const OBUS_USER_DEACTIVATE_SQL_PROXY_URL =
-  String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_URL || "").trim();
-const OBUS_USER_DEACTIVATE_SQL_PROXY_PORT =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_PORT || "3015", 10) || 3015;
-const OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES = Object.freeze([
-  "OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN"
-]);
-const OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS || "45000", 10) || 45000;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
   String(process.env.OBUS_USER_DEACTIVATE_REQUEST_DATE || "2026-05-13 08:30:02").trim() || "2026-05-13 08:30:02";
 const OBUS_USER_DELETE_REQUEST_DATE =
   String(process.env.OBUS_USER_DELETE_REQUEST_DATE || "2016-03-11T11:33:00").trim() || "2016-03-11T11:33:00";
 const OBUS_USER_DELETE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DELETE_COMPANY_CONCURRENCY || "4", 10) || 4;
-const OBUS_USER_DEACTIVATE_SQL_PROXY_HOST =
-  String(process.env.OBUS_USER_DEACTIVATE_SQL_PROXY_HOST || "127.0.0.1").trim() || "127.0.0.1";
-const OBUS_USER_DEACTIVATE_SQL_PROXY_SCRIPT_PATH = path.join(
-  __dirname,
-  "scripts",
-  "obus-user-deactivate-sql-proxy.js"
-);
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
@@ -599,129 +459,6 @@ const STATION_PASSENGER_INFO_REQUEST_LANGUAGE =
 const STATION_PASSENGER_INFO_TIMEOUT_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_TIMEOUT_MS || "45000", 10) || 45000;
 
-let obusUserDeactivateProxyProcess = null;
-let obusUserDeactivateProxyLastOutput = "";
-
-function appendObusUserDeactivateProxyOutput(value = "") {
-  const text = String(value || "").trim();
-  if (!text) return;
-  obusUserDeactivateProxyLastOutput = `${obusUserDeactivateProxyLastOutput}\n${text}`
-    .trim()
-    .slice(-2000);
-}
-
-function isObusUserDeactivateProxyProcessRunning() {
-  return Boolean(obusUserDeactivateProxyProcess && obusUserDeactivateProxyProcess.exitCode === null);
-}
-
-function isLoopbackAddress(value = "") {
-  const normalized = String(value || "")
-    .trim()
-    .replace(/^\[|\]$/g, "")
-    .replace(/^::ffff:/i, "")
-    .toLowerCase();
-  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
-}
-
-function isLocalObusUserDeactivateProxyStartRequest(req) {
-  if (String(process.env.OBUS_USER_DEACTIVATE_ALLOW_PROXY_AUTOSTART || "").trim().toLowerCase() === "true") {
-    return true;
-  }
-  if (isProd) return false;
-  return (
-    isLoopbackAddress(req.hostname) ||
-    isLoopbackAddress(req.ip) ||
-    isLoopbackAddress(req.socket?.remoteAddress)
-  );
-}
-
-function buildObusUserDeactivateProxyHealthUrl() {
-  return `http://${OBUS_USER_DEACTIVATE_SQL_PROXY_HOST}:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/health`;
-}
-
-async function readObusUserDeactivateProxyHealth(timeoutMs = 1200) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(buildObusUserDeactivateProxyHealthUrl(), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal
-    });
-    const data = parseJsonSafe(await response.text());
-    return {
-      ok: response.ok && data?.ok === true,
-      status: response.status,
-      data
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      error: err?.message || "Proxy health okunamadı."
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function waitForObusUserDeactivateProxyHealth({ attempts = 12, delayMs = 350 } = {}) {
-  for (let index = 0; index < attempts; index += 1) {
-    const health = await readObusUserDeactivateProxyHealth();
-    if (health.ok) return health;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  return readObusUserDeactivateProxyHealth();
-}
-
-async function ensureObusUserDeactivateProxyStarted() {
-  const health = await readObusUserDeactivateProxyHealth();
-  if (health.ok) {
-    return {
-      ok: true,
-      alreadyRunning: true,
-      message: "Yerel Obus proxy zaten çalışıyor.",
-      health
-    };
-  }
-
-  if (isObusUserDeactivateProxyProcessRunning()) {
-    const nextHealth = await waitForObusUserDeactivateProxyHealth();
-    return {
-      ok: nextHealth.ok,
-      alreadyRunning: true,
-      message: nextHealth.ok ? "Yerel Obus proxy çalışıyor." : "Yerel Obus proxy başlatıldı ama health yanıtı alınamadı.",
-      health: nextHealth,
-      output: obusUserDeactivateProxyLastOutput
-    };
-  }
-
-  obusUserDeactivateProxyLastOutput = "";
-  obusUserDeactivateProxyProcess = spawn(process.execPath, [OBUS_USER_DEACTIVATE_SQL_PROXY_SCRIPT_PATH], {
-    cwd: __dirname,
-    env: {
-      ...process.env,
-      OBUS_USER_DEACTIVATE_SQL_PROXY_HOST,
-      OBUS_USER_DEACTIVATE_SQL_PROXY_PORT: String(OBUS_USER_DEACTIVATE_SQL_PROXY_PORT)
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-
-  obusUserDeactivateProxyProcess.stdout?.on("data", (chunk) => appendObusUserDeactivateProxyOutput(chunk));
-  obusUserDeactivateProxyProcess.stderr?.on("data", (chunk) => appendObusUserDeactivateProxyOutput(chunk));
-  obusUserDeactivateProxyProcess.on("exit", (code, signal) => {
-    appendObusUserDeactivateProxyOutput(`proxy exited code=${code ?? ""} signal=${signal ?? ""}`);
-    obusUserDeactivateProxyProcess = null;
-  });
-
-  const startedHealth = await waitForObusUserDeactivateProxyHealth();
-  return {
-    ok: startedHealth.ok,
-    alreadyRunning: false,
-    message: startedHealth.ok ? "Yerel Obus proxy otomatik başlatıldı." : "Yerel Obus proxy başlatılamadı.",
-    health: startedHealth,
-    output: obusUserDeactivateProxyLastOutput
-  };
-}
 const STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL =
   String(
     process.env.STATION_PASSENGER_INFO_JOURNEY_STATIONS_API_URL ||
@@ -16155,390 +15892,6 @@ function buildObusUserDeactivateCompanyBaseUrl(company = {}, clusterLabel = "") 
   );
 }
 
-function getObusUserDeactivateSqlPassword() {
-  return resolveObusUserDeactivateSecret(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES, {
-    trim: false,
-    fallback: OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.password || ""
-  });
-}
-
-function getObusUserDeactivateSqlProxyToken() {
-  return resolveObusUserDeactivateSecret(OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN_SECRET_NAMES, { trim: false });
-}
-
-function resolveObusUserDeactivateSecret(secretNames = [], { trim = true, fallback = "" } = {}) {
-  const names = (Array.isArray(secretNames) ? secretNames : [secretNames])
-    .map((item) => String(item || "").trim())
-    .filter(Boolean);
-  if (names.length === 0) return "";
-
-  for (const secretName of names) {
-    const keychainValue = readMacOsKeychainSecret(secretName, { trim });
-    if (keychainValue && !isObusUserDeactivatePlaceholderConfigValue(keychainValue)) return keychainValue;
-  }
-
-  const legacyValue = readLegacyLocalSecret(names, { trim });
-  if (legacyValue && !isObusUserDeactivatePlaceholderConfigValue(legacyValue)) {
-    writeMacOsKeychainSecret(names[0], legacyValue, { trim });
-    return legacyValue;
-  }
-
-  const fallbackValue = normalizeMacOsKeychainSecretValue(fallback, trim);
-  return fallbackValue && !isObusUserDeactivatePlaceholderConfigValue(fallbackValue) ? fallbackValue : "";
-}
-
-function buildObusUserDeactivateSqlConfigurationMessage(missingItems = []) {
-  const normalizedMissingItems = (Array.isArray(missingItems) ? missingItems : [])
-    .map((item) => String(item || "").trim())
-    .filter(Boolean);
-  if (normalizedMissingItems.length === 0) {
-    return "Obus kullanıcı listeleme SQL bağlantı bilgileri eksik.";
-  }
-  return `Obus kullanıcı listeleme SQL bağlantı bilgileri eksik: ${normalizedMissingItems.join(", ")}.`;
-}
-
-function getObusUserDeactivateSqlCredentials() {
-  const password = getObusUserDeactivateSqlPassword();
-  const missingItems = [];
-  if (!OBUS_USER_DEACTIVATE_SQL_HOST) missingItems.push("OBUS_USER_DEACTIVATE_SQL_HOST");
-  if (!OBUS_USER_DEACTIVATE_SQL_DATABASE) missingItems.push("OBUS_USER_DEACTIVATE_SQL_DATABASE");
-  if (!OBUS_USER_DEACTIVATE_SQL_USERNAME) missingItems.push("OBUS_USER_DEACTIVATE_SQL_USERNAME");
-  if (!password) missingItems.push(OBUS_USER_DEACTIVATE_SQL_PASSWORD_SECRET_NAMES[0]);
-
-  return {
-    host: OBUS_USER_DEACTIVATE_SQL_HOST,
-    port: OBUS_USER_DEACTIVATE_SQL_PORT,
-    database: OBUS_USER_DEACTIVATE_SQL_DATABASE,
-    username: OBUS_USER_DEACTIVATE_SQL_USERNAME,
-    password,
-    error: missingItems.length > 0 ? buildObusUserDeactivateSqlConfigurationMessage(missingItems) : ""
-  };
-}
-
-function buildObusUserDeactivateSqlRequestUrl() {
-  if (OBUS_USER_DEACTIVATE_SQL_PROXY_URL) {
-    return OBUS_USER_DEACTIVATE_SQL_PROXY_URL;
-  }
-  return `mssql://${OBUS_USER_DEACTIVATE_SQL_HOST}:${OBUS_USER_DEACTIVATE_SQL_PORT}/${OBUS_USER_DEACTIVATE_SQL_DATABASE}`;
-}
-
-function buildObusUserDeactivateSqlRequestBody(usernameFilter = "") {
-  return JSON.stringify(
-    {
-      query: [
-        "select u.ID, u.PartnerId, p.Code, u.Username from b2b.[user] u",
-        "left join partner p on p.ID = u.PartnerId",
-        "where username like @usernameFilter"
-      ].join("\n"),
-      usernameFilter: `%${String(usernameFilter || "").trim()}%`
-    },
-    null,
-    2
-  );
-}
-
-function buildObusUserDeactivateSqlPreview({
-  usernameFilter = "",
-  status = null,
-  responseBody = "",
-  error = ""
-} = {}) {
-  return buildObusRequestPreviewFromTrace(
-    buildObusServiceTraceEntry({
-      service: "SQL Kullanıcı Listeleme",
-      url: buildObusUserDeactivateSqlRequestUrl(),
-      status,
-      requestBody: buildObusUserDeactivateSqlRequestBody(usernameFilter),
-      responseBody: responseBody || error || "",
-      error
-    })
-  );
-}
-
-let obusUserDeactivateSqlPoolPromise = null;
-let obusUserDeactivateSqlPoolKey = "";
-
-async function getObusUserDeactivateSqlPool() {
-  const credentials = getObusUserDeactivateSqlCredentials();
-  if (credentials.error) {
-    throw new Error(credentials.error);
-  }
-
-  const poolKey = [
-    credentials.host,
-    credentials.port,
-    credentials.database,
-    credentials.username,
-    credentials.password
-  ].join("\u0000");
-  if (obusUserDeactivateSqlPoolPromise && obusUserDeactivateSqlPoolKey === poolKey) {
-    return obusUserDeactivateSqlPoolPromise;
-  }
-
-  const encrypt =
-    credentials.host && net.isIP(credentials.host)
-      ? false
-      : parseObusUserDeactivateBooleanFlag(
-          process.env.OBUS_USER_DEACTIVATE_SQL_ENCRYPT,
-          typeof OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt === "boolean"
-            ? OBUS_USER_DEACTIVATE_DATABASE_MSSQL_CONFIG.encrypt
-            : true
-        );
-
-  const pool = new mssql.ConnectionPool({
-    user: credentials.username,
-    password: credentials.password,
-    server: credentials.host,
-    port: Number(credentials.port || 1433),
-    database: credentials.database,
-    connectionTimeout: OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS,
-    requestTimeout: OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS,
-    pool: {
-      min: 0,
-      max: 4,
-      idleTimeoutMillis: 30000
-    },
-    options: {
-      encrypt,
-      trustServerCertificate: true,
-      ...(net.isIP(credentials.host)
-        ? {
-            servername: "",
-            serverName: "",
-            cryptoCredentialsDetails: {
-              servername: ""
-            }
-          }
-        : {})
-    }
-  });
-
-  obusUserDeactivateSqlPoolKey = poolKey;
-  obusUserDeactivateSqlPoolPromise = pool.connect().catch((err) => {
-    if (obusUserDeactivateSqlPoolKey === poolKey) {
-      obusUserDeactivateSqlPoolPromise = null;
-      obusUserDeactivateSqlPoolKey = "";
-    }
-    throw err;
-  });
-  return obusUserDeactivateSqlPoolPromise;
-}
-
-async function fetchObusUserDeactivateSqlRows({ usernameFilter = "" } = {}) {
-  if (OBUS_USER_DEACTIVATE_SQL_PROXY_URL) {
-    return fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter });
-  }
-
-  const pool = await getObusUserDeactivateSqlPool();
-  const normalizedUsernameFilter = String(usernameFilter || "").trim();
-  const request = pool.request();
-  request.input("usernameFilter", mssql.NVarChar, `%${normalizedUsernameFilter}%`);
-  const result = await request.query(`
-    select u.ID, u.PartnerId, p.Code, u.Username from b2b.[user] u
-    left join partner p on p.ID = u.PartnerId
-    where username like @usernameFilter
-  `);
-  return Array.isArray(result?.recordset) ? result.recordset : [];
-}
-
-function sanitizeObusUserDeactivateSqlProxyUrl(value = "") {
-  const raw = String(value || "").trim();
-  if (!raw) return "SQL proxy URL";
-  try {
-    const parsed = new URL(raw);
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString();
-  } catch (err) {
-    return raw;
-  }
-}
-
-function buildObusUserDeactivateSqlProxyFetchError(err, requestUrl = "") {
-  const cause = err?.cause && typeof err.cause === "object" ? err.cause : null;
-  const parts = [`SQL proxy erişilemedi: ${sanitizeObusUserDeactivateSqlProxyUrl(requestUrl)}`];
-  const code = String(cause?.code || err?.code || "").trim();
-  const address = String(cause?.address || "").trim();
-  const port = String(cause?.port || "").trim();
-  const detail = String(cause?.message || err?.message || "").trim();
-
-  if (code) parts.push(`kod=${code}`);
-  if (address || port) parts.push(`adres=${[address, port].filter(Boolean).join(":")}`);
-  if (detail) parts.push(`detay=${detail}`);
-  return parts.join(" | ");
-}
-
-async function fetchObusUserDeactivateSqlRowsViaProxy({
-  usernameFilter = "",
-  requestUrl = OBUS_USER_DEACTIVATE_SQL_PROXY_URL
-} = {}) {
-  const normalizedRequestUrl = String(requestUrl || "").trim();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_SQL_TIMEOUT_MS);
-  const token = getObusUserDeactivateSqlProxyToken();
-
-  try {
-    const headers = {
-      Accept: "application/json",
-      "Content-Type": "application/json"
-    };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch(normalizedRequestUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        usernameFilter: String(usernameFilter || "").trim()
-      }),
-      signal: controller.signal
-    });
-    const raw = await response.text();
-    const payload = parseJsonSafe(raw);
-    if (!response.ok || !payload?.ok) {
-      const message =
-        (payload && typeof payload === "object" && String(payload.error || payload.message || "").trim()) ||
-        response.statusText ||
-        "SQL proxy yanıtı başarısız.";
-      throw new Error(`SQL proxy HTTP ${response.status}: ${message}`);
-    }
-    return Array.isArray(payload.rows) ? payload.rows : [];
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      throw new Error(
-        `SQL proxy isteği zaman aşımına uğradı: ${sanitizeObusUserDeactivateSqlProxyUrl(normalizedRequestUrl)}`
-      );
-    }
-    if (String(err?.message || "").startsWith("SQL proxy HTTP")) {
-      throw err;
-    }
-    throw new Error(buildObusUserDeactivateSqlProxyFetchError(err, normalizedRequestUrl));
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function buildObusUserDeactivateLocalSqlProxyUrls() {
-  return Array.from(
-    new Set(
-      [
-        OBUS_USER_DEACTIVATE_SQL_PROXY_URL,
-        `http://127.0.0.1:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/obus-user-deactivate/users`,
-        `http://localhost:${OBUS_USER_DEACTIVATE_SQL_PROXY_PORT}/obus-user-deactivate/users`
-      ]
-        .map((item) => String(item || "").trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-async function fetchObusUserDeactivateLocalSqlProxyRows({ usernameFilter = "" } = {}) {
-  const requestUrls = buildObusUserDeactivateLocalSqlProxyUrls();
-  let lastError = null;
-
-  for (const requestUrl of requestUrls) {
-    try {
-      const rows = await fetchObusUserDeactivateSqlRowsViaProxy({ usernameFilter, requestUrl });
-      return {
-        rows,
-        sourceUrl: requestUrl
-      };
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  const triedUrls = requestUrls.map((item) => sanitizeObusUserDeactivateSqlProxyUrl(item)).join(", ");
-  throw new Error(`${lastError?.message || "SQL proxy erişilemedi."} Denenen adresler: ${triedUrls}`);
-}
-
-function normalizeObusUserDeactivateSqlRow(row = {}) {
-  const userId = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["ID", "id", "user-id", "userId"])).trim();
-  const partnerId = formatPartnerCellValue(
-    readPartnerRawValueByAliases(row, ["PartnerId", "PartnerID", "partner-id", "partner_id", "partnerId", "partnerid"])
-  ).trim();
-  const code = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Code", "code"])).trim();
-  const username = formatPartnerCellValue(readPartnerRawValueByAliases(row, ["Username", "username"])).trim();
-  if (!userId || !code || !username) return null;
-  return {
-    userId,
-    partnerId,
-    code,
-    username
-  };
-}
-
-function normalizeObusUserDeactivateSqlCode(value) {
-  return String(value || "").trim().toLocaleLowerCase("tr");
-}
-
-function buildObusUserDeactivateSqlCompanyLookup(partnerItems = []) {
-  const byCode = new Map();
-  const byCodeAndPartnerId = new Map();
-  (Array.isArray(partnerItems) ? partnerItems : []).forEach((company) => {
-    const code = String(company?.code || "").trim();
-    const codeKey = normalizeObusUserDeactivateSqlCode(code);
-    const partnerId = String(company?.id || "").trim();
-    if (!codeKey) return;
-
-    const codeItems = byCode.get(codeKey) || [];
-    codeItems.push(company);
-    byCode.set(codeKey, codeItems);
-
-    if (partnerId) {
-      const partnerKey = `${codeKey}|||${partnerId}`;
-      const partnerItems = byCodeAndPartnerId.get(partnerKey) || [];
-      partnerItems.push(company);
-      byCodeAndPartnerId.set(partnerKey, partnerItems);
-    }
-  });
-  return {
-    byCode,
-    byCodeAndPartnerId
-  };
-}
-
-function findObusUserDeactivateSqlCompany(companyLookup, row = {}) {
-  const codeKey = normalizeObusUserDeactivateSqlCode(row?.code);
-  const partnerId = String(row?.partnerId || "").trim();
-  if (!codeKey || !companyLookup || typeof companyLookup !== "object") return null;
-
-  if (partnerId && companyLookup.byCodeAndPartnerId instanceof Map) {
-    const directCandidates = companyLookup.byCodeAndPartnerId.get(`${codeKey}|||${partnerId}`) || [];
-    if (directCandidates.length > 0) return directCandidates[0];
-  }
-
-  const candidates = companyLookup.byCode instanceof Map ? companyLookup.byCode.get(codeKey) || [] : [];
-  if (candidates.length === 1) return candidates[0];
-  if (!partnerId && candidates.length > 0) return candidates[0];
-  return null;
-}
-
-function buildObusUserDeactivateListedRowFromSql(row = {}, company = {}) {
-  const clusterLabel =
-    normalizeObusClusterLabel(company?.cluster || "") ||
-    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
-    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
-    "cluster4";
-  const requestUrl = buildMembershipGetUsersWithoutPermissionsUrl(
-    buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
-    clusterLabel
-  );
-
-  return {
-    userId: String(row?.userId || "").trim(),
-    partnerId: String(company?.id || row?.partnerId || "").trim(),
-    code: String(row?.code || company?.code || "").trim(),
-    username: String(row?.username || "").trim(),
-    fullName: "",
-    clusterUrl: requestUrl,
-    clusterLabel,
-    isActive: true,
-    isActiveText: "true"
-  };
-}
-
 async function fetchObusUserDeactivateCompanyResult({
   company,
   loginCredentials = {},
@@ -16706,7 +16059,7 @@ async function fetchObusUserDeactivateCompanyResult({
     }
 
     const allRows = extractObusUserDeactivateRows(parsed);
-    const activeRows = allRows.filter((row) => row.isActive === true);
+    const activeRows = allRows.filter((row) => row.isActive !== false);
     const listedRows = activeRows
       .map((row) => ({
         userId: String(row.userId || "").trim(),
@@ -16716,9 +16069,13 @@ async function fetchObusUserDeactivateCompanyResult({
         fullName: String(row.fullName || "").trim(),
         clusterUrl: requestUrl,
         clusterLabel,
-        isActive: row.isActive,
-        isActiveText: row.isActiveText
-      }));
+        isActive: true,
+        isActiveText: "true"
+      }))
+      .filter((row) => {
+        const userIdValue = normalizeObusPartnerIdValue(row.userId);
+        return Number.isInteger(userIdValue) && userIdValue > 0 && Boolean(row.username);
+      });
 
     return {
       ok: true,
@@ -17139,14 +16496,23 @@ function buildObusUserDeactivateMatchEventKey(row = {}) {
   ].join("|||");
 }
 
-async function runObusUserDeactivateSearchJob(job, { partnerItems = [], usernameFilter = "" }) {
+async function runObusUserDeactivateSearchJob(job, { partnerItems = [] }) {
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    finishObusLiveJob(
+      job,
+      buildObusServiceLoginConfigurationMessage(loginCredentials)
+    );
+    return;
+  }
+
   const normalizedCompanies = Array.isArray(partnerItems) ? partnerItems : [];
   if (normalizedCompanies.length === 0) {
     finishObusLiveJob(job, "Sorgulanacak firma listesi bulunamadı.");
     return;
   }
 
-  const normalizedUsernameFilter = String(usernameFilter || "").trim();
+  const sessionCache = new Map();
   let listedUserCount = 0;
   let totalUserCount = 0;
   let activeUserCount = 0;
@@ -17154,183 +16520,45 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
   let firstRequestPreview = null;
   let latestFailedRequestPreview = null;
   job.totalCount = normalizedCompanies.length;
-  const requestBodyPreview = buildObusUserDeactivateSqlRequestBody(normalizedUsernameFilter);
 
-  const updateSummary = () => {
-    setObusLiveJobSummary(job, {
-      scannedCompanyCount: normalizedCompanies.length,
-      successCompanyCount: Number(job.successCount || 0),
-      failureCompanyCount: Number(job.failureCount || 0),
-      listedUserCount,
-      matchedUserCount: listedUserCount,
-      totalUserCount,
-      activeUserCount,
-      failureSamples,
-      requestBody: requestBodyPreview,
-      debugPreview: {
-        firstRequest: firstRequestPreview,
-        failedRequest: latestFailedRequestPreview
-      }
-    });
-  };
-
-  updateSummary();
-
-  normalizedCompanies.forEach((company) => {
-    const eventKey = buildObusUserDeactivateCompanyEventKey(company);
-    const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
-    const clusterLabel =
-      normalizeObusClusterLabel(company?.cluster || "") ||
-      normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
-      "cluster";
-
-    pushObusLiveJobEvent(job, {
-      key: eventKey,
-      label: eventLabel,
-      statusKind: "pending",
-      message: "Firma SQL sorgusuna hazırlanıyor.",
-      detailText: [
-        `cluster=${clusterLabel}`,
-        `sql=${truncateObusDebugText(buildObusUserDeactivateSqlRequestUrl(), 120)}`
-      ]
-        .filter(Boolean)
-        .join(" | "),
-      meta: {
-        type: "company",
-        code: String(company?.code || "").trim(),
-        partnerId: String(company?.id || "").trim(),
-        clusterLabel
-      }
-    });
+  setObusLiveJobSummary(job, {
+    scannedCompanyCount: normalizedCompanies.length,
+    successCompanyCount: 0,
+    failureCompanyCount: 0,
+    listedUserCount: 0,
+    matchedUserCount: 0,
+    totalUserCount: 0,
+    activeUserCount: 0,
+    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
+    debugPreview: {
+      firstRequest: null,
+      failedRequest: null
+    }
   });
 
-  try {
-    const sqlRows = await fetchObusUserDeactivateSqlRows({ usernameFilter: normalizedUsernameFilter });
-    firstRequestPreview = buildObusUserDeactivateSqlPreview({
-      usernameFilter: normalizedUsernameFilter,
-      status: 200,
-      responseBody: `${Array.isArray(sqlRows) ? sqlRows.length : 0} SQL satırı döndü.`
-    });
-
-    const companyLookup = buildObusUserDeactivateSqlCompanyLookup(normalizedCompanies);
-    const listedRowsByCompanyKey = new Map();
-    (Array.isArray(sqlRows) ? sqlRows : []).forEach((rawRow) => {
-      const normalizedRow = normalizeObusUserDeactivateSqlRow(rawRow);
-      if (!normalizedRow) return;
-
-      const matchedCompany = findObusUserDeactivateSqlCompany(companyLookup, normalizedRow);
-      if (!matchedCompany) return;
-
-      const listedRow = buildObusUserDeactivateListedRowFromSql(normalizedRow, matchedCompany);
-      if (!listedRow.userId || !listedRow.username || !listedRow.code || !listedRow.partnerId) return;
-
-      const companyKey = buildObusUserDeactivateCompanyEventKey(matchedCompany);
-      const rows = listedRowsByCompanyKey.get(companyKey) || [];
-      rows.push(listedRow);
-      listedRowsByCompanyKey.set(companyKey, rows);
-    });
-
-    totalUserCount = Array.from(listedRowsByCompanyKey.values()).reduce(
-      (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
-      0
-    );
-    activeUserCount = totalUserCount;
-
-    normalizedCompanies.forEach((company) => {
+  await runWithConcurrency(
+    normalizedCompanies,
+    OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
+    async (company) => {
       const eventKey = buildObusUserDeactivateCompanyEventKey(company);
       const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
       const clusterLabel =
         normalizeObusClusterLabel(company?.cluster || "") ||
         normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
         "cluster";
-      const listedRows = listedRowsByCompanyKey.get(eventKey) || [];
-
-      listedRows.forEach((row) => {
-        listedUserCount += 1;
-        pushObusLiveJobEvent(job, {
-          key: buildObusUserDeactivateMatchEventKey(row),
-          label: `${String(row?.code || "").trim() || "Firma"} / ${String(row?.username || "").trim() || "-"}`,
-          statusKind: "info",
-          message: "Kullanıcı listelendi.",
-          detailText: [
-            `cluster=${clusterLabel}`,
-            String(row?.partnerId || "").trim() ? `partner-id=${String(row.partnerId).trim()}` : "",
-            String(row?.isActiveText || "").trim() ? `is-active=${String(row.isActiveText).trim()}` : ""
-          ]
-            .filter(Boolean)
-            .join(" | "),
-          meta: {
-            type: "user",
-            userId: String(row?.userId || "").trim(),
-            partnerId: String(row?.partnerId || "").trim(),
-            code: String(row?.code || "").trim(),
-            username: String(row?.username || "").trim(),
-            fullName: String(row?.fullName || "").trim(),
-            clusterUrl: String(row?.clusterUrl || "").trim(),
-            clusterLabel,
-            isActive: true,
-            isActiveText: "true"
-          }
-        });
-      });
+      const requestUrl = buildMembershipGetUsersWithoutPermissionsUrl(
+        buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
+        clusterLabel
+      );
 
       pushObusLiveJobEvent(job, {
         key: eventKey,
         label: eventLabel,
-        statusKind: "success",
-        ok: true,
-        message:
-          listedRows.length > 0
-            ? `${listedRows.length} kullanıcı listelendi.`
-            : "Kullanıcı bulunamadı.",
+        statusKind: "pending",
+        message: "Firma sorgulanıyor.",
         detailText: [
           `cluster=${clusterLabel}`,
-          "status=200",
-          `kullanıcı=${listedRows.length}`,
-          `aktif=${listedRows.length}`
-        ]
-          .filter(Boolean)
-          .join(" | "),
-        meta: {
-          type: "company",
-          code: String(company?.code || "").trim(),
-          partnerId: String(company?.id || "").trim(),
-          clusterLabel,
-          listedUserCount: listedRows.length,
-          totalUserCount: listedRows.length,
-          activeUserCount: listedRows.length
-        }
-      });
-
-      updateSummary();
-    });
-
-    updateSummary();
-    finishObusLiveJob(job);
-  } catch (err) {
-    const errorMessage = err?.message || "SQL kullanıcı listeleme tamamlanamadı.";
-    latestFailedRequestPreview = buildObusUserDeactivateSqlPreview({
-      usernameFilter: normalizedUsernameFilter,
-      error: errorMessage
-    });
-
-    normalizedCompanies.forEach((company) => {
-      const eventKey = buildObusUserDeactivateCompanyEventKey(company);
-      const eventLabel = buildObusUserDeactivateCompanyEventLabel(company);
-      const clusterLabel =
-        normalizeObusClusterLabel(company?.cluster || "") ||
-        normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
-        "cluster";
-
-      pushObusLiveJobEvent(job, {
-        key: eventKey,
-        label: eventLabel,
-        statusKind: "failure",
-        ok: false,
-        error: errorMessage,
-        detailText: [
-          `cluster=${clusterLabel}`,
-          `sql=${truncateObusDebugText(buildObusUserDeactivateSqlRequestUrl(), 120)}`
+          requestUrl ? `url=${truncateObusDebugText(String(requestUrl || "").trim(), 120)}` : ""
         ]
           .filter(Boolean)
           .join(" | "),
@@ -17342,18 +16570,142 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         }
       });
 
-      pushObusUserCreateSample(failureSamples, {
-        company: String(company?.code || "Firma").trim(),
-        error: errorMessage
+      const result = await fetchObusUserDeactivateCompanyResult({
+        company,
+        loginCredentials,
+        sessionCache
       });
-    });
+      if (!firstRequestPreview && result?.firstRequestPreview) {
+        firstRequestPreview = result.firstRequestPreview;
+      }
+      if (result?.failedRequestPreview) {
+        latestFailedRequestPreview = {
+          ...result.failedRequestPreview,
+          companyCode: String(result?.code || company?.code || "").trim(),
+          partnerId: String(result?.partnerId || company?.id || "").trim(),
+          clusterLabel,
+          companyLabel: buildObusUserDeactivateCompanyEventLabel({
+            code: String(result?.code || company?.code || "").trim(),
+            id: String(result?.partnerId || company?.id || "").trim(),
+            cluster: clusterLabel
+          })
+        };
+      }
 
-    updateSummary();
-    finishObusLiveJob(job, `SQL kullanıcı listeleme tamamlanamadı: ${errorMessage}`);
-  }
+      if (result.ok) {
+        totalUserCount += Number(result.totalUserCount || 0);
+        activeUserCount += Number(result.activeUserCount || 0);
+
+        const listedRows = Array.isArray(result.listedRows) ? result.listedRows : [];
+        listedRows.forEach((row) => {
+          listedUserCount += 1;
+          pushObusLiveJobEvent(job, {
+            key: buildObusUserDeactivateMatchEventKey(row),
+            label: `${String(row?.code || "").trim() || "Firma"} / ${String(row?.username || "").trim() || "-"}`,
+            statusKind: "info",
+            message: "Kullanıcı listelendi.",
+            detailText: [
+              `cluster=${clusterLabel}`,
+              String(row?.partnerId || "").trim() ? `partner-id=${String(row.partnerId).trim()}` : "",
+              String(row?.isActiveText || "").trim() ? `is-active=${String(row.isActiveText).trim()}` : ""
+            ]
+              .filter(Boolean)
+              .join(" | "),
+            meta: {
+              type: "user",
+              userId: String(row?.userId || "").trim(),
+              partnerId: String(row?.partnerId || "").trim(),
+              code: String(row?.code || "").trim(),
+              username: String(row?.username || "").trim(),
+              fullName: String(row?.fullName || "").trim(),
+              clusterUrl: String(row?.clusterUrl || result?.requestUrl || "").trim(),
+              clusterLabel,
+              isActive: row?.isActive === true,
+              isActiveText: String(row?.isActiveText || "").trim() || "true"
+            }
+          });
+        });
+
+        pushObusLiveJobEvent(job, {
+          key: eventKey,
+          label: eventLabel,
+          statusKind: "success",
+          ok: true,
+          message:
+            listedRows.length > 0
+              ? `${listedRows.length} kullanıcı listelendi.`
+              : "Kullanıcı bulunamadı.",
+          detailText: [
+            `cluster=${clusterLabel}`,
+            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+            `kullanıcı=${Number(result.totalUserCount || 0)}`,
+            `aktif=${Number(result.activeUserCount || 0)}`
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          meta: {
+            type: "company",
+            code: String(result?.code || "").trim(),
+            partnerId: String(result?.partnerId || "").trim(),
+            clusterLabel,
+            listedUserCount: listedRows.length,
+            totalUserCount: Number(result.totalUserCount || 0),
+            activeUserCount: Number(result.activeUserCount || 0)
+          }
+        });
+      } else {
+        pushObusLiveJobEvent(job, {
+          key: eventKey,
+          label: eventLabel,
+          statusKind: "failure",
+          ok: false,
+          error: String(result.error || "Firma sorgusu başarısız.").trim(),
+          errorDetail: String(result.errorDetail || "").trim(),
+          detailText: [
+            `cluster=${clusterLabel}`,
+            Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+            String(result?.requestUrl || "").trim()
+              ? `url=${truncateObusDebugText(String(result.requestUrl || "").trim(), 120)}`
+              : ""
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          meta: {
+            type: "company",
+            code: String(result?.code || "").trim(),
+            partnerId: String(result?.partnerId || "").trim(),
+            clusterLabel
+          }
+        });
+
+        pushObusUserCreateSample(failureSamples, {
+          company: String(result?.code || "Firma").trim(),
+          error: String(result?.error || "Firma sorgusu başarısız.").trim()
+        });
+      }
+
+      setObusLiveJobSummary(job, {
+        scannedCompanyCount: normalizedCompanies.length,
+        successCompanyCount: Number(job.successCount || 0),
+        failureCompanyCount: Number(job.failureCount || 0),
+        listedUserCount,
+        matchedUserCount: listedUserCount,
+        totalUserCount,
+        activeUserCount,
+        failureSamples,
+        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
+        debugPreview: {
+          firstRequest: firstRequestPreview,
+          failedRequest: latestFailedRequestPreview
+        }
+      });
+    }
+  );
+
+  finishObusLiveJob(job);
 }
 
-async function startObusUserDeactivateSearchJob({ companies = ["all"], usernameFilter = "", ownerUserId = 0 }) {
+async function startObusUserDeactivateSearchJob({ companies = ["all"], ownerUserId = 0 }) {
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
   if (partnerError && (!Array.isArray(partnerItems) || partnerItems.length === 0)) {
     return {
@@ -17389,6 +16741,15 @@ async function startObusUserDeactivateSearchJob({ companies = ["all"], usernameF
     };
   }
 
+  const loginCredentials = getObusUserCreateLoginCredentials();
+  if (!loginCredentials.username || !loginCredentials.password) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: buildObusServiceLoginConfigurationMessage(loginCredentials)
+    };
+  }
+
   const job = createObusLiveJob({
     type: "obus-user-deactivate",
     ownerUserId: Number(ownerUserId || 0),
@@ -17397,8 +16758,7 @@ async function startObusUserDeactivateSearchJob({ companies = ["all"], usernameF
 
   setImmediate(() => {
     runObusUserDeactivateSearchJob(job, {
-      partnerItems: selectedPartnerItems,
-      usernameFilter: String(usernameFilter || "").trim()
+      partnerItems: selectedPartnerItems
     }).catch((err) => {
       finishObusLiveJob(job, `Kullanıcı listeleme tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
     });
@@ -21385,47 +20745,11 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
   return res.json(readObusLiveJobSnapshot(job, cursor));
 });
 
-app.post(
-  "/api/obus-user-deactivate/proxy/start",
-  requireAuth,
-  requireMenuAccess("obus-user-deactivate"),
-  async (req, res) => {
-    if (!isLocalObusUserDeactivateProxyStartRequest(req)) {
-      return res.status(403).json({
-        ok: false,
-        autoStartAllowed: false,
-        error:
-          "Proxy otomatik başlatma sadece local çalışan web sunucusunda yapılabilir. Render ekranından local Mac'te process başlatılamaz."
-      });
-    }
-
-    try {
-      const result = await ensureObusUserDeactivateProxyStarted();
-      return res.status(result.ok ? 200 : 502).json({
-        ok: result.ok,
-        autoStartAllowed: true,
-        alreadyRunning: Boolean(result.alreadyRunning),
-        message: result.message,
-        healthUrl: buildObusUserDeactivateProxyHealthUrl(),
-        output: result.ok ? "" : String(result.output || "").trim()
-      });
-    } catch (err) {
-      return res.status(500).json({
-        ok: false,
-        autoStartAllowed: true,
-        error: err?.message || "Yerel Obus proxy otomatik başlatılamadı."
-      });
-    }
-  }
-);
-
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {
     const companies = Array.isArray(req.body?.companies) ? req.body.companies : [];
-    const usernameFilter = String(req.body?.usernameFilter || "").trim();
     const startResult = await startObusUserDeactivateSearchJob({
       companies,
-      usernameFilter,
       ownerUserId: req.session?.user?.id || 0
     });
 
@@ -21450,31 +20774,6 @@ app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-u
     });
   }
 });
-
-app.post(
-  "/api/obus-user-deactivate/local-sql-users",
-  requireAuth,
-  requireMenuAccess("obus-user-deactivate"),
-  async (req, res) => {
-    const usernameFilter = String(req.body?.usernameFilter || "").trim();
-    try {
-      const result = await fetchObusUserDeactivateLocalSqlProxyRows({ usernameFilter });
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      return res.json({
-        ok: true,
-        count: rows.length,
-        sourceUrl: result.sourceUrl || buildObusUserDeactivateSqlRequestUrl(),
-        rows
-      });
-    } catch (err) {
-      return res.status(502).json({
-        ok: false,
-        error: err?.message || "Yerel SQL proxy ile kullanıcı listeleme yapılamadı.",
-        sourceUrl: buildObusUserDeactivateLocalSqlProxyUrls()[0] || buildObusUserDeactivateSqlRequestUrl()
-      });
-    }
-  }
-);
 
 app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
   try {

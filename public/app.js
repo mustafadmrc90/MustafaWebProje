@@ -1026,7 +1026,6 @@
     const filterButton = root.querySelector("[data-obus-user-deactivate-filter-submit='1']");
     const deactivateButton = root.querySelector("[data-obus-user-deactivate-deactivate='1']");
     const submitButton = root.querySelector("[data-obus-user-deactivate-submit='1']");
-    const proxyStartButton = root.querySelector("[data-obus-user-deactivate-proxy-start='1']");
     const statusEl = root.querySelector("[data-obus-user-deactivate-status='1']");
     const summaryEl = root.querySelector("[data-obus-user-deactivate-summary='1']");
     const resultSelectAllCheckbox = root.querySelector("[data-obus-user-deactivate-result-select-all='1']");
@@ -1074,11 +1073,6 @@
       "Pasife Al";
     const deactivateLoadingLabel =
       String(deactivateButton?.getAttribute("data-loading-label") || "").trim() || "Pasife Alınıyor...";
-    const proxyStartDefaultLabel =
-      String(proxyStartButton?.getAttribute("data-default-label") || proxyStartButton?.textContent || "").trim() ||
-      "Proxy'i Başlat";
-    const proxyStartLoadingLabel =
-      String(proxyStartButton?.getAttribute("data-loading-label") || "").trim() || "Proxy Başlatılıyor...";
 
     const readSelectedValues = () =>
       companyCheckboxes
@@ -1135,302 +1129,6 @@
       } catch (err) {
         return text;
       }
-    };
-
-    const buildLocalSqlProxyUrls = () => {
-      const urls = [];
-      try {
-        const host = String(window.location.hostname || "").trim();
-        const normalizedHost = host.replace(/^\[|\]$/g, "").toLowerCase();
-        if (!host || normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1") {
-          urls.push("/api/obus-user-deactivate/local-sql-users");
-        }
-      } catch (err) {
-        // Keep the loopback fallbacks.
-      }
-      urls.push("http://127.0.0.1:3015/obus-user-deactivate/users");
-      urls.push("http://localhost:3015/obus-user-deactivate/users");
-      return Array.from(new Set(urls));
-    };
-
-    const buildLocalObusDeactivateProxyUrls = () =>
-      Array.from(
-        new Set([
-          "http://127.0.0.1:3015/obus-user-deactivate/deactivate",
-          "http://localhost:3015/obus-user-deactivate/deactivate"
-        ])
-      );
-
-    const buildLocalObusProxyHealthUrls = () =>
-      Array.from(new Set(["http://127.0.0.1:3015/health", "http://localhost:3015/health"]));
-
-    const isLoopbackBrowserHost = () => {
-      const hostname = String(window.location.hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
-      return !hostname || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-    };
-
-    const normalizeLocalSqlProxyCode = (value) => String(value || "").trim().toLocaleLowerCase("tr");
-
-    const createLocalSqlProxyError = (message, { retryable = true, status = 0, errorType = "" } = {}) => {
-      const err = new Error(String(message || "").trim() || "Yerel SQL proxy hatası.");
-      err.retryable = retryable;
-      err.status = status;
-      err.errorType = errorType;
-      return err;
-    };
-
-    const fetchLocalSqlProxyJson = async (url, payload, timeoutMs = 45000) => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json"
-          },
-          body: JSON.stringify(payload || {}),
-          signal: controller.signal
-        });
-        const data = await parseJsonResponse(response);
-        if (!response.ok || !data?.ok) {
-          const errorType = String(data?.errorType || "").trim();
-          throw createLocalSqlProxyError(getApiErrorMessage(response, data, "Yerel SQL proxy listeleme yapamadı"), {
-            retryable: data?.retryable !== false && errorType !== "sql-auth" && errorType !== "sql-config",
-            status: response.status,
-            errorType
-          });
-        }
-        return data;
-      } catch (err) {
-        if (err?.name === "AbortError") {
-          throw createLocalSqlProxyError(`Yerel SQL proxy ${Math.round(timeoutMs / 1000)} saniye içinde yanıt vermedi.`);
-        }
-        throw err;
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    };
-
-    const fetchLocalObusProxyHealth = async () => {
-      const healthUrls = buildLocalObusProxyHealthUrls();
-      let lastError = null;
-
-      for (const url of healthUrls) {
-        try {
-          const response = await fetch(url, {
-            headers: { Accept: "application/json" },
-            cache: "no-store"
-          });
-          const data = await parseJsonResponse(response);
-          if (response.ok && data?.ok) {
-            return { ok: true, url, data };
-          }
-          lastError = new Error(getApiErrorMessage(response, data, "Yerel Obus proxy health başarısız"));
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
-      return {
-        ok: false,
-        error: lastError?.message || "Yerel Obus proxy health yanıtı alınamadı.",
-        urls: healthUrls
-      };
-    };
-
-    const requestServerObusProxyStart = async () => {
-      const response = await fetch("/api/obus-user-deactivate/proxy/start", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        credentials: "same-origin"
-      });
-      const data = await parseJsonResponse(response);
-      if (!response.ok || !data?.ok) {
-        throw new Error(getApiErrorMessage(response, data, "Yerel Obus proxy otomatik başlatılamadı"));
-      }
-      return data;
-    };
-
-    const ensureLocalObusProxyOnPageOpen = async () => {
-      setStatus("Yerel Obus proxy durumu kontrol ediliyor...", "muted");
-      const health = await fetchLocalObusProxyHealth();
-      if (health.ok) {
-        setStatus(`Yerel Obus proxy çalışıyor: ${health.url}`, "success");
-        return;
-      }
-
-      if (!isLoopbackBrowserHost()) {
-        setStatus(
-          `Yerel Obus proxy otomatik başlatılamaz. Terminalde npm run obus-user-deactivate-sql-proxy çalıştırın. Denenen: ${health.urls.join(", ")}`,
-          "error"
-        );
-        return;
-      }
-
-      try {
-        setStatus("Yerel Obus proxy otomatik başlatılıyor...", "muted");
-        const startResult = await requestServerObusProxyStart();
-        setStatus(String(startResult.message || "Yerel Obus proxy çalışıyor.").trim(), "success");
-      } catch (err) {
-        setStatus(err?.message || "Yerel Obus proxy otomatik başlatılamadı.", "error");
-      }
-    };
-
-    const startLocalObusProxyFromButton = async () => {
-      if (proxyStartInProgress) return;
-      setProxyStartBusy(true);
-      setStatus("Yerel Obus proxy kontrol ediliyor...", "muted");
-      try {
-        const health = await fetchLocalObusProxyHealth();
-        if (health.ok) {
-          setStatus(`Yerel Obus proxy çalışıyor: ${health.url}`, "success");
-          return;
-        }
-
-        if (!isLoopbackBrowserHost()) {
-          setStatus(
-            `Proxy bu ekrandan başlatılamaz. Local app'i http://localhost:3000 üzerinden açın veya terminalde npm run obus-user-deactivate-sql-proxy çalıştırın. Denenen: ${health.urls.join(", ")}`,
-            "error"
-          );
-          return;
-        }
-
-        setStatus("Yerel Obus proxy başlatılıyor...", "muted");
-        const startResult = await requestServerObusProxyStart();
-        setStatus(String(startResult.message || "Yerel Obus proxy çalışıyor.").trim(), "success");
-      } catch (err) {
-        setStatus(err?.message || "Yerel Obus proxy başlatılamadı.", "error");
-      } finally {
-        setProxyStartBusy(false);
-      }
-    };
-
-    const readSelectedCompanyMetas = () =>
-      companyCheckboxes
-        .filter((item) => item.checked)
-        .map((item) => ({
-          value: String(item.value || "").trim(),
-          code: String(item.dataset.companyCode || "").trim(),
-          id: String(item.dataset.companyId || "").trim(),
-          cluster: String(item.dataset.companyCluster || "").trim(),
-          branchId: String(item.dataset.companyBranchId || "").trim(),
-          url: String(item.dataset.companyUrl || "").trim()
-        }))
-        .filter((item) => item.value && item.code && item.id);
-
-    const buildLocalSqlProxyRows = (rows, selectedCompanyMetas) => {
-      const companiesByCode = new Map();
-      selectedCompanyMetas.forEach((company) => {
-        const codeKey = normalizeLocalSqlProxyCode(company.code);
-        if (!codeKey) return;
-        const companies = companiesByCode.get(codeKey) || [];
-        companies.push(company);
-        companiesByCode.set(codeKey, companies);
-      });
-
-      const findCompanyForSqlRow = ({ code = "", partnerId = "" } = {}) => {
-        const candidates = companiesByCode.get(normalizeLocalSqlProxyCode(code)) || [];
-        const normalizedPartnerId = String(partnerId || "").trim();
-        if (normalizedPartnerId) {
-          return candidates.find((company) => String(company?.id || "").trim() === normalizedPartnerId) || null;
-        }
-        return candidates.length > 0 ? candidates[0] : null;
-      };
-
-      const dedupedRows = new Map();
-      (Array.isArray(rows) ? rows : []).forEach((rawRow) => {
-        const userId = String(rawRow?.ID ?? rawRow?.Id ?? rawRow?.id ?? rawRow?.userId ?? "").trim();
-        const partnerId = String(
-          rawRow?.PartnerId ??
-            rawRow?.PartnerID ??
-            rawRow?.partnerId ??
-            rawRow?.partnerID ??
-            rawRow?.partner_id ??
-            rawRow?.["partner-id"] ??
-            ""
-        ).trim();
-        const code = String(rawRow?.Code ?? rawRow?.code ?? "").trim();
-        const username = String(rawRow?.Username ?? rawRow?.username ?? "").trim();
-        const company = findCompanyForSqlRow({ code, partnerId });
-        if (!userId || !code || !username || !company) return;
-
-        const clusterLabel = String(company.cluster || "").trim();
-        const key = ["local-sql", code, company.id, clusterLabel, userId, username].join("|||");
-        if (dedupedRows.has(key)) return;
-        dedupedRows.set(key, {
-          key,
-          userId,
-          partnerId: company.id,
-          username,
-          fullName: "",
-          isActive: true,
-          isActiveText: "true",
-          code,
-          branchId: company.branchId,
-          clusterUrl: company.url,
-          clusterLabel
-        });
-      });
-
-      return Array.from(dedupedRows.values());
-    };
-
-    const fetchLocalSqlProxyRows = async ({ usernameFilter = "", selectedCompanyMetas = [], onAttempt = null } = {}) => {
-      let lastError = null;
-      const localSqlProxyUrls = buildLocalSqlProxyUrls();
-      for (const url of localSqlProxyUrls) {
-        if (typeof onAttempt === "function") {
-          onAttempt(url);
-        }
-        try {
-          const data = await fetchLocalSqlProxyJson(url, { usernameFilter });
-          const sourceUrl = String(data?.sourceUrl || url || "").trim();
-          return {
-            ok: true,
-            url: sourceUrl || url,
-            rows: buildLocalSqlProxyRows(data.rows, selectedCompanyMetas),
-            rawCount: Number(data.count || (Array.isArray(data.rows) ? data.rows.length : 0)) || 0
-          };
-        } catch (err) {
-          lastError = err;
-          if (err?.retryable === false) {
-            return {
-              ok: false,
-              retryable: false,
-              error: err?.message || "Yerel SQL proxy SQL bağlantı hatası verdi."
-            };
-          }
-        }
-      }
-
-      return {
-        ok: false,
-        retryable: true,
-        error: `${lastError?.message || "Yerel SQL proxy bulunamadı."} Denenen adresler: ${localSqlProxyUrls.join(", ")}`
-      };
-    };
-
-    const fetchLocalObusDeactivateResult = async ({ users = [], usernameFilter = "", onAttempt = null } = {}) => {
-      const localObusProxyUrls = buildLocalObusDeactivateProxyUrls();
-      let lastError = null;
-
-      for (const url of localObusProxyUrls) {
-        if (typeof onAttempt === "function") {
-          onAttempt(url);
-        }
-        try {
-          return await fetchLocalSqlProxyJson(url, { users, usernameFilter }, 90000);
-        } catch (err) {
-          lastError = err;
-          if (err?.retryable === false) throw err;
-        }
-      }
-
-      throw createLocalSqlProxyError(
-        `${lastError?.message || "Yerel Obus proxy bulunamadı."} Denenen adresler: ${localObusProxyUrls.join(", ")}`,
-        { retryable: true }
-      );
     };
 
     const updatePageUrl = () => {
@@ -1545,9 +1243,7 @@
     let activeJobPollTimerId = 0;
     let activeJobTimerId = 0;
     let activeJobFailureCount = 0;
-    let localSqlListingActive = false;
     let deleteInProgress = false;
-    let proxyStartInProgress = false;
     let appliedUsernameFilter = "";
     let companyTypeAheadText = "";
     let companyTypeAheadTimerId = null;
@@ -1596,13 +1292,6 @@
       }
     };
 
-    const setProxyStartBusy = (busy) => {
-      proxyStartInProgress = Boolean(busy);
-      if (!proxyStartButton) return;
-      proxyStartButton.disabled = proxyStartInProgress;
-      proxyStartButton.textContent = proxyStartInProgress ? proxyStartLoadingLabel : proxyStartDefaultLabel;
-    };
-
     const compareListedRows = (a, b) => {
       const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
       if (byCode !== 0) return byCode;
@@ -1613,8 +1302,8 @@
 
     const getTotalListedRowCount = () => Math.max(Number(snapshot.listedUserCount || 0), listedRowsByKey.size);
 
-    const getListedRowsMatchingUsernameFilter = (usernameFilter = "") => {
-      const normalizedFilter = normalizeDeactivateUsernameFilter(usernameFilter);
+    const getVisibleListedRows = () => {
+      const normalizedFilter = normalizeDeactivateUsernameFilter(appliedUsernameFilter);
       const rows = Array.from(listedRowsByKey.values()).sort(compareListedRows);
       if (!normalizedFilter) return rows;
       return rows.filter((row) =>
@@ -1622,14 +1311,14 @@
       );
     };
 
-    const getVisibleListedRows = () => getListedRowsMatchingUsernameFilter(appliedUsernameFilter);
-
     const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
 
-    const getSelectableRowsForUsernameFilter = (usernameFilter = "") =>
-      getListedRowsMatchingUsernameFilter(usernameFilter).filter((row) => isListedRowActive(row));
+    const getSelectableVisibleRows = () => getVisibleListedRows().filter((row) => isListedRowActive(row));
 
-    const getSelectableVisibleRows = () => getSelectableRowsForUsernameFilter(appliedUsernameFilter);
+    const isUsernameFilterAppliedForDeactivate = () => {
+      const currentInputValue = String(usernameFilterInput?.value || "").trim();
+      return Boolean(appliedUsernameFilter && currentInputValue === appliedUsernameFilter);
+    };
 
     const syncSelectionControls = () => {
       if (!resultSelectAllCheckbox) return;
@@ -1644,9 +1333,9 @@
     const syncDeactivateButtonState = () => {
       if (!deactivateButton) return;
       const isListingBusy = Boolean(activeJobId && snapshot.done !== true);
-      const currentInputValue = String(usernameFilterInput?.value || "").trim();
-      const hasSelectableRows = getSelectableRowsForUsernameFilter(currentInputValue).length > 0;
-      deactivateButton.disabled = deleteInProgress || isListingBusy || !currentInputValue || !hasSelectableRows;
+      const hasAppliedFilter = isUsernameFilterAppliedForDeactivate();
+      const hasSelectableRows = getSelectableVisibleRows().length > 0;
+      deactivateButton.disabled = deleteInProgress || isListingBusy || !hasAppliedFilter || !hasSelectableRows;
       deactivateButton.textContent = deleteInProgress ? deactivateLoadingLabel : deactivateDefaultLabel;
     };
 
@@ -1686,7 +1375,7 @@
         : done
           ? `HTTP ${snapshot.failureCount > 0 ? 207 : 200}`
           : "HTTP -";
-      const hasDuration = (activeJobId || localSqlListingActive) && activeJobCreatedAt > 0;
+      const hasDuration = activeJobId && activeJobCreatedAt > 0;
       const durationEndTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
       const durationText = hasDuration ? `Süre ${formatElapsedTime(durationEndTime - activeJobCreatedAt)}` : "Süre -";
       if (httpPill) httpPill.textContent = httpText;
@@ -1712,7 +1401,7 @@
         summaryEl.appendChild(line);
       };
 
-      if (!activeJobId && !localSqlListingActive) {
+      if (!activeJobId) {
         appendLine("Sonuç özeti burada canlı olarak güncellenecek.");
         if (snapshot.error) {
           appendLine(snapshot.error);
@@ -1805,7 +1494,7 @@
         return;
       }
 
-      if (activeJobId || localSqlListingActive) {
+      if (activeJobId) {
         emptyEl.textContent = snapshot.done
           ? "Listelenecek kullanıcı bulunamadı."
           : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
@@ -1853,7 +1542,7 @@
     };
 
     const syncRunningStatus = () => {
-      if ((!activeJobId && !localSqlListingActive) || !activeJobCreatedAt) {
+      if (!activeJobId || !activeJobCreatedAt) {
         if (snapshot.error) {
           setStatus(snapshot.error, "error");
         } else {
@@ -1911,7 +1600,6 @@
 
     const resetJobState = () => {
       stopTimers();
-      localSqlListingActive = false;
       activeJobCursor = 0;
       activeJobCreatedAt = 0;
       activeJobFinishedAt = 0;
@@ -1992,57 +1680,10 @@
           isActive: meta.isActive === true,
           isActiveText: String(meta.isActiveText || "").trim(),
           code: String(meta.code || "").trim(),
-          branchId: String(meta.branchId || "").trim(),
           clusterUrl: String(meta.clusterUrl || "").trim(),
           clusterLabel: String(meta.clusterLabel || "").trim()
         });
       });
-    };
-
-    const applyLocalSqlProxyResult = ({ rows = [], selectedCompanyMetas = [], rawCount = 0, sourceUrl = "" } = {}) => {
-      stopTimers();
-      activeJobId = "";
-      localSqlListingActive = true;
-      activeJobCreatedAt = Date.now();
-      activeJobFinishedAt = Date.now();
-      activeJobCursor = 0;
-      activeJobFailureCount = 0;
-      selectedUserKeys.clear();
-      listedRowsByKey.clear();
-
-      const selectedCompanyCount = Array.isArray(selectedCompanyMetas) ? selectedCompanyMetas.length : 0;
-      (Array.isArray(rows) ? rows : []).forEach((row) => {
-        const key = String(row?.key || "").trim();
-        if (!key || listedRowsByKey.has(key)) return;
-        listedRowsByKey.set(key, {
-          key,
-          userId: String(row?.userId || "").trim(),
-          partnerId: String(row?.partnerId || "").trim(),
-          username: String(row?.username || "").trim(),
-          fullName: String(row?.fullName || "").trim(),
-          isActive: row?.isActive !== false,
-          isActiveText: String(row?.isActiveText || "true").trim() || "true",
-          code: String(row?.code || "").trim(),
-          branchId: String(row?.branchId || "").trim(),
-          clusterUrl: String(row?.clusterUrl || sourceUrl || "").trim(),
-          clusterLabel: String(row?.clusterLabel || "").trim()
-        });
-      });
-
-      snapshot.done = true;
-      snapshot.error = "";
-      snapshot.totalCount = selectedCompanyCount;
-      snapshot.processedCount = selectedCompanyCount;
-      snapshot.successCount = selectedCompanyCount;
-      snapshot.failureCount = 0;
-      snapshot.scannedCompanyCount = selectedCompanyCount;
-      snapshot.successCompanyCount = selectedCompanyCount;
-      snapshot.failureCompanyCount = 0;
-      snapshot.totalUserCount = Math.max(Number(rawCount || 0), listedRowsByKey.size);
-      snapshot.activeUserCount = listedRowsByKey.size;
-      snapshot.listedUserCount = listedRowsByKey.size;
-      snapshot.failureSamples = [];
-      snapshot.failedRequestPreview = null;
     };
 
     const finalizeRender = ({ preserveStatus = false } = {}) => {
@@ -2187,52 +1828,50 @@
       deactivateButton.addEventListener("click", async () => {
         if (deleteInProgress) return;
 
-        const currentUsernameFilter = String(usernameFilterInput?.value || "").trim();
-        if (!currentUsernameFilter) {
-          setStatus("Pasife alma için kullanıcı adı girin.", "error");
+        if (!isUsernameFilterAppliedForDeactivate()) {
+          setStatus("Pasife alma için önce kullanıcı adı filtresi uygulayın.", "error");
           return;
-        }
-        if (currentUsernameFilter !== appliedUsernameFilter) {
-          appliedUsernameFilter = currentUsernameFilter;
-          selectedUserKeys.clear();
-          finalizeRender({ preserveStatus: true });
         }
 
         const selectedRows = readSelectedUserRows();
-        const targetRows = selectedRows.length > 0 ? selectedRows : getSelectableVisibleRows();
-        if (targetRows.length === 0) {
-          setStatus("Pasife alınacak kullanıcı bulunamadı.", "error");
+        if (selectedRows.length === 0) {
+          setStatus("Pasife alınacak kullanıcı seçmelisiniz.", "error");
           return;
         }
 
         let responseData = null;
         deleteInProgress = true;
         finalizeRender({ preserveStatus: true });
-        setStatus(`${targetRows.length} kullanıcı pasife alınıyor...`, "muted");
+        setStatus(`${selectedRows.length} kullanıcı pasife alınıyor...`, "muted");
 
         try {
-          responseData = await fetchLocalObusDeactivateResult({
-            usernameFilter: appliedUsernameFilter,
-            users: targetRows.map((row) => ({
-              key: String(row?.key || "").trim(),
-              userId: String(row?.userId || "").trim(),
-              username: String(row?.username || "").trim(),
-              code: String(row?.code || "").trim(),
-              partnerId: String(row?.partnerId || "").trim(),
-              branchId: String(row?.branchId || "").trim(),
-              clusterLabel: String(row?.clusterLabel || "").trim(),
-              clusterUrl: String(row?.clusterUrl || "").trim()
-            })),
-            onAttempt: (url) => {
-              setStatus(`Yerel Obus proxy pasife alma deneniyor: ${url}`, "muted");
-            }
+          const response = await fetch("/api/obus-user-deactivate/deactivate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json"
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              usernameFilter: appliedUsernameFilter,
+              users: selectedRows.map((row) => ({
+                key: String(row?.key || "").trim(),
+                userId: String(row?.userId || "").trim(),
+                username: String(row?.username || "").trim(),
+                code: String(row?.code || "").trim(),
+                partnerId: String(row?.partnerId || "").trim(),
+                clusterLabel: String(row?.clusterLabel || "").trim(),
+                clusterUrl: String(row?.clusterUrl || "").trim()
+              }))
+            })
           });
+          responseData = await parseJsonResponse(response);
 
-          if (!responseData?.ok) {
+          if (!response.ok || !responseData?.ok) {
             if (responseData?.failedRequestPreview && typeof responseData.failedRequestPreview === "object") {
               snapshot.failedRequestPreview = responseData.failedRequestPreview;
             }
-            throw new Error(String(responseData?.error || "Kullanıcılar pasife alınamadı.").trim());
+            throw new Error(getApiErrorMessage(response, responseData, "Kullanıcılar pasife alınamadı"));
           }
 
           applyDeactivateResults(responseData);
@@ -2254,12 +1893,6 @@
       });
     }
 
-    if (proxyStartButton) {
-      proxyStartButton.addEventListener("click", () => {
-        void startLocalObusProxyFromButton();
-      });
-    }
-
     submitButton.addEventListener("click", async () => {
       if (deleteInProgress) return;
       if (activeJobId && snapshot.done !== true) return;
@@ -2270,60 +1903,47 @@
         return;
       }
 
-      const usernameFilterForListing = String(usernameFilterInput?.value || "").trim();
       resetJobState();
       activeJobId = "";
-      appliedUsernameFilter = usernameFilterForListing;
       updatePageUrl();
       finalizeRender();
       setBusy(true);
-      setStatus("Yerel VPN SQL proxy ile listeleme başlatılıyor...");
+      setStatus("Listeleme başlatılıyor...");
       closeDropdown();
 
       try {
-        const selectedCompanyMetas = readSelectedCompanyMetas();
-        const localResult = await fetchLocalSqlProxyRows({
-          usernameFilter: usernameFilterForListing,
-          selectedCompanyMetas,
-          onAttempt: (url) => {
-            setStatus(`Yerel SQL proxy deneniyor: ${url}`, "muted");
-          }
+        const response = await fetch("/api/obus-user-deactivate/run", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({ companies })
         });
-
-        if (!localResult.ok) {
-          const proxyReachabilityHint =
-            localResult.retryable === false ? "" : " VPN açık local PC'de SQL proxy çalışıyor olmalı.";
-          throw new Error(
-            `${String(localResult.error || "Yerel SQL proxy erişilemedi.").trim()}${proxyReachabilityHint}`
-          );
+        const data = await parseJsonResponse(response);
+        if (!response.ok || !data?.ok) {
+          throw new Error(getApiErrorMessage(response, data, "Kullanıcı listeleme başlatılamadı"));
         }
 
-        applyLocalSqlProxyResult({
-          rows: localResult.rows,
-          selectedCompanyMetas,
-          rawCount: localResult.rawCount,
-          sourceUrl: localResult.url
-        });
+        activeJobId = String(data.jobId || "").trim();
+        activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
+        snapshot.totalCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : companies.length;
+        snapshot.scannedCompanyCount = snapshot.totalCount;
         updatePageUrl();
-        setBusy(false);
         finalizeRender();
-        setStatus(
-          `Yerel VPN SQL proxy ile listeleme tamamlandı. Listelenen kullanıcı: ${listedRowsByKey.size}`,
-          "success"
-        );
-        return;
-      } catch (localErr) {
+        startStatusTimer();
+        void pollActiveJob();
+      } catch (err) {
         setBusy(false);
-        snapshot.error = localErr?.message || "Yerel SQL proxy ile kullanıcı listeleme başlatılamadı.";
+        snapshot.error = err?.message || "Kullanıcı listeleme başlatılamadı.";
         finalizeRender();
-        return;
       }
     });
 
     syncSelectedCompanies();
     setBusy(activeJobId && snapshot.done !== true);
     finalizeRender();
-    void ensureLocalObusProxyOnPageOpen();
 
     if (activeJobId) {
       updatePageUrl();

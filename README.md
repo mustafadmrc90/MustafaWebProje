@@ -44,22 +44,24 @@ cp .env.example .env
 - `ALL_COMPANIES_FETCH_TIMEOUT_MS` (varsayılan: `180000`)
 - `INVENTORY_BRANCHES_CLUSTER_CONCURRENCY` (varsayılan: `4`)
 
-### Obus Kullanıcılarını Pasife al / Yerel VPN Proxy
+### Obus Kullanıcılarını Pasife al
 
-`/general/obus-user-deactivate` ekranında kullanıcı listeleme ve pasife alma için VPN erişimi olan bilgisayarda yerel proxy çalışmalıdır. Render sunucusu Obus'a doğrudan istek atmaz; tarayıcı local proxy'ye gider, local proxy VPN içinden SQL ve Obus servislerine bağlanır:
+`/general/obus-user-deactivate` ekranında seçilen firmalar için kullanıcılar backend üzerinden OBUS servislerinden listelenir. Listeleme `Membership/GetUsersWithoutPermissions`, pasife alma `Membership/DeleteUser` çağrısını kullanır. Firma listesi Tüm Firmalar ekranındaki kayıtlardan alınır.
+
+Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_*`, `OBUS_USER_DELETE_*`, `OBUS_SERVICE_LOGIN_*` ve `PARTNERS_SESSION_API_URL` değişkenleridir. OBUS login bilgileri normal kullanımda macOS Keychain'den okunur.
+
+Yerel SQL/proxy scripti ana ekran tarafından kullanılmaz; gerektiğinde manuel kontrol aracı olarak çalıştırılabilir:
 
 ```bash
 npm run obus-user-deactivate-sql-proxy
 ```
 
-Ekran local web sunucusundan (`localhost` / `127.0.0.1`) açılırsa proxy otomatik başlatılmaya çalışılır ve durum bilgisi ekranda yazılır. Aynı ekrandaki `Proxy'i Başlat` butonu ile manuel başlatma tekrar denenebilir. Render'dan açılan sayfa local Mac'te process başlatamaz; bu durumda proxy manuel başlatılmalıdır.
+macOS LaunchAgent olarak kurmak veya kaldırmak için:
 
-Varsayılan proxy adresleri:
-
-- Listeleme: `http://127.0.0.1:3015/obus-user-deactivate/users`
-- Pasife alma: `http://127.0.0.1:3015/obus-user-deactivate/deactivate`
-
-Gerekli ayarlar `.env.example` içindeki `OBUS_USER_DEACTIVATE_SQL_*`, `OBUS_USER_DEACTIVATE_SQL_PROXY_*`, `OBUS_SERVICE_LOGIN_*` ve `PARTNERS_SESSION_API_URL` değişkenleridir. SQL host/database/user bilgileri bu değişkenlerden veya MSSQL formatlı `DATABASE_URL` değerinden okunabilir. SQL password, Obus login bilgileri ve opsiyonel proxy token için macOS Keychain tercih edilir. Render'dan açılan sayfa kullanılırken proxy yine kullanıcının kendi bilgisayarında çalışır; tarayıcı `127.0.0.1:3015` adresine doğrudan gider. `OBUS_USER_DEACTIVATE_SQL_PROXY_ALLOWED_ORIGIN` virgülle ayrılmış origin listesi alır ve `https://*.onrender.com` gibi wildcard origin kabul eder. Tarayıcıdan yerel proxy'ye yapılan isteklerde Chrome Private Network Access preflight kontrolü için proxy `Access-Control-Allow-Private-Network: true` başlığı döndürür.
+```bash
+npm run install-obus-user-deactivate-proxy
+npm run uninstall-obus-user-deactivate-proxy
+```
 
 ### macOS Keychain Secret'lari
 
@@ -73,10 +75,10 @@ Normal kullanimda asagidaki hassas bilgiler `.env` yerine macOS Keychain'den oku
 - `MustafaWebProje/OBUS_JOB_FIXED_PASSWORD`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_USERNAME`
 - `MustafaWebProje/OBUS_USER_CREATE_LOGIN_PASSWORD`
-- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PASSWORD`
-- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN` (opsiyonel)
+- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PASSWORD` (opsiyonel yerel proxy)
+- `MustafaWebProje/OBUS_USER_DEACTIVATE_SQL_PROXY_TOKEN` (opsiyonel yerel proxy)
 
-Uygulama kaynak kodunda OBUS servis sifresi ve OBUS kullanıcı pasife alma SQL sifresi plaintext tutulmaz. Runtime'da gercek sifre macOS Keychain'den okunur; kod tarafinda yalnizca bcrypt hash ile dogrulama yapilir.
+Uygulama kaynak kodunda OBUS servis sifresi plaintext tutulmaz. Runtime'da gercek sifre macOS Keychain'den okunur; kod tarafinda yalnizca bcrypt hash ile dogrulama yapilir.
 
 Kurulum icin:
 
