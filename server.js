@@ -702,16 +702,6 @@ const SIDEBAR_MENU_REGISTRY = [
     iconKey: "jira-analysis"
   },
   {
-    key: "jira-board",
-    type: "item",
-    label: "Jira Board",
-    parentKey: "reports",
-    route: "/reports/jira-board",
-    routeKey: "jira-board",
-    sortOrder: 25,
-    iconKey: "jira-board"
-  },
-  {
     key: "obus",
     type: "section",
     label: "Otobüs",
@@ -750,16 +740,6 @@ const SIDEBAR_MENU_REGISTRY = [
     routeKey: "password",
     sortOrder: 32,
     iconKey: "password"
-  },
-  {
-    key: "menti",
-    type: "item",
-    label: "Menti",
-    parentKey: "management",
-    route: "/menti",
-    routeKey: "menti",
-    sortOrder: 33,
-    iconKey: "menti"
   }
 ];
 
