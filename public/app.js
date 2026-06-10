@@ -1247,6 +1247,9 @@
     let appliedUsernameFilter = "";
     let companyTypeAheadText = "";
     let companyTypeAheadTimerId = null;
+    let tableRenderDirty = true;
+    let visibleRowsDirty = true;
+    let visibleListedRowsCache = [];
     const listedRowsByKey = new Map();
     const selectedUserKeys = new Set();
     let snapshot = {
@@ -1292,6 +1295,11 @@
       }
     };
 
+    const markListedRowsDirty = () => {
+      tableRenderDirty = true;
+      visibleRowsDirty = true;
+    };
+
     const compareListedRows = (a, b) => {
       const byCode = String(a.code || "").localeCompare(String(b.code || ""), "tr");
       if (byCode !== 0) return byCode;
@@ -1303,12 +1311,15 @@
     const getTotalListedRowCount = () => Math.max(Number(snapshot.listedUserCount || 0), listedRowsByKey.size);
 
     const getVisibleListedRows = () => {
+      if (!visibleRowsDirty) return visibleListedRowsCache;
+
       const normalizedFilter = normalizeDeactivateUsernameFilter(appliedUsernameFilter);
       const rows = Array.from(listedRowsByKey.values()).sort(compareListedRows);
-      if (!normalizedFilter) return rows;
-      return rows.filter((row) =>
-        normalizeDeactivateUsernameFilter(row?.username || "").includes(normalizedFilter)
-      );
+      visibleListedRowsCache = normalizedFilter
+        ? rows.filter((row) => normalizeDeactivateUsernameFilter(row?.username || "").includes(normalizedFilter))
+        : rows;
+      visibleRowsDirty = false;
+      return visibleListedRowsCache;
     };
 
     const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
@@ -1361,6 +1372,7 @@
       const updatedCount = updatedRows.length;
       if (updatedCount > 0) {
         snapshot.activeUserCount = Math.max(0, Number(snapshot.activeUserCount || 0) - updatedCount);
+        markListedRowsDirty();
       }
       snapshot.failedRequestPreview =
         data?.failedRequestPreview && typeof data.failedRequestPreview === "object" ? data.failedRequestPreview : null;
@@ -1453,7 +1465,30 @@
     const renderTable = () => {
       const rows = getVisibleListedRows();
 
-      tableBody.innerHTML = "";
+      const syncEmptyState = () => {
+        emptyEl.hidden = rows.length > 0;
+        if (rows.length > 0) return;
+
+        if (appliedUsernameFilter) {
+          emptyEl.textContent = "Girilen username filtresine uygun kullanıcı bulunamadı.";
+          return;
+        }
+
+        if (activeJobId) {
+          emptyEl.textContent = snapshot.done
+            ? "Listelenecek kullanıcı bulunamadı."
+            : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
+        } else {
+          emptyEl.textContent = "Listelenen kullanıcılar burada gösterilecek.";
+        }
+      };
+
+      if (!tableRenderDirty) {
+        syncEmptyState();
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
       rows.forEach((row) => {
         const tr = document.createElement("tr");
         tr.className = isListedRowActive(row) ? "obus-user-deactivate-row" : "obus-user-deactivate-row is-inactive";
@@ -1473,6 +1508,7 @@
           } else {
             selectedUserKeys.delete(key);
           }
+          tableRenderDirty = true;
           finalizeRender({ preserveStatus: true });
         });
         checkboxCell.appendChild(checkbox);
@@ -1483,24 +1519,12 @@
           td.textContent = value;
           tr.appendChild(td);
         });
-        tableBody.appendChild(tr);
+        fragment.appendChild(tr);
       });
 
-      emptyEl.hidden = rows.length > 0;
-      if (rows.length > 0) return;
-
-      if (appliedUsernameFilter) {
-        emptyEl.textContent = "Girilen username filtresine uygun kullanıcı bulunamadı.";
-        return;
-      }
-
-      if (activeJobId) {
-        emptyEl.textContent = snapshot.done
-          ? "Listelenecek kullanıcı bulunamadı."
-          : "Kullanıcı kayıtları geldikçe tabloya satır satır eklenecek.";
-      } else {
-        emptyEl.textContent = "Listelenen kullanıcılar burada gösterilecek.";
-      }
+      tableBody.replaceChildren(fragment);
+      tableRenderDirty = false;
+      syncEmptyState();
     };
 
     const renderDebugPreview = () => {
@@ -1622,6 +1646,7 @@
         failureSamples: [],
         failedRequestPreview: null
       };
+      markListedRowsDirty();
     };
 
     const scheduleJobPoll = (delayMs = 900) => {
@@ -1635,6 +1660,7 @@
     };
 
     const applySnapshot = (data) => {
+      const wasDone = snapshot.done === true;
       activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : activeJobCreatedAt;
       activeJobFinishedAt = Number.isFinite(Number(data.finishedAt)) ? Number(data.finishedAt) : 0;
       snapshot.done = data.done === true;
@@ -1662,28 +1688,59 @@
           typeof data.summary.debugPreview.failedRequest === "object"
             ? data.summary.debugPreview.failedRequest
             : null;
+        const summaryUsernameFilter = String(data.summary.usernameFilter || "").trim();
+        if (summaryUsernameFilter && !appliedUsernameFilter && usernameFilterInput && !String(usernameFilterInput.value || "").trim()) {
+          appliedUsernameFilter = summaryUsernameFilter;
+          usernameFilterInput.value = summaryUsernameFilter;
+          markListedRowsDirty();
+        }
+      }
+
+      if (!wasDone && snapshot.done === true) {
+        tableRenderDirty = true;
       }
     };
 
     const applyEvents = (events) => {
+      let addedCount = 0;
+      const addListedRow = (key, meta) => {
+        const normalizedKey = String(key || "").trim();
+        if (!normalizedKey || listedRowsByKey.has(normalizedKey)) return;
+        listedRowsByKey.set(normalizedKey, {
+          key: normalizedKey,
+          userId: String(meta?.userId || "").trim(),
+          partnerId: String(meta?.partnerId || "").trim(),
+          username: String(meta?.username || "").trim(),
+          fullName: String(meta?.fullName || "").trim(),
+          isActive: meta?.isActive === true,
+          isActiveText: String(meta?.isActiveText || "").trim(),
+          code: String(meta?.code || "").trim(),
+          clusterUrl: String(meta?.clusterUrl || "").trim(),
+          clusterLabel: String(meta?.clusterLabel || "").trim()
+        });
+        addedCount += 1;
+      };
+
       (Array.isArray(events) ? events : []).forEach((event) => {
         const meta = event?.meta;
-        if (!meta || meta.type !== "user") return;
-        const key = String(event?.key || "").trim();
-        if (!key || listedRowsByKey.has(key)) return;
-        listedRowsByKey.set(key, {
-          key,
-          userId: String(meta.userId || "").trim(),
-          partnerId: String(meta.partnerId || "").trim(),
-          username: String(meta.username || "").trim(),
-          fullName: String(meta.fullName || "").trim(),
-          isActive: meta.isActive === true,
-          isActiveText: String(meta.isActiveText || "").trim(),
-          code: String(meta.code || "").trim(),
-          clusterUrl: String(meta.clusterUrl || "").trim(),
-          clusterLabel: String(meta.clusterLabel || "").trim()
-        });
+        if (!meta) return;
+
+        if (meta.type === "users") {
+          (Array.isArray(meta.rows) ? meta.rows : []).forEach((row) => {
+            addListedRow(String(row?.key || "").trim(), row);
+          });
+          return;
+        }
+
+        if (meta.type === "user") {
+          addListedRow(String(event?.key || "").trim(), meta);
+        }
       });
+
+      if (addedCount > 0) {
+        markListedRowsDirty();
+      }
+      return addedCount;
     };
 
     const finalizeRender = ({ preserveStatus = false } = {}) => {
@@ -1701,6 +1758,7 @@
     const applyUsernameFilter = () => {
       appliedUsernameFilter = String(usernameFilterInput?.value || "").trim();
       selectedUserKeys.clear();
+      markListedRowsDirty();
       finalizeRender({ preserveStatus: true });
     };
 
@@ -1802,6 +1860,7 @@
             selectedUserKeys.delete(key);
           }
         });
+        tableRenderDirty = true;
         finalizeRender({ preserveStatus: true });
       });
     }
@@ -1841,6 +1900,7 @@
 
         let responseData = null;
         deleteInProgress = true;
+        tableRenderDirty = true;
         finalizeRender({ preserveStatus: true });
         setStatus(`${selectedRows.length} kullanıcı pasife alınıyor...`, "muted");
 
@@ -1888,6 +1948,7 @@
           setStatus(err?.message || "Kullanıcılar pasife alınamadı.", "error");
         } finally {
           deleteInProgress = false;
+          tableRenderDirty = true;
           finalizeRender({ preserveStatus: true });
         }
       });
@@ -1902,6 +1963,8 @@
         setStatus("En az bir firma seçmelisiniz.", "error");
         return;
       }
+      const requestedUsernameFilter = String(usernameFilterInput?.value || "").trim();
+      appliedUsernameFilter = requestedUsernameFilter;
 
       resetJobState();
       activeJobId = "";
@@ -1919,7 +1982,7 @@
             Accept: "application/json"
           },
           credentials: "same-origin",
-          body: JSON.stringify({ companies })
+          body: JSON.stringify({ companies, usernameFilter: requestedUsernameFilter })
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
