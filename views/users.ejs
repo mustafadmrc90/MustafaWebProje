@@ -73,6 +73,7 @@
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
               <% const approvedDeviceCount = deviceItems.filter((device) => device.approved).length; %>
+              <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
               <div class="row users-main-row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
@@ -100,13 +101,13 @@
                     class="button-link ghost"
                     data-user-device-panel-toggle="1"
                     data-user-device-panel-target="<%= u.id %>"
-                    aria-expanded="false"
+                    aria-expanded="<%= isDevicesExpanded ? 'true' : 'false' %>"
                   >
                     Cihazlar (<%= deviceItems.length %>)
                   </button>
                   <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
                   <% if (editingUserId === u.id) { %>
-                    <a class="button-link ghost" href="/users">Vazgeç</a>
+                    <a class="button-link ghost" href="/users" data-user-preserve-scroll="1">Vazgeç</a>
                   <% } else { %>
                     <a class="button-link ghost" href="/users?edit=<%= u.id %>" data-user-preserve-scroll="1">Düzenle</a>
                   <% } %>
@@ -116,7 +117,7 @@
               <div
                 class="row user-device-row"
                 data-user-device-panel="<%= u.id %>"
-                hidden
+                <%= isDevicesExpanded ? '' : 'hidden' %>
               >
                 <div class="user-device-panel">
                   <div class="user-device-panel-head">
@@ -195,7 +196,12 @@
 
               <% if (editingUserId === u.id) { %>
                 <div class="row user-edit-row">
-                  <form class="user-edit-form" method="post" action="/users/<%= u.id %>/update">
+                  <form
+                    class="user-edit-form"
+                    method="post"
+                    action="/users/<%= u.id %>/update"
+                    data-user-preserve-scroll-form="1"
+                  >
                     <div class="user-edit-fields">
                       <label>
                         <span>Kullanıcı Adı</span>
@@ -212,7 +218,7 @@
                     </div>
                     <div class="user-edit-actions">
                       <button type="submit">Kaydet</button>
-                      <a class="button-link ghost" href="/users">İptal</a>
+                      <a class="button-link ghost" href="/users" data-user-preserve-scroll="1">İptal</a>
                     </div>
                   </form>
                 </div>
@@ -236,6 +242,6 @@
     </div>
 
     <script src="/public/app.js" defer></script>
-    <script src="/public/users.js?v=20260616-1" defer></script>
+    <script src="/public/users.js?v=20260616-2" defer></script>
   </body>
 </html>

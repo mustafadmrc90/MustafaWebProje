@@ -10,6 +10,7 @@
   const feedbackMessageEl = document.querySelector("[data-user-feedback-message]");
   const feedbackCloseButton = document.querySelector("[data-user-feedback-close='1']");
   const preserveScrollLinks = Array.from(document.querySelectorAll("[data-user-preserve-scroll='1']"));
+  const preserveScrollForms = Array.from(document.querySelectorAll("[data-user-preserve-scroll-form='1']"));
   const userScrollStorageKey = "users_page_scroll_y_v1";
 
   const parseJsonResponse = async (response) => {
@@ -239,6 +240,12 @@
   preserveScrollLinks.forEach((link) => {
     link.addEventListener("click", (event) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      storeCurrentScrollPosition();
+    });
+  });
+
+  preserveScrollForms.forEach((form) => {
+    form.addEventListener("submit", () => {
       storeCurrentScrollPosition();
     });
   });
