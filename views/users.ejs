@@ -73,24 +73,10 @@
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
               <% const approvedDeviceCount = deviceItems.filter((device) => device.approved).length; %>
-              <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
               <div class="row users-main-row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
                 <span class="user-row-actions">
-                  <form class="user-login-lock-form" method="post" action="/users/<%= u.id %>/login-lock">
-                    <input type="hidden" name="enabled" value="0" />
-                    <label class="user-login-lock-toggle">
-                      <input
-                        type="checkbox"
-                        name="enabled"
-                        value="1"
-                        data-user-login-lock-toggle="1"
-                        <%= u.login_input_lock_enabled ? 'checked' : '' %>
-                      />
-                      <span>Login Sabitle</span>
-                    </label>
-                  </form>
                   <form
                     class="user-login-lock-form"
                     method="post"
@@ -114,7 +100,7 @@
                     class="button-link ghost"
                     data-user-device-panel-toggle="1"
                     data-user-device-panel-target="<%= u.id %>"
-                    aria-expanded="<%= isDevicesExpanded ? 'true' : 'false' %>"
+                    aria-expanded="false"
                   >
                     Cihazlar (<%= deviceItems.length %>)
                   </button>
@@ -122,7 +108,7 @@
                   <% if (editingUserId === u.id) { %>
                     <a class="button-link ghost" href="/users">Vazgeç</a>
                   <% } else { %>
-                    <a class="button-link ghost" href="/users?edit=<%= u.id %>">Düzenle</a>
+                    <a class="button-link ghost" href="/users?edit=<%= u.id %>" data-user-preserve-scroll="1">Düzenle</a>
                   <% } %>
                 </span>
               </div>
@@ -130,7 +116,7 @@
               <div
                 class="row user-device-row"
                 data-user-device-panel="<%= u.id %>"
-                <%= isDevicesExpanded ? '' : 'hidden' %>
+                hidden
               >
                 <div class="user-device-panel">
                   <div class="user-device-panel-head">
@@ -250,6 +236,6 @@
     </div>
 
     <script src="/public/app.js" defer></script>
-    <script src="/public/users.js?v=20260513-2" defer></script>
+    <script src="/public/users.js?v=20260616-1" defer></script>
   </body>
 </html>

@@ -9,12 +9,38 @@
   const feedbackTitleEl = document.querySelector("#user-feedback-title");
   const feedbackMessageEl = document.querySelector("[data-user-feedback-message]");
   const feedbackCloseButton = document.querySelector("[data-user-feedback-close='1']");
+  const preserveScrollLinks = Array.from(document.querySelectorAll("[data-user-preserve-scroll='1']"));
+  const userScrollStorageKey = "users_page_scroll_y_v1";
 
   const parseJsonResponse = async (response) => {
     try {
       return await response.json();
     } catch (err) {
       return null;
+    }
+  };
+
+  const restoreStoredScrollPosition = () => {
+    let storedValue = "";
+    try {
+      storedValue = window.sessionStorage.getItem(userScrollStorageKey) || "";
+      window.sessionStorage.removeItem(userScrollStorageKey);
+    } catch (err) {
+      return;
+    }
+
+    const scrollY = Number.parseInt(storedValue, 10);
+    if (!Number.isFinite(scrollY) || scrollY < 0) return;
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
+    });
+  };
+
+  const storeCurrentScrollPosition = () => {
+    try {
+      window.sessionStorage.setItem(userScrollStorageKey, String(Math.max(0, Math.round(window.scrollY || 0))));
+    } catch (err) {
+      // Ignore storage errors.
     }
   };
 
@@ -209,6 +235,15 @@
       setPanelVisibility(targetId, nextVisible);
     });
   });
+
+  preserveScrollLinks.forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      storeCurrentScrollPosition();
+    });
+  });
+
+  restoreStoredScrollPosition();
 
   feedbackCloseButton?.addEventListener("click", closeFeedback);
   feedbackBackdrop?.addEventListener("click", (event) => {
