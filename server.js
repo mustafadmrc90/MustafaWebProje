@@ -323,7 +323,7 @@ const isProd = process.env.NODE_ENV === "production";
 const APP_ASSET_VERSION = String(
   process.env.RENDER_GIT_COMMIT || process.env.APP_VERSION || Date.now()
 ).trim();
-const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "5mb").trim() || "5mb";
+const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "25mb").trim() || "25mb";
 const REQUEST_BODY_PARAMETER_LIMIT =
   Number.parseInt(process.env.REQUEST_BODY_PARAMETER_LIMIT || "50000", 10) || 50000;
 const initDbOnly = String(process.env.INIT_DB_ONLY || "")
@@ -486,6 +486,10 @@ const STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_AUTH_CACHE_TTL_MS || "900000", 10) || 900000;
 const STATION_PASSENGER_INFO_WEB_STATIONS_CACHE_TTL_MS =
   Number.parseInt(process.env.STATION_PASSENGER_INFO_WEB_STATIONS_CACHE_TTL_MS || "3600000", 10) || 3600000;
+const JOURNEY_UPDATE_STATE_TTL_MS =
+  Number.parseInt(process.env.JOURNEY_UPDATE_STATE_TTL_MS || "1800000", 10) || 1800000;
+const JOURNEY_UPDATE_STATE_MAX_ENTRIES =
+  Number.parseInt(process.env.JOURNEY_UPDATE_STATE_MAX_ENTRIES || "100", 10) || 100;
 const STATION_PASSENGER_INFO_TARGET_COMPANY_CODE =
   String(process.env.STATION_PASSENGER_INFO_TARGET_COMPANY_CODE || "envergecgel").trim() || "envergecgel";
 const STATION_PASSENGER_INFO_TARGET_COMPANY_ID =
@@ -765,6 +769,7 @@ const allCompaniesServicePreviewCache = new Map();
 const obusLiveJobs = new Map();
 const jiraEpicMetaCache = new Map();
 const stationPassengerWebStationsCache = new Map();
+const journeyUpdateStateCache = new Map();
 const OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH = 120;
 const OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH = 160;
 const OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT = 250;
@@ -14031,6 +14036,7 @@ function buildJourneyUpdateReportModel() {
     updateRequestDate: "",
     updateEditorValues: {},
     updateJourneyIdsCsv: "",
+    updateStateKey: "",
     updateDetailState: "",
     tableRowsState: "",
     tableColumnsState: ""
@@ -14639,6 +14645,73 @@ function parseJourneyUpdateDetailState(value) {
   }, {});
 }
 
+function cleanupJourneyUpdateStateCache() {
+  const now = Date.now();
+  for (const [stateKey, state] of journeyUpdateStateCache.entries()) {
+    if (!state || typeof state !== "object") {
+      journeyUpdateStateCache.delete(stateKey);
+      continue;
+    }
+    const expiresAt = Number(state.expiresAt || 0);
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
+      journeyUpdateStateCache.delete(stateKey);
+    }
+  }
+
+  const maxEntries = Math.max(10, Number(JOURNEY_UPDATE_STATE_MAX_ENTRIES || 100));
+  if (journeyUpdateStateCache.size <= maxEntries) return;
+
+  Array.from(journeyUpdateStateCache.entries())
+    .sort((a, b) => Number(a[1]?.createdAt || 0) - Number(b[1]?.createdAt || 0))
+    .slice(0, Math.max(0, journeyUpdateStateCache.size - maxEntries))
+    .forEach(([stateKey]) => {
+      journeyUpdateStateCache.delete(stateKey);
+    });
+}
+
+function createJourneyUpdateStateKey() {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function saveJourneyUpdateCachedState({ ownerUserId, tableRows = [], tableColumns = [], detailState = {} } = {}) {
+  cleanupJourneyUpdateStateCache();
+  const now = Date.now();
+  const stateKey = createJourneyUpdateStateKey();
+  const normalizedRows = Array.isArray(tableRows) ? tableRows : [];
+  const normalizedColumns = Array.isArray(tableColumns) ? tableColumns : [];
+  const normalizedDetailState =
+    detailState && typeof detailState === "object" && !Array.isArray(detailState) ? detailState : {};
+
+  journeyUpdateStateCache.set(stateKey, {
+    ownerUserId: Number(ownerUserId || 0),
+    createdAt: now,
+    expiresAt: now + Math.max(60000, JOURNEY_UPDATE_STATE_TTL_MS),
+    tableRows: cloneJsonCompatibleValue(normalizedRows) || [],
+    tableColumns: cloneJsonCompatibleValue(normalizedColumns) || [],
+    detailState: cloneJsonCompatibleValue(normalizedDetailState) || {}
+  });
+
+  return stateKey;
+}
+
+function readJourneyUpdateCachedState(stateKey, ownerUserId) {
+  cleanupJourneyUpdateStateCache();
+  const normalizedKey = String(stateKey || "").trim();
+  if (!normalizedKey) return null;
+
+  const cachedState = journeyUpdateStateCache.get(normalizedKey);
+  if (!cachedState || Number(cachedState.ownerUserId || 0) !== Number(ownerUserId || 0)) {
+    return null;
+  }
+
+  cachedState.expiresAt = Date.now() + Math.max(60000, JOURNEY_UPDATE_STATE_TTL_MS);
+  return {
+    tableRows: cloneJsonCompatibleValue(cachedState.tableRows) || [],
+    tableColumns: cloneJsonCompatibleValue(cachedState.tableColumns) || [],
+    detailState: cloneJsonCompatibleValue(cachedState.detailState) || {}
+  };
+}
+
 function buildJourneyUpdateUpdateRequestHeadersText() {
   return JSON.stringify(
     {
@@ -14698,7 +14771,7 @@ function buildJourneyUpdateUpdatePreviewBody({
 
 function applyJourneyUpdateEditorStateToReport(
   report,
-  { endpointUrl = "", editorValues = {}, tableRows = [], tableColumns = [], detailState = {} } = {}
+  { endpointUrl = "", editorValues = {}, tableRows = [], tableColumns = [], detailState = {}, ownerUserId = 0 } = {}
 ) {
   const nextReport = report && typeof report === "object" ? report : buildJourneyUpdateReportModel();
   const normalizedRows = Array.isArray(tableRows) ? tableRows : [];
@@ -14723,6 +14796,15 @@ function applyJourneyUpdateEditorStateToReport(
   nextReport.updateRequestDate = preview.requestDate;
   nextReport.updateEditorValues = normalizedEditorValues;
   nextReport.updateJourneyIdsCsv = journeyIds.join(",");
+  nextReport.updateStateKey =
+    normalizedRows.length > 0 || normalizedColumns.length > 0 || Object.keys(normalizedDetailState).length > 0
+      ? saveJourneyUpdateCachedState({
+          ownerUserId,
+          tableRows: normalizedRows,
+          tableColumns: normalizedColumns,
+          detailState: normalizedDetailState
+        })
+      : "";
   nextReport.updateDetailState = encodeJsonStateToBase64(normalizedDetailState);
   nextReport.tableRowsState = encodeJsonStateToBase64(normalizedRows);
   nextReport.tableColumnsState = encodeJsonStateToBase64(normalizedColumns);
@@ -20264,7 +20346,8 @@ app.get("/general/journey-update", requireAuth, requireMenuAccess("journey-updat
     editorValues: report.updateEditorValues,
     detailState: {},
     tableRows: report.tableRows,
-    tableColumns: report.tableColumns
+    tableColumns: report.tableColumns,
+    ownerUserId: req.session?.user?.id || 0
   });
 
   res.render("general-journey-update", {
@@ -20327,9 +20410,17 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   report.updateEditorValues = normalizeJourneyUpdateEditorInputState(req.body);
 
   if (isUpdateAction) {
-    const submittedTableRows = parseJourneyUpdateTableRowsState(req.body.tableRowsState);
-    const submittedTableColumns = parseJourneyUpdateTableColumnsState(req.body.tableColumnsState);
-    const submittedDetailState = parseJourneyUpdateDetailState(req.body.detailState);
+    const submittedStateKey = String(req.body.updateStateKey || "").trim();
+    const cachedState = readJourneyUpdateCachedState(submittedStateKey, req.session?.user?.id || 0);
+    const submittedTableRows = cachedState
+      ? cachedState.tableRows
+      : parseJourneyUpdateTableRowsState(req.body.tableRowsState);
+    const submittedTableColumns = cachedState
+      ? cachedState.tableColumns
+      : parseJourneyUpdateTableColumnsState(req.body.tableColumnsState);
+    const submittedDetailState = cachedState
+      ? cachedState.detailState
+      : parseJourneyUpdateDetailState(req.body.detailState);
     const requestedJourneyIds = parseJourneyUpdateRowIdsInput(req.body.journeyIds);
     const journeyIds =
       requestedJourneyIds.length > 0
@@ -20347,7 +20438,9 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
     report.tableColumns = submittedTableColumns.length ? submittedTableColumns : buildJourneyUpdateTableColumns([]);
     report.requestUrl = resolvedUpdateEndpointUrl;
 
-    if (requestedCompany && !selectedCompanyMeta) {
+    if (submittedStateKey && !cachedState) {
+      report.error = "Sefer güncelleme verisi süresi doldu. Seferleri yeniden gösterip tekrar deneyin.";
+    } else if (requestedCompany && !selectedCompanyMeta) {
       report.error = "Seçilen firma bulunamadı. Listeden tekrar seçim yapın.";
     } else if (!selectedCompanyCluster) {
       report.error = "Seçilen firma için geçerli cluster bilgisi bulunamadı.";
@@ -20743,7 +20836,8 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
     editorValues: report.updateEditorValues,
     detailState: detailStateForRender,
     tableRows: report.tableRows,
-    tableColumns: report.tableColumns
+    tableColumns: report.tableColumns,
+    ownerUserId: req.session?.user?.id || 0
   });
 
   res.render("general-journey-update", {
@@ -24354,7 +24448,7 @@ function wantsJsonErrorResponse(req) {
 
 function buildRequestBodyTooLargeMessage(req) {
   const pathText = String(req.path || req.originalUrl || "").trim();
-  const limitText = String(REQUEST_BODY_LIMIT || "5mb").trim();
+  const limitText = String(REQUEST_BODY_LIMIT || "25mb").trim();
 
   return `Gönderilen veri sunucu limitini (${limitText}) aştı.`;
 }

@@ -2191,8 +2191,10 @@
     const fieldEls = Array.from(form.querySelectorAll("[data-journey-update-editor-key]"));
     const rowIdsInput = form.querySelector("[data-journey-update-row-ids='1']");
     const detailStateInput = form.querySelector("[data-journey-update-detail-state='1']");
-    const tableRowsStateInput = form.querySelector("input[name='tableRowsState']");
-    const tableColumnsStateInput = form.querySelector("input[name='tableColumnsState']");
+    const tableRowsStateInput =
+      form.querySelector("[data-journey-update-table-rows-state='1']") || form.querySelector("input[name='tableRowsState']");
+    const tableColumnsStateInput =
+      form.querySelector("[data-journey-update-table-columns-state='1']") || form.querySelector("input[name='tableColumnsState']");
     const requestUrlEl = form.querySelector("[data-journey-update-request-url]");
     const requestHeadersEl = form.querySelector("[data-journey-update-request-headers]");
     const requestBodyEl = form.querySelector("[data-journey-update-request-body]");

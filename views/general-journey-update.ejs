@@ -187,9 +187,10 @@
               <input type="hidden" name="startDate" value="<%= filters.startDate || '' %>" />
               <input type="hidden" name="endDate" value="<%= filters.endDate || '' %>" />
               <input type="hidden" name="journeyIds" value="<%= report.updateJourneyIdsCsv || '' %>" data-journey-update-row-ids="1" />
-              <input type="hidden" name="detailState" value="<%= report.updateDetailState || '' %>" data-journey-update-detail-state="1" />
-              <input type="hidden" name="tableRowsState" value="<%= report.tableRowsState || '' %>" />
-              <input type="hidden" name="tableColumnsState" value="<%= report.tableColumnsState || '' %>" />
+              <input type="hidden" name="updateStateKey" value="<%= report.updateStateKey || '' %>" />
+              <input type="hidden" value="<%= report.updateDetailState || '' %>" data-journey-update-detail-state="1" />
+              <input type="hidden" value="<%= report.tableRowsState || '' %>" data-journey-update-table-rows-state="1" />
+              <input type="hidden" value="<%= report.tableColumnsState || '' %>" data-journey-update-table-columns-state="1" />
 
               <div class="journey-update-editor-grid">
                 <% updateEditorFields.forEach((field) => { %>
