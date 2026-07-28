@@ -12,6 +12,7 @@
   const preserveScrollLinks = Array.from(document.querySelectorAll("[data-user-preserve-scroll='1']"));
   const preserveScrollForms = Array.from(document.querySelectorAll("[data-user-preserve-scroll-form='1']"));
   const userScrollStorageKey = "users_page_scroll_y_v1";
+  const userScrollAnchorStorageKey = "users_page_scroll_anchor_v1";
 
   if ("scrollRestoration" in window.history) {
     window.history.scrollRestoration = "manual";
@@ -36,6 +37,16 @@
     return result;
   };
 
+  const findUserMainRow = (targetId) => {
+    const normalizedTargetId = String(targetId || "").trim();
+    if (!normalizedTargetId) return null;
+    return (
+      Array.from(document.querySelectorAll("[data-user-main-row]")).find(
+        (row) => String(row.getAttribute("data-user-main-row") || "").trim() === normalizedTargetId
+      ) || null
+    );
+  };
+
   const parseJsonResponse = async (response) => {
     try {
       return await response.json();
@@ -46,26 +57,77 @@
 
   const restoreStoredScrollPosition = () => {
     let storedValue = "";
+    let storedAnchorValue = "";
     try {
       storedValue = window.sessionStorage.getItem(userScrollStorageKey) || "";
+      storedAnchorValue = window.sessionStorage.getItem(userScrollAnchorStorageKey) || "";
       window.sessionStorage.removeItem(userScrollStorageKey);
+      window.sessionStorage.removeItem(userScrollAnchorStorageKey);
     } catch (err) {
       return;
     }
 
     const scrollY = Number.parseInt(storedValue, 10);
     if (!Number.isFinite(scrollY) || scrollY < 0) return;
-    window.requestAnimationFrame(() => {
+
+    let scrollAnchor = null;
+    if (storedAnchorValue) {
+      try {
+        const parsedAnchor = JSON.parse(storedAnchorValue);
+        const targetId = String(parsedAnchor?.targetId || "").trim();
+        const viewportTop = Number(parsedAnchor?.viewportTop);
+        if (targetId && Number.isFinite(viewportTop)) {
+          scrollAnchor = { targetId, viewportTop };
+        }
+      } catch (err) {
+        scrollAnchor = null;
+      }
+    }
+
+    const restoreStoredPosition = () => {
+      if (scrollAnchor) {
+        const targetRow = findUserMainRow(scrollAnchor.targetId);
+        if (targetRow instanceof HTMLElement) {
+          const nextTop = window.scrollY + targetRow.getBoundingClientRect().top - scrollAnchor.viewportTop;
+          restoreScrollPosition({ x: 0, y: Math.max(0, Math.round(nextTop)) });
+          return;
+        }
+      }
+
       restoreScrollPosition({ x: 0, y: scrollY });
+    };
+
+    window.requestAnimationFrame(() => {
+      restoreStoredPosition();
       window.setTimeout(() => {
-        restoreScrollPosition({ x: 0, y: scrollY });
+        restoreStoredPosition();
       }, 0);
     });
   };
 
-  const storeCurrentScrollPosition = () => {
+  const storeCurrentScrollPosition = (sourceElement = null) => {
     try {
       window.sessionStorage.setItem(userScrollStorageKey, String(getCurrentScrollPosition().y));
+      window.sessionStorage.removeItem(userScrollAnchorStorageKey);
+
+      const targetId =
+        sourceElement instanceof HTMLElement
+          ? String(
+              sourceElement.getAttribute("data-user-preserve-scroll-target") ||
+                sourceElement.closest("[data-user-main-row]")?.getAttribute("data-user-main-row") ||
+                ""
+            ).trim()
+          : "";
+      const targetRow = findUserMainRow(targetId);
+      if (targetRow instanceof HTMLElement) {
+        window.sessionStorage.setItem(
+          userScrollAnchorStorageKey,
+          JSON.stringify({
+            targetId,
+            viewportTop: Math.round(targetRow.getBoundingClientRect().top)
+          })
+        );
+      }
     } catch (err) {
       // Ignore storage errors.
     }
@@ -280,13 +342,13 @@
   preserveScrollLinks.forEach((link) => {
     link.addEventListener("click", (event) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      storeCurrentScrollPosition();
+      storeCurrentScrollPosition(link);
     });
   });
 
   preserveScrollForms.forEach((form) => {
     form.addEventListener("submit", () => {
-      storeCurrentScrollPosition();
+      storeCurrentScrollPosition(form);
     });
   });
 

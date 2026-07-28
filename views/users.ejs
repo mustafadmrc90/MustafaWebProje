@@ -74,7 +74,7 @@
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
               <% const approvedDeviceCount = deviceItems.filter((device) => device.approved).length; %>
               <% const isDevicesExpanded = String(expandedDeviceUserId || '') === String(u.id || ''); %>
-              <div class="row users-main-row">
+              <div class="row users-main-row" data-user-main-row="<%= u.id %>">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
                 <span class="user-row-actions">
@@ -107,9 +107,19 @@
                   </button>
                   <a class="button-link ghost" href="/permissions/<%= u.id %>">Yetkiler</a>
                   <% if (editingUserId === u.id) { %>
-                    <a class="button-link ghost" href="/users" data-user-preserve-scroll="1">Vazgeç</a>
+                    <a
+                      class="button-link ghost"
+                      href="/users"
+                      data-user-preserve-scroll="1"
+                      data-user-preserve-scroll-target="<%= u.id %>"
+                    >Vazgeç</a>
                   <% } else { %>
-                    <a class="button-link ghost" href="/users?edit=<%= u.id %>" data-user-preserve-scroll="1">Düzenle</a>
+                    <a
+                      class="button-link ghost"
+                      href="/users?edit=<%= u.id %>"
+                      data-user-preserve-scroll="1"
+                      data-user-preserve-scroll-target="<%= u.id %>"
+                    >Düzenle</a>
                   <% } %>
                 </span>
               </div>
@@ -203,6 +213,7 @@
                     method="post"
                     action="/users/<%= u.id %>/update"
                     data-user-preserve-scroll-form="1"
+                    data-user-preserve-scroll-target="<%= u.id %>"
                   >
                     <div class="user-edit-fields">
                       <label>
@@ -220,7 +231,12 @@
                     </div>
                     <div class="user-edit-actions">
                       <button type="submit">Kaydet</button>
-                      <a class="button-link ghost" href="/users" data-user-preserve-scroll="1">İptal</a>
+                      <a
+                        class="button-link ghost"
+                        href="/users"
+                        data-user-preserve-scroll="1"
+                        data-user-preserve-scroll-target="<%= u.id %>"
+                      >İptal</a>
                     </div>
                   </form>
                 </div>
@@ -244,6 +260,6 @@
     </div>
 
     <script src="/public/app.js" defer></script>
-    <script src="/public/users.js?v=20260728-2" defer></script>
+    <script src="/public/users.js?v=20260728-3" defer></script>
   </body>
 </html>
