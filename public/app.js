@@ -4311,7 +4311,7 @@
       10
     );
     const maxCreateUserEntries = 5;
-    const maxCreateUserEntriesError = "Tek sefer max 5 kullanıcı açılabilir";
+    const maxCreateUserEntriesError = "Tek firma dışında tek sefer max 5 kullanıcı açılabilir";
     const samplePartnerId = Number.isFinite(samplePartnerIdRaw) && samplePartnerIdRaw > 0 ? samplePartnerIdRaw : 0;
     const sampleBranchId = Number.isFinite(sampleBranchIdRaw) && sampleBranchIdRaw > 0 ? sampleBranchIdRaw : 0;
     const rowsContainer = root.querySelector("[data-obus-user-create-rows='1']");
@@ -4392,6 +4392,8 @@
         .filter(Boolean);
 
     const readFirstSelectedCompany = () => companyCheckboxes.find((item) => item.checked) || null;
+    const shouldLimitCreateUserEntries = (selectedCompanyValues = readSelectedCompanyValues()) =>
+      selectedCompanyValues.length > 0 && selectedCompanyValues.length !== 1;
     const normalizeCompanySearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
 
     const clearCompanyTypeAhead = () => {
@@ -4613,7 +4615,7 @@
       };
     };
 
-    const validateEntriesForSubmit = () => {
+    const validateEntriesForSubmit = ({ enforceEntryLimit = true } = {}) => {
       const rows = readEntries();
       const validEntries = [];
       const incompleteRows = [];
@@ -4645,7 +4647,7 @@
         };
       }
 
-      if (validEntries.length > maxCreateUserEntries) {
+      if (enforceEntryLimit && validEntries.length > maxCreateUserEntries) {
         return {
           ok: false,
           error: maxCreateUserEntriesError
@@ -4948,10 +4950,12 @@
     };
 
     const renderPreview = () => {
-      const validation = validateEntriesForSubmit();
-      const filledEntries = validation.ok ? validation.entries : readFilledEntries();
       const selectedCompanyValues = readSelectedCompanyValues();
       const selectedCompanyCount = selectedCompanyValues.length;
+      const validation = validateEntriesForSubmit({
+        enforceEntryLimit: shouldLimitCreateUserEntries(selectedCompanyValues)
+      });
+      const filledEntries = validation.ok ? validation.entries : readFilledEntries();
       const sampleEntry = filledEntries[0] || createEmptyEntry();
       const targetCount = selectedCompanyCount > 0 ? selectedCompanyCount * filledEntries.length : 0;
       const companySelectionError = selectedCompanyCount > 0 ? "" : "En az bir firma seçmelisiniz.";
@@ -5371,7 +5375,10 @@
     createUsersButton.addEventListener("click", () => {
       void (async () => {
         if (isBusy()) return;
-        const validation = validateEntriesForSubmit();
+        const selectedCompanyValues = readSelectedCompanyValues();
+        const validation = validateEntriesForSubmit({
+          enforceEntryLimit: shouldLimitCreateUserEntries(selectedCompanyValues)
+        });
         if (!validation.ok) {
           setStatus(validation.error, "error");
           renderPreview();
@@ -5381,7 +5388,6 @@
           setStatus("Tüm Firmalar listesi boş. Önce firma listesini güncelleyin.", "error");
           return;
         }
-        const selectedCompanyValues = readSelectedCompanyValues();
         if (selectedCompanyValues.length === 0) {
           setStatus("En az bir firma seçmelisiniz.", "error");
           renderPreview();

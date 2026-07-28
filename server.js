@@ -774,7 +774,7 @@ const OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH = 120;
 const OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH = 160;
 const OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT = 250;
 const OBUS_USER_CREATE_RUN_ENTRY_LIMIT = 5;
-const OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR = "Tek sefer max 5 kullanıcı açılabilir";
+const OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR = "Tek firma dışında tek sefer max 5 kullanıcı açılabilir";
 const OBUS_USER_CREATE_PERMISSION_TYPES = [
   "CanSeePassengerInformation",
   "CanSeeAgentName",
@@ -19051,7 +19051,7 @@ function normalizeObusUserCreateEntriesInput(input) {
     .map((entry) => normalizeObusBulkUserTemplateEntry(entry));
 }
 
-function validateObusUserCreateEntries(input) {
+function validateObusUserCreateEntries(input, { enforceRunLimit = true } = {}) {
   const normalizedEntries = normalizeObusUserCreateEntriesInput(input);
   const readyEntries = [];
   const incompleteRows = [];
@@ -19087,7 +19087,7 @@ function validateObusUserCreateEntries(input) {
     };
   }
 
-  if (readyEntries.length > OBUS_USER_CREATE_RUN_ENTRY_LIMIT) {
+  if (enforceRunLimit && readyEntries.length > OBUS_USER_CREATE_RUN_ENTRY_LIMIT) {
     return {
       ok: false,
       error: OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR
@@ -19433,18 +19433,20 @@ async function runObusBulkUserCreateJob(job, { entries, partnerItems }) {
     return;
   }
 
-  const validatedEntries = validateObusUserCreateEntries(entries);
-  if (!validatedEntries.ok) {
-    finishObusLiveJob(job, validatedEntries.error);
-    return;
-  }
-
   const normalizedCompanies = Array.isArray(partnerItems) ? partnerItems : [];
   if (normalizedCompanies.length === 0) {
     finishObusLiveJob(
       job,
       "Firma listesi SQL'de boş. Önce Tüm Firmalar ekranında firma listesini güncelleyin."
     );
+    return;
+  }
+
+  const validatedEntries = validateObusUserCreateEntries(entries, {
+    enforceRunLimit: normalizedCompanies.length !== 1
+  });
+  if (!validatedEntries.ok) {
+    finishObusLiveJob(job, validatedEntries.error);
     return;
   }
 
@@ -21513,7 +21515,7 @@ app.post("/api/obus-user-create/templates", requireAuth, requireMenuAccess("obus
 
 app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
   try {
-    const entryValidation = validateObusUserCreateEntries(req.body?.entries);
+    const entryValidation = validateObusUserCreateEntries(req.body?.entries, { enforceRunLimit: false });
     if (!entryValidation.ok) {
       return res.status(400).json({
         ok: false,
@@ -21559,6 +21561,13 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
       return res.status(400).json({
         ok: false,
         error: "Kullanıcı oluşturulacak firma listesi bulunamadı."
+      });
+    }
+
+    if (selectedPartnerItems.length !== 1 && entryValidation.entries.length > OBUS_USER_CREATE_RUN_ENTRY_LIMIT) {
+      return res.status(400).json({
+        ok: false,
+        error: OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR
       });
     }
 
