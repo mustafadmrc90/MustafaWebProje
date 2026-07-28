@@ -13,6 +13,29 @@
   const preserveScrollForms = Array.from(document.querySelectorAll("[data-user-preserve-scroll-form='1']"));
   const userScrollStorageKey = "users_page_scroll_y_v1";
 
+  if ("scrollRestoration" in window.history) {
+    window.history.scrollRestoration = "manual";
+  }
+
+  const getCurrentScrollPosition = () => ({
+    x: Math.max(0, Math.round(window.scrollX || 0)),
+    y: Math.max(0, Math.round(window.scrollY || 0))
+  });
+
+  const restoreScrollPosition = ({ x = 0, y = 0 } = {}) => {
+    window.scrollTo({ top: y, left: x, behavior: "auto" });
+  };
+
+  const preserveViewportPosition = (callback) => {
+    const scrollPosition = getCurrentScrollPosition();
+    const result = callback();
+    restoreScrollPosition(scrollPosition);
+    window.requestAnimationFrame(() => {
+      restoreScrollPosition(scrollPosition);
+    });
+    return result;
+  };
+
   const parseJsonResponse = async (response) => {
     try {
       return await response.json();
@@ -33,13 +56,16 @@
     const scrollY = Number.parseInt(storedValue, 10);
     if (!Number.isFinite(scrollY) || scrollY < 0) return;
     window.requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
+      restoreScrollPosition({ x: 0, y: scrollY });
+      window.setTimeout(() => {
+        restoreScrollPosition({ x: 0, y: scrollY });
+      }, 0);
     });
   };
 
   const storeCurrentScrollPosition = () => {
     try {
-      window.sessionStorage.setItem(userScrollStorageKey, String(Math.max(0, Math.round(window.scrollY || 0))));
+      window.sessionStorage.setItem(userScrollStorageKey, String(getCurrentScrollPosition().y));
     } catch (err) {
       // Ignore storage errors.
     }
@@ -48,21 +74,27 @@
   const setPanelVisibility = (targetId, visible) => {
     panelRows.forEach((row) => {
       const matches = String(row.getAttribute("data-user-device-panel") || "") === String(targetId || "");
-      row.hidden = matches ? !visible : true;
+      if (matches) {
+        row.hidden = !visible;
+      }
     });
 
     panelButtons.forEach((button) => {
       const matches = String(button.getAttribute("data-user-device-panel-target") || "") === String(targetId || "");
-      button.setAttribute("aria-expanded", matches && visible ? "true" : "false");
+      if (matches) {
+        button.setAttribute("aria-expanded", visible ? "true" : "false");
+      }
     });
   };
 
   const closeFeedback = () => {
     if (!(feedbackBackdrop instanceof HTMLElement)) return;
-    feedbackBackdrop.hidden = true;
-    feedbackBackdrop.classList.remove("active");
-    feedbackBackdrop.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("user-feedback-open");
+    preserveViewportPosition(() => {
+      feedbackBackdrop.hidden = true;
+      feedbackBackdrop.classList.remove("active");
+      feedbackBackdrop.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("user-feedback-open");
+    });
   };
 
   const openFeedback = (message, { title = "Bilgi" } = {}) => {
@@ -78,13 +110,17 @@
       feedbackTitleEl.textContent = String(title || "Bilgi").trim() || "Bilgi";
     }
 
-    feedbackMessageEl.textContent = String(message || "").trim();
-    feedbackBackdrop.hidden = false;
-    feedbackBackdrop.classList.add("active");
-    feedbackBackdrop.setAttribute("aria-hidden", "false");
-    document.body.classList.add("user-feedback-open");
+    preserveViewportPosition(() => {
+      feedbackMessageEl.textContent = String(message || "").trim();
+      feedbackBackdrop.hidden = false;
+      feedbackBackdrop.classList.add("active");
+      feedbackBackdrop.setAttribute("aria-hidden", "false");
+      document.body.classList.add("user-feedback-open");
+    });
     window.setTimeout(() => {
-      feedbackCloseButton?.focus();
+      preserveViewportPosition(() => {
+        feedbackCloseButton?.focus();
+      });
     }, 0);
   };
 
@@ -221,19 +257,23 @@
 
   ajaxToggles.forEach((toggle) => {
     toggle.addEventListener("change", () => {
-      void submitAjaxToggle(toggle);
+      preserveViewportPosition(() => {
+        void submitAjaxToggle(toggle);
+      });
     });
   });
 
   panelButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      const targetId = String(button.getAttribute("data-user-device-panel-target") || "").trim();
-      if (!targetId) return;
-      const targetRow = panelRows.find(
-        (row) => String(row.getAttribute("data-user-device-panel") || "") === targetId
-      );
-      const nextVisible = targetRow ? targetRow.hidden : true;
-      setPanelVisibility(targetId, nextVisible);
+      preserveViewportPosition(() => {
+        const targetId = String(button.getAttribute("data-user-device-panel-target") || "").trim();
+        if (!targetId) return;
+        const targetRow = panelRows.find(
+          (row) => String(row.getAttribute("data-user-device-panel") || "") === targetId
+        );
+        const nextVisible = targetRow ? targetRow.hidden : true;
+        setPanelVisibility(targetId, nextVisible);
+      });
     });
   });
 

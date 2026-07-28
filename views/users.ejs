@@ -43,7 +43,7 @@
       <div class="panel-grid users-page-grid">
         <section class="table-card panel-card users-create-card">
           <h2>Yeni Kullanıcı</h2>
-          <form class="form-grid" method="post" action="/users">
+          <form class="form-grid" method="post" action="/users" data-user-preserve-scroll-form="1">
             <label>
               <span>Kullanıcı Adı</span>
               <input type="text" name="username" required />
@@ -73,7 +73,7 @@
             <% users.forEach((u) => { %>
               <% const deviceItems = userLoginDevicesByUserId && typeof userLoginDevicesByUserId.get === "function" ? (userLoginDevicesByUserId.get(Number(u.id)) || []) : []; %>
               <% const approvedDeviceCount = deviceItems.filter((device) => device.approved).length; %>
-              <% const isDevicesExpanded = expandedDeviceUserId === u.id; %>
+              <% const isDevicesExpanded = String(expandedDeviceUserId || '') === String(u.id || ''); %>
               <div class="row users-main-row">
                 <span>@<%= u.username %></span>
                 <span><%= u.display_name %></span>
@@ -242,6 +242,6 @@
     </div>
 
     <script src="/public/app.js" defer></script>
-    <script src="/public/users.js?v=20260616-2" defer></script>
+    <script src="/public/users.js?v=20260728-2" defer></script>
   </body>
 </html>
