@@ -773,6 +773,8 @@ const journeyUpdateStateCache = new Map();
 const OBUS_BULK_USER_TEMPLATE_NAME_MAX_LENGTH = 120;
 const OBUS_BULK_USER_TEMPLATE_FIELD_MAX_LENGTH = 160;
 const OBUS_BULK_USER_TEMPLATE_ENTRY_LIMIT = 250;
+const OBUS_USER_CREATE_RUN_ENTRY_LIMIT = 5;
+const OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR = "Tek sefer max 5 kullanıcı açılabilir";
 const OBUS_USER_CREATE_PERMISSION_TYPES = [
   "CanSeePassengerInformation",
   "CanSeeAgentName",
@@ -19082,6 +19084,13 @@ function validateObusUserCreateEntries(input) {
     return {
       ok: false,
       error: "En az bir kullanıcı satırı doldurulmalıdır."
+    };
+  }
+
+  if (readyEntries.length > OBUS_USER_CREATE_RUN_ENTRY_LIMIT) {
+    return {
+      ok: false,
+      error: OBUS_USER_CREATE_RUN_ENTRY_LIMIT_ERROR
     };
   }
 

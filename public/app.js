@@ -4310,6 +4310,8 @@
       String(root.getAttribute("data-obus-user-create-sample-branch-id") || "0"),
       10
     );
+    const maxCreateUserEntries = 5;
+    const maxCreateUserEntriesError = "Tek sefer max 5 kullanıcı açılabilir";
     const samplePartnerId = Number.isFinite(samplePartnerIdRaw) && samplePartnerIdRaw > 0 ? samplePartnerIdRaw : 0;
     const sampleBranchId = Number.isFinite(sampleBranchIdRaw) && sampleBranchIdRaw > 0 ? sampleBranchIdRaw : 0;
     const rowsContainer = root.querySelector("[data-obus-user-create-rows='1']");
@@ -4505,6 +4507,13 @@
         return {
           ok: false,
           error: "En az bir kullanıcı satırı doldurulmalıdır."
+        };
+      }
+
+      if (validEntries.length > maxCreateUserEntries) {
+        return {
+          ok: false,
+          error: maxCreateUserEntriesError
         };
       }
 
