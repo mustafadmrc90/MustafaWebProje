@@ -4325,6 +4325,13 @@
     const refreshTemplatesButton = root.querySelector("[data-obus-user-create-refresh-templates='1']");
     const loadTemplateButton = root.querySelector("[data-obus-user-create-load-template='1']");
     const deleteTemplateButton = root.querySelector("[data-obus-user-create-delete-template='1']");
+    const companyMultiselect = root.querySelector(".obus-company-multiselect");
+    const companyTrigger = root.querySelector("[data-obus-user-create-company-trigger='1']");
+    const companyDropdown = root.querySelector("[data-obus-user-create-company-dropdown='1']");
+    const selectAllCompaniesCheckbox = root.querySelector("[data-obus-user-create-select-all='1']");
+    const companyCheckboxes = Array.from(root.querySelectorAll("[data-obus-user-create-company-checkbox='1']"));
+    const companyOptionRows = Array.from(root.querySelectorAll("[data-obus-user-create-company-option-row='1']"));
+    const selectedCompaniesInput = root.querySelector("[data-obus-user-create-selected-companies='1']");
     const statusEl = root.querySelector("[data-obus-user-create-status='1']");
     const rowCountEl = root.querySelector("[data-obus-user-create-row-count='1']");
     const previewEl = root.querySelector("[data-obus-user-create-preview='1']");
@@ -4350,6 +4357,11 @@
       !refreshTemplatesButton ||
       !loadTemplateButton ||
       !deleteTemplateButton ||
+      !companyMultiselect ||
+      !companyTrigger ||
+      !companyDropdown ||
+      !selectAllCompaniesCheckbox ||
+      !selectedCompaniesInput ||
       !statusEl ||
       !rowCountEl ||
       !previewEl ||
@@ -4370,6 +4382,121 @@
     let activeJobFailureCount = 0;
     let activeJobCreatedAt = 0;
     let activeJobFinishedAt = 0;
+    let companyTypeAheadText = "";
+    let companyTypeAheadTimerId = null;
+
+    const readSelectedCompanyValues = () =>
+      companyCheckboxes
+        .filter((item) => item.checked)
+        .map((item) => String(item.value || "").trim())
+        .filter(Boolean);
+
+    const readFirstSelectedCompany = () => companyCheckboxes.find((item) => item.checked) || null;
+    const normalizeCompanySearchText = (value) => String(value || "").toLocaleLowerCase("tr").trim();
+
+    const clearCompanyTypeAhead = () => {
+      companyTypeAheadText = "";
+      if (companyTypeAheadTimerId) {
+        clearTimeout(companyTypeAheadTimerId);
+        companyTypeAheadTimerId = null;
+      }
+    };
+
+    const queueCompanyTypeAheadReset = () => {
+      if (companyTypeAheadTimerId) {
+        clearTimeout(companyTypeAheadTimerId);
+      }
+      companyTypeAheadTimerId = setTimeout(() => {
+        companyTypeAheadText = "";
+        companyTypeAheadTimerId = null;
+      }, 900);
+    };
+
+    const updateCompanyTriggerLabel = () => {
+      const selectedValues = readSelectedCompanyValues();
+      if (selectedValues.length === 0) {
+        companyTrigger.textContent = "Firma seçiniz";
+        return;
+      }
+      if (selectedValues.length === companyCheckboxes.length) {
+        companyTrigger.textContent = "Hepsi";
+        return;
+      }
+      if (selectedValues.length === 1) {
+        const selectedItem = readFirstSelectedCompany();
+        companyTrigger.textContent = String(selectedItem?.dataset.companyLabel || "").trim() || "1 firma seçildi";
+        return;
+      }
+      companyTrigger.textContent = `${selectedValues.length} firma seçildi`;
+    };
+
+    const syncSelectedCompanies = () => {
+      const selectedValues = readSelectedCompanyValues();
+      selectedCompaniesInput.value = JSON.stringify(selectedValues);
+      selectAllCompaniesCheckbox.checked =
+        companyCheckboxes.length > 0 && selectedValues.length === companyCheckboxes.length;
+      updateCompanyTriggerLabel();
+    };
+
+    const closeCompanyDropdown = () => {
+      companyDropdown.hidden = true;
+      companyTrigger.setAttribute("aria-expanded", "false");
+      clearCompanyTypeAhead();
+    };
+
+    const openCompanyDropdown = () => {
+      companyDropdown.hidden = false;
+      companyTrigger.setAttribute("aria-expanded", "true");
+    };
+
+    const findMatchingCompanyOption = (queryText) => {
+      const normalizedQuery = normalizeCompanySearchText(queryText);
+      if (!normalizedQuery) return null;
+
+      return (
+        companyOptionRows.find((row) => {
+          const labelText = String(row.querySelector("span")?.textContent || "");
+          return normalizeCompanySearchText(labelText).startsWith(normalizedQuery);
+        }) || null
+      );
+    };
+
+    const focusCompanyOptionRow = (row) => {
+      if (!row) return;
+      const focusedRows = Array.from(root.querySelectorAll(".obus-company-option-focus"));
+      focusedRows.forEach((item) => item.classList.remove("obus-company-option-focus"));
+      row.scrollIntoView({ block: "nearest" });
+      row.classList.add("obus-company-option-focus");
+      row.querySelector("input")?.focus({ preventScroll: true });
+      setTimeout(() => {
+        row.classList.remove("obus-company-option-focus");
+      }, 450);
+    };
+
+    const handleCompanyTypeAheadKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.key === "Escape" || event.key === "Tab" || event.key === " " || event.code === "Space") return;
+
+      let nextQuery = companyTypeAheadText;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        nextQuery = String(companyTypeAheadText || "").slice(0, -1);
+      } else if (event.key.length === 1) {
+        event.preventDefault();
+        nextQuery = `${String(companyTypeAheadText || "")}${event.key}`;
+      } else {
+        return;
+      }
+
+      companyTypeAheadText = normalizeCompanySearchText(nextQuery);
+      queueCompanyTypeAheadReset();
+      if (!companyTypeAheadText) return;
+
+      if (companyDropdown.hidden) {
+        openCompanyDropdown();
+      }
+      focusCompanyOptionRow(findMatchingCompanyOption(companyTypeAheadText));
+    };
 
     const permissionTypes = [
       "CanSeePassengerInformation",
@@ -4442,8 +4569,15 @@
         "user-id": 0
       }));
 
-    const buildSampleRequestBody = (entry) => ({
-      data: {
+    const buildSampleRequestBody = (entry) => {
+      const selectedCompany = readFirstSelectedCompany();
+      const partnerIdRaw = Number.parseInt(String(selectedCompany?.dataset.companyId || samplePartnerId || "0"), 10);
+      const branchIdRaw = Number.parseInt(String(selectedCompany?.dataset.companyBranchId || sampleBranchId || "0"), 10);
+      const partnerIdValue = Number.isFinite(partnerIdRaw) && partnerIdRaw > 0 ? partnerIdRaw : 0;
+      const branchIdValue = Number.isFinite(branchIdRaw) && branchIdRaw > 0 ? branchIdRaw : 0;
+
+      return {
+        data: {
         "full-name": String(entry?.fullName || "").trim(),
         "is-active": true,
         "day-for-can-view-expired-journey": null,
@@ -4458,14 +4592,14 @@
         "user-modules": [
           {
             "module-id": "Obus",
-            "partner-id": samplePartnerId || 0,
+            "partner-id": partnerIdValue,
             "user-id": 0
           }
         ],
-        branches: [sampleBranchId || 0],
+        branches: [branchIdValue],
         "time-to-change-password": 0,
         "is-mac-address-check": false,
-        permissions: buildPermissionList(sampleBranchId || 0),
+        permissions: buildPermissionList(branchIdValue),
         "report-permissions": [],
         "branch-station-permission": [],
         "user-branch-profile": []
@@ -4476,7 +4610,8 @@
       },
       language: "tr-TR",
       token: "{{token}}"
-    });
+      };
+    };
 
     const validateEntriesForSubmit = () => {
       const rows = readEntries();
@@ -4534,6 +4669,11 @@
       refreshTemplatesButton.disabled = disabled;
       loadTemplateButton.disabled = disabled || !String(templateSelect.value || "").trim();
       deleteTemplateButton.disabled = disabled || !String(templateSelect.value || "").trim();
+      companyTrigger.disabled = disabled;
+      selectAllCompaniesCheckbox.disabled = disabled;
+      companyCheckboxes.forEach((item) => {
+        item.disabled = disabled;
+      });
       getRows().forEach((row) => {
         row.querySelectorAll("input").forEach((input) => {
           input.disabled = disabled;
@@ -4810,8 +4950,11 @@
     const renderPreview = () => {
       const validation = validateEntriesForSubmit();
       const filledEntries = validation.ok ? validation.entries : readFilledEntries();
+      const selectedCompanyValues = readSelectedCompanyValues();
+      const selectedCompanyCount = selectedCompanyValues.length;
       const sampleEntry = filledEntries[0] || createEmptyEntry();
-      const targetCount = companyCount > 0 ? companyCount * filledEntries.length : 0;
+      const targetCount = selectedCompanyCount > 0 ? selectedCompanyCount * filledEntries.length : 0;
+      const companySelectionError = selectedCompanyCount > 0 ? "" : "En az bir firma seçmelisiniz.";
 
       previewEl.textContent = JSON.stringify(
         {
@@ -4819,13 +4962,14 @@
           meta: {
             templateId: currentTemplateId,
             templateName: normalizeTemplateName(templateNameInput.value || ""),
-            requestReady: validation.ok && companyCount > 0,
-            companyCount,
+            requestReady: validation.ok && selectedCompanyCount > 0,
+            companyCount: selectedCompanyCount,
+            availableCompanyCount: companyCount,
             entryCount: filledEntries.length,
             targetCount,
             samplePartnerId: samplePartnerId || 0,
             sampleBranchId: sampleBranchId || 0,
-            validationError: validation.ok ? "" : validation.error
+            validationError: validation.ok ? companySelectionError : validation.error
           }
         },
         null,
@@ -5177,6 +5321,53 @@
       void deleteTemplate();
     });
 
+    companyTrigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (isBusy()) return;
+      if (companyDropdown.hidden) {
+        openCompanyDropdown();
+      } else {
+        closeCompanyDropdown();
+      }
+    });
+
+    companyTrigger.addEventListener("keydown", (event) => {
+      handleCompanyTypeAheadKey(event);
+    });
+
+    selectAllCompaniesCheckbox.addEventListener("change", () => {
+      companyCheckboxes.forEach((item) => {
+        item.checked = selectAllCompaniesCheckbox.checked;
+      });
+      syncSelectedCompanies();
+      renderPreview();
+    });
+
+    companyCheckboxes.forEach((item) => {
+      item.addEventListener("change", () => {
+        syncSelectedCompanies();
+        renderPreview();
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (companyMultiselect.contains(event.target)) return;
+      closeCompanyDropdown();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeCompanyDropdown();
+      }
+    });
+
+    companyMultiselect.addEventListener("keydown", (event) => {
+      const activeElement = document.activeElement;
+      const isCheckboxActive = activeElement instanceof HTMLInputElement && activeElement.type === "checkbox";
+      if (!isCheckboxActive) return;
+      handleCompanyTypeAheadKey(event);
+    });
+
     createUsersButton.addEventListener("click", () => {
       void (async () => {
         if (isBusy()) return;
@@ -5190,13 +5381,20 @@
           setStatus("Tüm Firmalar listesi boş. Önce firma listesini güncelleyin.", "error");
           return;
         }
+        const selectedCompanyValues = readSelectedCompanyValues();
+        if (selectedCompanyValues.length === 0) {
+          setStatus("En az bir firma seçmelisiniz.", "error");
+          renderPreview();
+          return;
+        }
 
-        const targetCount = validation.entries.length * companyCount;
+        const targetCount = validation.entries.length * selectedCompanyValues.length;
         const confirmed = window.confirm(
-          `${validation.entries.length} kullanıcı satırı, ${companyCount} firmaya gönderilecek. Toplam ${targetCount} createuser isteği başlatılsın mı?`
+          `${validation.entries.length} kullanıcı satırı, ${selectedCompanyValues.length} firmaya gönderilecek. Toplam ${targetCount} createuser isteği başlatılsın mı?`
         );
         if (!confirmed) return;
 
+        closeCompanyDropdown();
         setBusy(true);
         try {
           const response = await fetch(submitUrl, {
@@ -5206,7 +5404,8 @@
               Accept: "application/json"
             },
             body: JSON.stringify({
-              entries: validation.entries
+              entries: validation.entries,
+              companies: selectedCompanyValues
             })
           });
           const data = await parseJsonResponse(response);
@@ -5244,10 +5443,11 @@
       renderPreview();
     });
 
+    syncSelectedCompanies();
     renderRows([createEmptyEntry()]);
     setStatus(
       companyCount > 0
-        ? `Kullanıcı satırlarını hazırlayın. Girilen kullanıcılar ${companyCount} firmaya gönderilecek.`
+        ? `Firma seçimini ve kullanıcı satırlarını hazırlayın. ${companyCount} firma içinden seçim yapılabilir.`
         : "Tüm Firmalar listesi boş görünüyor. Önce firma listesini güncelleyin.",
       companyCount > 0 ? "muted" : "error"
     );

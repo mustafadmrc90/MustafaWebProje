@@ -3659,9 +3659,15 @@ button.ghost {
   color: #1f2735;
 }
 
-.obus-user-create-meta-item span {
+.obus-user-create-meta-item span,
+.obus-user-create-company-select {
   font-size: 12px;
   color: #5f6b7a;
+}
+
+.obus-user-create-company-select {
+  display: grid;
+  gap: 6px;
 }
 
 .obus-user-create-template-grid,

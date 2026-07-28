@@ -52,13 +52,51 @@
           <aside class="obus-user-create-summary-card">
             <div>
               <h2>Hazırlık Alanı</h2>
-              <p>Girilen her kullanıcı satırı, Tüm Firmalar ekranında kayıtlı tüm firmalara ayrı ayrı gönderilir.</p>
+              <p>Girilen her kullanıcı satırı, seçilen firmalara ayrı ayrı gönderilir.</p>
             </div>
 
             <div class="obus-user-create-meta-list">
               <div class="obus-user-create-meta-item">
-                <strong>Hedef Firma Sayısı</strong>
-                <span><%= companyCount || 0 %> firma hedeflenecek.</span>
+                <strong>Hedef Firma Seçimi</strong>
+                <div class="obus-user-create-company-select">
+                  <input type="hidden" value="[]" data-obus-user-create-selected-companies="1" />
+                  <div class="obus-company-multiselect">
+                    <button
+                      type="button"
+                      class="obus-company-trigger"
+                      data-obus-user-create-company-trigger="1"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                    >
+                      Firma seçiniz
+                    </button>
+
+                    <div class="obus-company-dropdown" data-obus-user-create-company-dropdown="1" role="listbox" hidden>
+                      <label class="obus-company-option obus-company-option-all">
+                        <input type="checkbox" data-obus-user-create-select-all="1" />
+                        <span>Hepsi</span>
+                      </label>
+
+                      <% (companyOptions || []).forEach((company) => { %>
+                        <label class="obus-company-option" data-obus-user-create-company-option-row="1">
+                          <input
+                            type="checkbox"
+                            data-obus-user-create-company-checkbox="1"
+                            value="<%= company.value %>"
+                            data-company-label="<%= company.label %>"
+                            data-company-code="<%= company.code %>"
+                            data-company-id="<%= company.id %>"
+                            data-company-cluster="<%= company.cluster %>"
+                            data-company-branch-id="<%= company.branchId %>"
+                            data-company-url="<%= company.url %>"
+                          />
+                          <span><%= company.label %></span>
+                        </label>
+                      <% }) %>
+                    </div>
+                  </div>
+                  <small class="muted">Firma listesi Tüm Firmalar ekranındaki kayıtlardan gelir. <%= companyCount || 0 %> firma içinden seçim yapılabilir.</small>
+                </div>
               </div>
               <div class="obus-user-create-meta-item">
                 <strong>Çoklu satır</strong>
@@ -70,7 +108,7 @@
               </div>
               <div class="obus-user-create-meta-item">
                 <strong>Toplu gönderim</strong>
-                <span>Her kullanıcı için tüm firmalara paralel ve kontrollü istek atılır; durum sağ tarafta canlı izlenir.</span>
+                <span>Her kullanıcı için seçilen firmalara paralel ve kontrollü istek atılır; durum sağ tarafta canlı izlenir.</span>
               </div>
             </div>
           </aside>
@@ -192,6 +230,6 @@
       </section>
     </section>
 
-    <script src="/public/app.js?v=20260728-2" defer></script>
+    <script src="/public/app.js?v=20260728-3" defer></script>
   </body>
 </html>

@@ -21388,10 +21388,12 @@ app.post("/general/obus-jobs", requireAuth, requireMenuAccess("obus-jobs"), asyn
 app.get("/general/obus-user-create", requireAuth, requireMenuAccess("obus-user-create"), async (req, res) => {
   const { partnerItems, partnerError } = await loadAuthorizedLinesCompanies();
   const sampleCompany = Array.isArray(partnerItems) && partnerItems.length > 0 ? partnerItems[0] : null;
+  const companyOptions = buildObusUserDeactivateCompanyOptions(partnerItems);
   res.render("general-obus-user-create", {
     user: req.session.user,
     active: "obus-user-create",
     partnerError,
+    companyOptions,
     companyCount: Array.isArray(partnerItems) ? partnerItems.length : 0,
     samplePartnerId: sampleCompany?.id || "",
     sampleBranchId: sampleCompany?.branchId || ""
@@ -21534,6 +21536,32 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
       });
     }
 
+    const selectedCompanyValues = Array.from(
+      new Set(parseSelectedCompanyValuesFromInput(req.body?.companies ?? req.body?.selectedCompanies))
+    );
+    if (selectedCompanyValues.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "En az bir firma seçmelisiniz."
+      });
+    }
+
+    const selectedCompaniesResult = resolveObusUserDeactivatePartnerItems(partnerItems, selectedCompanyValues);
+    if (selectedCompaniesResult.error) {
+      return res.status(400).json({
+        ok: false,
+        error: selectedCompaniesResult.error
+      });
+    }
+
+    const selectedPartnerItems = Array.isArray(selectedCompaniesResult.items) ? selectedCompaniesResult.items : [];
+    if (selectedPartnerItems.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Kullanıcı oluşturulacak firma listesi bulunamadı."
+      });
+    }
+
     const loginCredentials = getObusUserCreateLoginCredentials();
     if (!loginCredentials.username || !loginCredentials.password) {
       return res.status(400).json({
@@ -21542,7 +21570,7 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
       });
     }
 
-    const totalCount = entryValidation.entries.length * partnerItems.length;
+    const totalCount = entryValidation.entries.length * selectedPartnerItems.length;
     const ownerUserId = Number(req.session?.user?.id || 0);
     const job = createObusLiveJob({
       type: "obus-user-create",
@@ -21553,7 +21581,7 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
     setImmediate(() => {
       runObusBulkUserCreateJob(job, {
         entries: entryValidation.entries,
-        partnerItems
+        partnerItems: selectedPartnerItems
       }).catch((err) => {
         finishObusLiveJob(job, `Toplu kullanıcı oluşturma tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
       });
@@ -21562,7 +21590,7 @@ app.post("/api/obus-user-create/run", requireAuth, requireMenuAccess("obus-user-
     return res.json({
       ok: true,
       jobId: job.id,
-      companyCount: partnerItems.length,
+      companyCount: selectedPartnerItems.length,
       userCount: entryValidation.entries.length,
       totalCount
     });
