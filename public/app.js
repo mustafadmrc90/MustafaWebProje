@@ -2,6 +2,8 @@
   const sidebar = document.querySelector(".sidebar");
   const content = document.querySelector(".content");
   const sidebarCollapsedStorageKey = "dashboard_sidebar_collapsed_v1";
+  const usersPageScrollStorageKey = "users_page_scroll_y_v1";
+  const usersPageScrollAnchorStorageKey = "users_page_scroll_anchor_v1";
 
   if (!sidebar || !content) return;
 
@@ -39,6 +41,66 @@
 
   const isModified = (event) =>
     event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+
+  const findUsersPageMainRow = (targetId) => {
+    const normalizedTargetId = String(targetId || "").trim();
+    if (!normalizedTargetId) return null;
+    return (
+      Array.from(document.querySelectorAll("[data-user-main-row]")).find(
+        (row) => String(row.getAttribute("data-user-main-row") || "").trim() === normalizedTargetId
+      ) || null
+    );
+  };
+
+  const storeUsersPageScrollPosition = (sourceElement) => {
+    try {
+      window.sessionStorage.setItem(usersPageScrollStorageKey, String(Math.max(0, Math.round(window.scrollY || 0))));
+      window.sessionStorage.removeItem(usersPageScrollAnchorStorageKey);
+
+      const targetId =
+        sourceElement instanceof HTMLElement
+          ? String(
+              sourceElement.getAttribute("data-user-preserve-scroll-target") ||
+                sourceElement.closest("[data-user-main-row]")?.getAttribute("data-user-main-row") ||
+                ""
+            ).trim()
+          : "";
+      const targetRow = findUsersPageMainRow(targetId);
+      if (targetRow instanceof HTMLElement) {
+        window.sessionStorage.setItem(
+          usersPageScrollAnchorStorageKey,
+          JSON.stringify({
+            targetId,
+            viewportTop: Math.round(targetRow.getBoundingClientRect().top)
+          })
+        );
+      }
+    } catch (err) {
+      // Ignore storage errors.
+    }
+  };
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      const eventTarget = event.target instanceof Element ? event.target : null;
+      const link = eventTarget?.closest("a[data-user-preserve-scroll='1']");
+      if (!(link instanceof HTMLAnchorElement)) return;
+      if (event.defaultPrevented || link.target || isModified(event)) return;
+      storeUsersPageScrollPosition(link);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "submit",
+    (event) => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.matches("[data-user-preserve-scroll-form='1']")) return;
+      storeUsersPageScrollPosition(form);
+    },
+    true
+  );
 
   const normalizePath = (value) => {
     try {

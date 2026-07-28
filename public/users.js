@@ -97,11 +97,12 @@
       restoreScrollPosition({ x: 0, y: scrollY });
     };
 
+    const restoreDelays = [0, 50, 150, 350, 700];
     window.requestAnimationFrame(() => {
       restoreStoredPosition();
-      window.setTimeout(() => {
-        restoreStoredPosition();
-      }, 0);
+      restoreDelays.forEach((delay) => {
+        window.setTimeout(restoreStoredPosition, delay);
+      });
     });
   };
 
