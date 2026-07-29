@@ -8248,9 +8248,10 @@ async function fetchObusMerkezBranchMapForTarget({
   };
 }
 
-async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
+async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options = {}) {
   const sourceRows = Array.isArray(rows) ? rows : [];
   const inventoryLogin = getInventoryBranchesLoginCredentials();
+  const useFallbackLookup = options?.useFallbackLookup !== false;
   if (sourceRows.length === 0) {
     return { rows: [], notice: null };
   }
@@ -8563,7 +8564,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
   );
   let fallbackErrorMessage = "";
   let fallbackDebugDetail = "";
-  if (unresolvedAfterSiblingPass.length > 0 && !Boolean(signal?.aborted)) {
+  if (useFallbackLookup && unresolvedAfterSiblingPass.length > 0 && !Boolean(signal?.aborted)) {
     const hasDebugTarget = unresolvedAfterSiblingPass.some((item) => item.isDebugTarget === true);
     if (hasDebugTarget) {
       logAllCompaniesObusMerkezDebug("fallback-start", {
@@ -9340,7 +9341,7 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
     const rowsNeedingService = normalizedTargetRows.filter((row) => !String(row?.ObusMerkezSubeID || "").trim());
     const enriched =
       rowsNeedingService.length > 0
-        ? await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedTargetRows)
+        ? await enrichAllCompaniesRowsWithObusMerkezSubeId(normalizedTargetRows, null, { useFallbackLookup: false })
         : { rows: normalizedTargetRows, notice: null };
 
     const missingBranchDetails = buildAllCompaniesObusUpdateMissingBranchDetails(enriched.rows || normalizedTargetRows);
@@ -22828,24 +22829,6 @@ app.post(
       }
 
       const cacheRows = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
-      const clusterSetByPartnerId = new Map();
-      cacheRows.forEach((row) => {
-        const partnerId = String(row?.id || "").trim();
-        const clusterLabel = extractClusterLabel(row?.source);
-        if (!partnerId || !clusterLabel) return;
-        if (!clusterSetByPartnerId.has(partnerId)) {
-          clusterSetByPartnerId.set(partnerId, new Set());
-        }
-        clusterSetByPartnerId.get(partnerId).add(clusterLabel);
-      });
-      const forceRefreshPartnerClusterKeys = new Set();
-      clusterSetByPartnerId.forEach((clusterSet, partnerId) => {
-        if (!(clusterSet instanceof Set) || clusterSet.size <= 1) return;
-        clusterSet.forEach((clusterLabel) => {
-          const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, clusterLabel);
-          if (partnerClusterKey) forceRefreshPartnerClusterKeys.add(partnerClusterKey);
-        });
-      });
       const knownBranchIdByPartnerClusterKey = new Map();
       cacheRows.forEach((row) => {
         const partnerId = String(row?.id || "").trim();
@@ -22855,21 +22838,10 @@ app.post(
         knownBranchIdByPartnerClusterKey.set(partnerClusterKey, branchId);
       });
       const targetRows = cacheRows
-        .filter((row) => {
-          const partnerClusterKey = buildObusMerkezPartnerClusterKey(String(row?.id || "").trim(), row?.source);
-          if (partnerClusterKey && forceRefreshPartnerClusterKeys.has(partnerClusterKey)) return true;
-          return !String(row?.ObusMerkezSubeID || "").trim();
-        })
+        .filter((row) => !String(row?.ObusMerkezSubeID || "").trim())
         .map((row) => {
           const partnerId = String(row?.id || "").trim();
           const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
-          if (partnerClusterKey && forceRefreshPartnerClusterKeys.has(partnerClusterKey)) {
-            return {
-              ...row,
-              ObusMerkezSubeID: "",
-              ObusMerkezSubeIDDebug: ""
-            };
-          }
           const cachedBranchId = String(knownBranchIdByPartnerClusterKey.get(partnerClusterKey) || "").trim();
           if (!partnerClusterKey || !cachedBranchId) return row;
           return {
