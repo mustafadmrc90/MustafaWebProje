@@ -3726,8 +3726,29 @@ function shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId } = {}) {
   return Boolean(requiredPartnerId && normalizedPartnerId && normalizedPartnerId === requiredPartnerId);
 }
 
-function buildUserLoginBaseUrlsWithOverrides({ companyUrl, endpointUrl, partnerCode, partnerId } = {}) {
-  const baseUrls = buildUserLoginBaseUrls(companyUrl, endpointUrl);
+function buildUserLoginBaseUrlsWithOverrides({
+  companyUrl,
+  endpointUrl,
+  partnerCode,
+  partnerId,
+  sessionClusterLabel = ""
+} = {}) {
+  const normalizedSessionCluster = normalizeObusClusterLabel(extractClusterLabel(sessionClusterLabel));
+  const baseUrls = normalizedSessionCluster
+    ? buildUserLoginBaseUrls(endpointUrl, companyUrl)
+    : buildUserLoginBaseUrls(companyUrl, endpointUrl);
+  if (normalizedSessionCluster) {
+    const clusteredBaseUrls = [];
+    const coreProdBaseUrl = buildObusCoreProdApiUrl(normalizedSessionCluster, "/api");
+    if (coreProdBaseUrl) clusteredBaseUrls.push(coreProdBaseUrl);
+    baseUrls.forEach((item) => {
+      const normalized = normalizeTargetUrl(item);
+      if (!normalized) return;
+      if (normalizeObusClusterLabel(extractClusterLabel(normalized)) !== normalizedSessionCluster) return;
+      if (!clusteredBaseUrls.includes(normalized)) clusteredBaseUrls.push(normalized);
+    });
+    if (clusteredBaseUrls.length > 0) return clusteredBaseUrls;
+  }
   if (!shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId })) return baseUrls;
 
   const preprodBaseUrl = normalizeTargetUrl(PARTNERS_REQUIRED_EXTRA_API_URL);
@@ -3884,16 +3905,30 @@ function normalizeObusClusterLabel(value) {
   return /^cluster\d+$/.test(normalized) ? normalized : "";
 }
 
+function buildObusCoreProdApiUrl(clusterLabel = "", apiPath = "/api") {
+  const cluster = normalizeObusClusterLabel(extractClusterLabel(clusterLabel));
+  const rawPath = String(apiPath || "/api").trim() || "/api";
+  const path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+  return cluster ? normalizeTargetUrl(`https://api-coreprod-${cluster}.obus.com.tr${path}`) : "";
+}
+
 function buildSessionUrlForPartnerUrl(partnerUrl, sessionClusterLabel = "") {
   const normalizedCluster =
     normalizeObusClusterLabel(sessionClusterLabel) ||
     normalizeObusClusterLabel(extractClusterLabel(partnerUrl)) ||
     "";
-  const clusteredSessionUrl = normalizedCluster
+  const configuredSessionUrl = normalizedCluster
     ? normalizeTargetUrl(buildUrlForCluster(PARTNERS_SESSION_API_URL, normalizedCluster))
     : "";
-  if (clusteredSessionUrl) {
-    return clusteredSessionUrl;
+  if (
+    configuredSessionUrl &&
+    normalizeObusClusterLabel(extractClusterLabel(configuredSessionUrl)) === normalizedCluster
+  ) {
+    return configuredSessionUrl;
+  }
+  const coreProdSessionUrl = buildObusCoreProdApiUrl(normalizedCluster, "/api/client/getsession");
+  if (coreProdSessionUrl) {
+    return coreProdSessionUrl;
   }
 
   try {
@@ -4017,9 +4052,16 @@ function buildMembershipUserLoginUrl(partnerUrl) {
 }
 
 function buildInventoryGetBranchesUrl(baseUrl, clusterLabel = "") {
-  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  const normalizedCluster = normalizeObusClusterLabel(extractClusterLabel(clusterLabel));
+  const clusteredUrl = buildUrlForCluster(baseUrl, normalizedCluster);
+  const hasRequestedCluster =
+    normalizedCluster && normalizeObusClusterLabel(extractClusterLabel(clusteredUrl)) === normalizedCluster;
+  const sourceUrl =
+    normalizedCluster && !hasRequestedCluster
+      ? buildObusCoreProdApiUrl(normalizedCluster, "/api/inventory/getbranches")
+      : clusteredUrl;
   try {
-    const parsed = new URL(String(clusteredUrl || ""));
+    const parsed = new URL(String(sourceUrl || ""));
     const pathname = String(parsed.pathname || "/");
     const apiMatch = pathname.match(/^(.+?\/api\/?)/i);
     const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
@@ -17390,7 +17432,8 @@ async function fetchAuthorizedLinesLoginInfo({
     companyUrl,
     endpointUrl,
     partnerCode,
-    partnerId
+    partnerId,
+    sessionClusterLabel
   });
   if (loginBaseUrls.length === 0) {
     return {
