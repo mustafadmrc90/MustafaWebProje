@@ -2878,6 +2878,25 @@ function normalizeTokenName(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeSearchTokenName(value) {
+  return String(value || "")
+    .replace(/[Çç]/g, "c")
+    .replace(/[Ğğ]/g, "g")
+    .replace(/[İIı]/g, "i")
+    .replace(/[Öö]/g, "o")
+    .replace(/[Şş]/g, "s")
+    .replace(/[Üü]/g, "u")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function isObusMerkezBranchName(value) {
+  const normalized = normalizeSearchTokenName(value);
+  if (!normalized.startsWith("obusmerkez")) return false;
+  const suffix = normalized.slice("obusmerkez".length);
+  return ["", "sube", "subesi", "merkezsube", "merkezsubesi"].includes(suffix);
+}
+
 function findNestedValue(node, keySet) {
   if (node === null || node === undefined) return undefined;
   if (Array.isArray(node)) {
@@ -3475,7 +3494,6 @@ function extractBranchIdFromUserLoginPayload(payload) {
 
 function extractObusMerkezBranchKeyFromBranchListNode(node) {
   const normalizeText = (value) => String(value === undefined || value === null ? "" : value).trim();
-  const isObusMerkez = (value) => normalizeTokenName(value) === "obusmerkez";
   const parseStructuredText = (value) => {
     const text = normalizeText(value);
     if (!text) return null;
@@ -3507,11 +3525,14 @@ function extractObusMerkezBranchKeyFromBranchListNode(node) {
         "label",
         "title",
         "text",
+        "display-name",
+        "display_name",
+        "displayName",
         "branch-name",
         "branch_name",
         "branchName"
       ]) || "";
-    if (isObusMerkez(labelValue)) {
+    if (isObusMerkezBranchName(labelValue)) {
       const keyValue =
         readPartnerRawValueByAliases(current, [
           "key",
@@ -3529,7 +3550,7 @@ function extractObusMerkezBranchKeyFromBranchListNode(node) {
 
     for (const [key, value] of Object.entries(current)) {
       const keyText = normalizeText(key);
-      if (isObusMerkez(value) && keyText) {
+      if (isObusMerkezBranchName(value) && keyText) {
         return keyText;
       }
       const found = walk(value, keyText);
@@ -7904,6 +7925,7 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     "providerID"
   ];
   const branchIdAliases = [
+    "key",
     "id",
     "branch-id",
     "branch_id",
@@ -7920,6 +7942,9 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     "label",
     "title",
     "text",
+    "display-name",
+    "display_name",
+    "displayName",
     "value"
   ];
 
@@ -7941,7 +7966,7 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     if (typeof node !== "object") return;
 
     const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
-    if (normalizeTokenName(branchName) === "obusmerkez") {
+    if (isObusMerkezBranchName(branchName)) {
       const partnerId =
         formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases)) || normalizedFallbackPartnerId;
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
@@ -9329,7 +9354,7 @@ function normalizeObusMerkezBranchRows(rows, { dedupeByPartnerId = true } = {}) 
     const branchName = String(row?.name || "").trim();
 
     if (!partnerId || !branchId) return;
-    if (normalizeTokenName(branchName) !== "obusmerkez") return;
+    if (!isObusMerkezBranchName(branchName)) return;
     const normalized = {
       partnerId,
       name: "OBUSMERKEZ",
@@ -9454,7 +9479,7 @@ async function collectObusMerkezBranchRowsForAllCompanies(
             const partnerId = String(item?.partnerId || "").trim();
             const branchId = String(item?.branchId || "").trim();
             const name = String(item?.name || "OBUSMERKEZ").trim();
-            if (!partnerId || !branchId || normalizeTokenName(name) !== "obusmerkez") return;
+            if (!partnerId || !branchId || !isObusMerkezBranchName(name)) return;
             collectedRows.push({
               partnerId,
               name: "OBUSMERKEZ",
