@@ -1514,7 +1514,12 @@
         appendLine(
           `Örnek hata: ${snapshot.failureSamples
             .slice(0, 2)
-            .map((item) => `${String(item.company || "").trim() || "-"} - ${String(item.error || "").trim() || "Hata"}`)
+            .map((item) => {
+              const companyText = String(item.company || "").trim() || "-";
+              const errorText = String(item.error || "").trim() || "Hata";
+              const responseText = String(item.response || "").trim();
+              return `${companyText} - ${errorText}${responseText ? ` | Response: ${responseText}` : ""}`;
+            })
             .join(" | ")}`
         );
       } else if (snapshot.done) {

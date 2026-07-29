@@ -4918,7 +4918,8 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
   sessionClusterLabel = "",
   authorization = PARTNERS_API_AUTH,
   timeoutMs = 90000,
-  sessionCache = null
+  sessionCache = null,
+  signal = null
 }) {
   const initialResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl,
@@ -4931,7 +4932,8 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     sessionClusterLabel,
     authorization,
     timeoutMs,
-    sessionCache
+    sessionCache,
+    signal
   });
   const initialToken = String(initialResult?.token || "").trim();
   const retryBranchCandidates = buildUniqueLoginBranchCandidates(
@@ -4959,7 +4961,8 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
       sessionClusterLabel,
       authorization,
       timeoutMs,
-      sessionCache
+      sessionCache,
+      signal
     });
     retryResults.push(retryResult);
     const retryToken = String(retryResult?.token || "").trim();
@@ -16313,6 +16316,132 @@ function appendObusUserDeactivateSkipNotice(error = "") {
   return /sonraki firmaya geçildi/i.test(text) ? text : `${text}; sonraki firmaya geçildi.`;
 }
 
+function extractObusUserDeactivateResponseMessage(value = "") {
+  const normalizedPayload =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : parseJsonSafe(String(value || "").trim());
+  const payload = normalizedPayload && typeof normalizedPayload === "object" ? normalizedPayload : null;
+  if (payload) {
+    const direct =
+      readPartnerRawValueByAliases(payload, [
+        "user-message",
+        "user_message",
+        "userMessage",
+        "message",
+        "Message",
+        "error",
+        "Error",
+        "exception-message",
+        "exception_message",
+        "ExceptionMessage"
+      ]) ||
+      findNestedValue(payload, new Set(["usermessage", "message", "error", "exceptionmessage"])) ||
+      "";
+    const directText = truncateObusDebugText(direct, 320);
+    if (directText) return directText;
+  }
+
+  return truncateObusDebugText(value, 320);
+}
+
+function buildObusUserDeactivateFailureResponseText(result = {}) {
+  const failedPreview =
+    result?.failedRequestPreview && typeof result.failedRequestPreview === "object"
+      ? result.failedRequestPreview
+      : null;
+  return (
+    extractObusUserDeactivateResponseMessage(failedPreview?.responseBody || "") ||
+    extractObusUserDeactivateResponseMessage(result?.errorDetail || "") ||
+    extractObusUserDeactivateResponseMessage(result?.responseBody || "") ||
+    truncateObusDebugText(result?.error || "", 320)
+  );
+}
+
+function buildObusUserDeactivateTimedOutCompanyResult({
+  company = {},
+  service = "Firma sorgusu",
+  selectedUsers = []
+} = {}) {
+  const clusterLabel =
+    normalizeObusClusterLabel(company?.cluster || "") ||
+    normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
+    normalizeObusClusterLabel(extractClusterLabel(OBUS_USER_DEACTIVATE_API_URL)) ||
+    "cluster4";
+  const code = String(company?.code || "").trim();
+  const partnerId = String(company?.id || "").trim();
+  const companyLabel = buildObusUserDeactivateCompanyEventLabel({
+    code,
+    id: partnerId,
+    cluster: clusterLabel
+  });
+  const error = `${service} ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
+  return {
+    ok: false,
+    code,
+    partnerId,
+    clusterLabel,
+    companyLabel,
+    requestUrl: "",
+    status: null,
+    error,
+    errorDetail: "",
+    responseBody: "",
+    listedRows: [],
+    selectedUsers: (Array.isArray(selectedUsers) ? selectedUsers : []).map((item) => ({
+      key: String(item?.key || "").trim(),
+      userIdValue: Number(item?.userIdValue),
+      username: String(item?.username || "").trim()
+    })),
+    firstRequestPreview: null,
+    failedRequestPreview: {
+      service,
+      status: null,
+      requestUrl: "",
+      requestBody: "{}",
+      responseBody: error
+    }
+  };
+}
+
+async function runObusUserDeactivateCompanyWithDeadline({
+  company = {},
+  selectedUsers = [],
+  service = "Firma sorgusu",
+  worker
+} = {}) {
+  const controller = new AbortController();
+  let timeoutId = null;
+  const timedOutResult = buildObusUserDeactivateTimedOutCompanyResult({
+    company,
+    service,
+    selectedUsers
+  });
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve(timedOutResult);
+    }, OBUS_USER_DEACTIVATE_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => worker(controller.signal)),
+      timeoutPromise
+    ]);
+  } catch (err) {
+    return controller.signal.aborted
+      ? timedOutResult
+      : {
+          ...timedOutResult,
+          error: err?.message || "Firma sorgusu başarısız.",
+          failedRequestPreview: null
+        };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function buildObusUserDeleteRequestBody({
   userIds = [],
   sessionId = "",
@@ -16486,7 +16615,8 @@ async function fetchObusUserDeactivateCompanyResult({
   company,
   loginCredentials = {},
   sessionCache = null,
-  usernameFilter = ""
+  usernameFilter = "",
+  signal = null
 }) {
   const companyCode = String(company?.code || "").trim();
   const partnerId = String(company?.id || "").trim();
@@ -16542,7 +16672,8 @@ async function fetchObusUserDeactivateCompanyResult({
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
-    sessionCache
+    sessionCache,
+    signal
   });
   const firstLoginTrace = getFirstObusServiceTrace(loginResult?.serviceLogs);
   const firstRequestPreview = buildPreview(firstLoginTrace, {
@@ -16590,6 +16721,14 @@ async function fetchObusUserDeactivateCompanyResult({
   });
 
   const controller = new AbortController();
+  const abortFromOuterSignal = () => controller.abort();
+  if (signal && typeof signal === "object") {
+    if (signal.aborted) {
+      controller.abort();
+    } else if (typeof signal.addEventListener === "function") {
+      signal.addEventListener("abort", abortFromOuterSignal, { once: true });
+    }
+  }
   const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
 
   try {
@@ -16711,6 +16850,9 @@ async function fetchObusUserDeactivateCompanyResult({
     return failure;
   } finally {
     clearTimeout(timeout);
+    if (signal && typeof signal.removeEventListener === "function") {
+      signal.removeEventListener("abort", abortFromOuterSignal);
+    }
   }
 }
 
@@ -16718,7 +16860,8 @@ async function deactivateObusUsersForCompany({
   company,
   selectedUsers = [],
   loginCredentials = {},
-  sessionCache = null
+  sessionCache = null,
+  signal = null
 }) {
   const normalizedSelectedUsers = (Array.isArray(selectedUsers) ? selectedUsers : []).filter(
     (item) => item && Number.isInteger(Number(item.userIdValue)) && Number(item.userIdValue) > 0
@@ -16787,7 +16930,8 @@ async function deactivateObusUsersForCompany({
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
-    sessionCache
+    sessionCache,
+    signal
   });
   const firstLoginTrace = getFirstObusServiceTrace(loginResult?.serviceLogs);
   const firstRequestPreview = buildPreview(firstLoginTrace, {
@@ -16848,6 +16992,14 @@ async function deactivateObusUsersForCompany({
   }
 
   const controller = new AbortController();
+  const abortFromOuterSignal = () => controller.abort();
+  if (signal && typeof signal === "object") {
+    if (signal.aborted) {
+      controller.abort();
+    } else if (typeof signal.addEventListener === "function") {
+      signal.addEventListener("abort", abortFromOuterSignal, { once: true });
+    }
+  }
   const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
 
   try {
@@ -16946,6 +17098,9 @@ async function deactivateObusUsersForCompany({
     return failure;
   } finally {
     clearTimeout(timeout);
+    if (signal && typeof signal.removeEventListener === "function") {
+      signal.removeEventListener("abort", abortFromOuterSignal);
+    }
   }
 }
 
@@ -16969,10 +17124,16 @@ async function fetchObusUserDeactivateSearchReport({ partnerItems = [] }) {
     partnerItems,
     OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
     async (company) =>
-      fetchObusUserDeactivateCompanyResult({
+      runObusUserDeactivateCompanyWithDeadline({
         company,
-        loginCredentials,
-        sessionCache
+        service: "Firma sorgusu",
+        worker: (signal) =>
+          fetchObusUserDeactivateCompanyResult({
+            company,
+            loginCredentials,
+            sessionCache,
+            signal
+          })
       })
   );
 
@@ -17222,11 +17383,17 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         }
       });
 
-      const result = await fetchObusUserDeactivateCompanyResult({
+      const result = await runObusUserDeactivateCompanyWithDeadline({
         company,
-        loginCredentials,
-        sessionCache,
-        usernameFilter: normalizedUsernameFilter
+        service: "Firma sorgusu",
+        worker: (signal) =>
+          fetchObusUserDeactivateCompanyResult({
+            company,
+            loginCredentials,
+            sessionCache,
+            usernameFilter: normalizedUsernameFilter,
+            signal
+          })
       });
       if (!firstRequestPreview && result?.firstRequestPreview) {
         firstRequestPreview = result.firstRequestPreview;
@@ -17287,6 +17454,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
           }
         });
       } else {
+        const failureResponseText = buildObusUserDeactivateFailureResponseText(result);
         pushObusLiveJobEvent(job, {
           key: eventKey,
           label: eventLabel,
@@ -17299,7 +17467,8 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
             Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
             String(result?.requestUrl || "").trim()
               ? `url=${truncateObusDebugText(String(result.requestUrl || "").trim(), 120)}`
-              : ""
+              : "",
+            failureResponseText ? `response=${failureResponseText}` : ""
           ]
             .filter(Boolean)
             .join(" | "),
@@ -17313,7 +17482,8 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
 
         pushObusUserCreateSample(failureSamples, {
           company: String(result?.code || "Firma").trim(),
-          error: String(result?.error || "Firma sorgusu başarısız.").trim()
+          error: String(result?.error || "Firma sorgusu başarısız.").trim(),
+          response: failureResponseText
         });
       }
 
@@ -21542,11 +21712,18 @@ app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess(
       groupedTargets,
       OBUS_USER_DELETE_COMPANY_CONCURRENCY,
       async (group) =>
-        deactivateObusUsersForCompany({
+        runObusUserDeactivateCompanyWithDeadline({
           company: group.company,
           selectedUsers: group.users,
-          loginCredentials,
-          sessionCache
+          service: "DeleteUser",
+          worker: (signal) =>
+            deactivateObusUsersForCompany({
+              company: group.company,
+              selectedUsers: group.users,
+              loginCredentials,
+              sessionCache,
+              signal
+            })
         })
     );
 
