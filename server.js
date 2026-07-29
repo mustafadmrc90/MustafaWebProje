@@ -8189,12 +8189,28 @@ async function fetchObusMerkezBranchMapForTarget({
   onProgress = null
 }) {
   const inventoryLogin = getInventoryBranchesLoginCredentials();
-  const cluster = extractClusterLabel(clusterLabel);
+  const cluster = normalizeObusClusterLabel(extractClusterLabel(clusterLabel));
   const endpointCandidates = [];
-  [
-    buildInventoryGetBranchesUrl(companyUrl, cluster),
-    buildInventoryGetBranchesUrl(INVENTORY_BRANCHES_API_URL, cluster)
-  ].forEach((url) => {
+
+  if (!cluster) {
+    return {
+      cluster: "",
+      map: new Map(),
+      rows: [],
+      error: "Firma için geçerli cluster bilgisi bulunamadı.",
+      serviceLogs: [],
+      failedServiceLog: null
+    };
+  }
+
+  const normalizedCompanyUrl = normalizeTargetUrl(companyUrl);
+  const endpointSourceUrls = [INVENTORY_BRANCHES_API_URL];
+  if (normalizeObusClusterLabel(extractClusterLabel(normalizedCompanyUrl))) {
+    endpointSourceUrls.push(normalizedCompanyUrl);
+  }
+
+  endpointSourceUrls.forEach((sourceUrl) => {
+    const url = buildInventoryGetBranchesUrl(sourceUrl, cluster);
     const normalizedUrl = normalizeTargetUrl(url);
     if (!normalizedUrl || endpointCandidates.includes(normalizedUrl)) return;
     endpointCandidates.push(normalizedUrl);
@@ -8243,7 +8259,7 @@ async function fetchObusMerkezBranchMapForTarget({
   for (const endpointUrl of endpointCandidates) {
     const loginResult = await fetchAuthorizedLinesLoginInfo({
       endpointUrl,
-      companyUrl: normalizeTargetUrl(companyUrl) || endpointUrl,
+      companyUrl: endpointUrl,
       partnerCode: normalizedPartnerCode,
       partnerId: normalizedFallbackPartnerId,
       username: inventoryLogin.username,
@@ -8252,6 +8268,7 @@ async function fetchObusMerkezBranchMapForTarget({
       timeoutMs: 20000,
       authorization: INVENTORY_BRANCHES_API_AUTH,
       allowEmptyPartnerCode: false,
+      sessionClusterLabel: cluster,
       signal,
       onProgress: reportProgress
     });
@@ -9481,6 +9498,38 @@ function buildAllCompaniesObusUpdateTimeoutMessage(step = null, summary = {}) {
   }`;
 }
 
+function timeoutAllCompaniesObusUpdateJob(job) {
+  if (!job || typeof job !== "object" || job.done) return "";
+  const summary = job.summary && typeof job.summary === "object" ? job.summary : {};
+  const scanned = Number.isFinite(Number(summary.scanned))
+    ? Math.max(0, Number(summary.scanned))
+    : Math.max(0, Number(job.totalCount || 0));
+  const filled = Number.isFinite(Number(summary.filled))
+    ? Math.max(0, Number(summary.filled))
+    : Math.max(0, Number(job.successCount || 0));
+  const remaining = Number.isFinite(Number(summary.remaining))
+    ? Math.max(0, Number(summary.remaining))
+    : Math.max(0, scanned - filled);
+  const timeoutSummary = {
+    ...summary,
+    scanned,
+    filled,
+    remaining
+  };
+  const timeoutMessage = buildAllCompaniesObusUpdateTimeoutMessage(job.activeStep || null, timeoutSummary);
+  job.statusMessage = timeoutMessage;
+  job.summary = {
+    ...timeoutSummary,
+    partial: true,
+    timedOut: true,
+    notice: [timeoutMessage, String(summary.notice || "").trim()]
+      .filter((part, index, parts) => part && parts.indexOf(part) === index)
+      .join(" | ")
+  };
+  finishObusLiveJob(job, timeoutMessage);
+  return timeoutMessage;
+}
+
 function buildAllCompaniesObusUpdateMissingBranchDetails(rows) {
   const itemsByKey = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
@@ -9598,6 +9647,7 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
   const controller = new AbortController();
   let timedOut = false;
   const setActiveStep = (progress = {}) => {
+    if (job.done) return;
     const activeStep = normalizeAllCompaniesObusUpdateActiveStep(progress);
     job.activeStep = activeStep;
     job.statusMessage = timedOut
@@ -9608,8 +9658,7 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
-    job.statusMessage = buildAllCompaniesObusUpdateTimeoutMessage(job.activeStep || null, job.summary || {});
-    job.updatedAt = Date.now();
+    timeoutAllCompaniesObusUpdateJob(job);
   }, ALL_COMPANIES_OBUS_UPDATE_TIMEOUT_MS);
 
   try {
@@ -9639,10 +9688,19 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
           })
         : { rows: normalizedTargetRows, notice: null };
 
+    if (timedOut || Boolean(controller.signal.aborted) || job.done) {
+      timeoutAllCompaniesObusUpdateJob(job);
+      return;
+    }
+
     const missingBranchDetails = buildAllCompaniesObusUpdateMissingBranchDetails(enriched.rows || normalizedTargetRows);
     const finalRows = normalizeAllCompaniesCacheRows(enriched.rows || normalizedTargetRows);
     const saveResult = await upsertAllCompaniesCacheRows(finalRows);
     if (saveResult.error) {
+      if (timedOut || Boolean(controller.signal.aborted) || job.done) {
+        timeoutAllCompaniesObusUpdateJob(job);
+        return;
+      }
       console.error("All companies ObusMerkezSubeID background save error:", saveResult.error);
       finishObusLiveJob(job, `ObusMerkezSubeID güncellemesi kaydedilemedi: ${saveResult.error}`);
       return;
@@ -9672,19 +9730,16 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
       missingBranchDetails
     };
     if (wasAborted) {
-      job.statusMessage = timeoutMessage;
-      finishObusLiveJob(job, timeoutMessage);
+      timeoutAllCompaniesObusUpdateJob(job);
       return;
     }
     finishObusLiveJob(job, null);
   } catch (err) {
-    console.error("All companies ObusMerkezSubeID background update error:", err);
     if (timedOut || Boolean(controller.signal.aborted)) {
-      const timeoutMessage = buildAllCompaniesObusUpdateTimeoutMessage(job.activeStep || null, job.summary || {});
-      job.statusMessage = timeoutMessage;
-      finishObusLiveJob(job, timeoutMessage);
+      timeoutAllCompaniesObusUpdateJob(job);
       return;
     }
+    console.error("All companies ObusMerkezSubeID background update error:", err);
     finishObusLiveJob(job, `ObusMerkezSubeID güncellemesi tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`);
   } finally {
     clearTimeout(timeout);
