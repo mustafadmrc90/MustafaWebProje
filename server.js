@@ -9098,7 +9098,7 @@ async function fetchAllPartnerRows({ includeObusMerkezSubeId = false } = {}) {
     } else {
       rows = attachAllCompaniesMissingObusDebug(
         rows,
-        "Detay: ObusMerkezSubeID servis verisinde henuz yok. 'ObusMerkezSubeID Guncelle' butonunu kullanin."
+        "Detay: ObusMerkezSubeID servis verisinde henuz yok."
       );
     }
 
@@ -23322,7 +23322,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   }
 
   let syncMessage = shouldSync
-    ? `Servisten ${result.rows?.length || 0} kayıt getirildi. Boş ObusMerkezSubeID kayıtları için 'ObusMerkezSubeID Güncelle' butonunu kullanın. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`
+    ? `Servisten ${result.rows?.length || 0} kayıt getirildi. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`
     : hasServicePreview
       ? `Servisten alınan son veri hazır (${previewSnapshot.rows.length} kayıt).`
       : "";
@@ -23336,7 +23336,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
         errorParts.push(syncJob.error);
       } else {
         const syncRowCount = Number(syncJob?.summary?.rowCount || previewSnapshot?.rows?.length || 0);
-        syncMessage = `Servisten ${syncRowCount} kayıt getirildi. Boş ObusMerkezSubeID kayıtları için 'ObusMerkezSubeID Güncelle' butonunu kullanın. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`;
+        syncMessage = `Servisten ${syncRowCount} kayıt getirildi. SQL'e kaydetmek için 'SQL'e Kaydet' butonunu kullanın.`;
         const syncError = String(syncJob?.summary?.error || "").trim();
         if (syncError) {
           syncMessageKind = "warning";
@@ -23508,59 +23508,7 @@ app.post(
   "/reports/all-companies/update-obus-merkez-sube-id",
   requireAuth,
   requireMenuAccess("all-companies"),
-  async (req, res) => {
-    try {
-      const currentUserId = Number(req.session?.user?.id || 0);
-      const cacheResult = await fetchAllCompaniesRowsFromCache();
-      if (cacheResult.error) {
-        return res.redirect("/reports/all-companies?saveErr=obus_update_failed");
-      }
-
-      const cacheRows = normalizeAllCompaniesCacheRows(cacheResult.rows || []);
-      const knownBranchIdByPartnerClusterKey = new Map();
-      cacheRows.forEach((row) => {
-        const partnerId = String(row?.id || "").trim();
-        const branchId = String(row?.ObusMerkezSubeID || "").trim();
-        const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
-        if (!partnerClusterKey || !branchId || knownBranchIdByPartnerClusterKey.has(partnerClusterKey)) return;
-        knownBranchIdByPartnerClusterKey.set(partnerClusterKey, branchId);
-      });
-      const targetRows = cacheRows
-        .filter((row) => !String(row?.ObusMerkezSubeID || "").trim())
-        .map((row) => {
-          const partnerId = String(row?.id || "").trim();
-          const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, row?.source);
-          const cachedBranchId = String(knownBranchIdByPartnerClusterKey.get(partnerClusterKey) || "").trim();
-          if (!partnerClusterKey || !cachedBranchId) return row;
-          return {
-            ...row,
-            ObusMerkezSubeID: cachedBranchId
-          };
-        });
-      if (targetRows.length === 0) {
-        return res.redirect("/reports/all-companies?cache=1&obusUpdated=1&obusScanned=0&obusFilled=0&obusRemaining=0");
-      }
-      const job = createObusLiveJob({
-        type: "all-companies-obus-update",
-        ownerUserId: currentUserId,
-        totalCount: targetRows.length
-      });
-
-      setImmediate(() => {
-        runAllCompaniesObusMerkezUpdateJob(job, targetRows).catch((err) => {
-          finishObusLiveJob(
-            job,
-            `ObusMerkezSubeID güncellemesi tamamlanamadı: ${err?.message || "Bilinmeyen hata"}`
-          );
-        });
-      });
-
-      return res.redirect(`/reports/all-companies?cache=1&obusJobId=${encodeURIComponent(job.id)}`);
-    } catch (err) {
-      console.error("All companies ObusMerkezSubeID update error:", err);
-      return res.redirect("/reports/all-companies?saveErr=obus_update_failed");
-    }
-  }
+  (req, res) => res.redirect("/reports/all-companies?cache=1")
 );
 
 app.get("/reports/slack-analysis", requireAuth, requireMenuAccess("slack-analysis"), async (req, res) => {
