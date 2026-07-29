@@ -7677,6 +7677,8 @@
     const responseBody = document.querySelector("#response-body");
     const responseUrl = document.querySelector("#response-url");
     const responseTime = document.querySelector("#response-time");
+    const requestTraceList = document.querySelector("#request-trace");
+    const requestTraceSummary = document.querySelector("#request-trace-summary");
     const targetInput = document.querySelector("#target-url-input");
     const loginProfileSelect = document.querySelector("#login-profile-select");
     const loginPartnerCodeInput = document.querySelector("#login-partner-code");
@@ -8303,13 +8305,122 @@
       refreshTargetOptions(selectedTargetUrl || getActiveTargetUrl());
     });
 
+    const formatTracePayload = (value) => {
+      if (value === undefined || value === null) return "";
+      if (typeof value === "string") {
+        const text = value.trim();
+        if (!text) return "";
+        try {
+          return JSON.stringify(JSON.parse(text), null, 2);
+        } catch (err) {
+          return text;
+        }
+      }
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch (err) {
+        return String(value ?? "");
+      }
+    };
+
+    const appendTraceBlock = (container, label, value) => {
+      const text = formatTracePayload(value);
+      if (!text) return;
+
+      const block = document.createElement("div");
+      block.className = "request-trace-block";
+
+      const title = document.createElement("span");
+      title.textContent = label;
+
+      const pre = document.createElement("pre");
+      pre.textContent = text;
+
+      block.appendChild(title);
+      block.appendChild(pre);
+      container.appendChild(block);
+    };
+
+    const renderRequestTrace = (items = [], summary = {}) => {
+      if (!requestTraceList) return;
+      const traceItems = Array.isArray(items) ? items : [];
+      requestTraceList.innerHTML = "";
+
+      const totalMs =
+        Number.isFinite(Number(summary.totalMs))
+          ? Number(summary.totalMs)
+          : traceItems.reduce((total, item) => total + (Number(item?.durationMs) || 0), 0);
+      if (requestTraceSummary) {
+        requestTraceSummary.textContent = traceItems.length
+          ? `${traceItems.length} adım · toplam ${Math.max(0, Math.round(totalMs))} ms`
+          : "Henüz istek yok";
+      }
+
+      if (!traceItems.length) {
+        const empty = document.createElement("div");
+        empty.className = "request-trace-empty";
+        empty.textContent = "İstek gönderildiğinde adımlar burada görünecek.";
+        requestTraceList.appendChild(empty);
+        return;
+      }
+
+      traceItems.forEach((item, index) => {
+        const isError = String(item?.status || "").toLowerCase() === "error";
+        const step = document.createElement("article");
+        step.className = `request-trace-step${isError ? " error" : ""}`;
+
+        const header = document.createElement("div");
+        header.className = "request-trace-step-header";
+
+        const title = document.createElement("div");
+        title.className = "request-trace-step-title";
+        title.textContent = `${index + 1}. ${String(item?.title || "Adım").trim()}`;
+
+        const meta = document.createElement("div");
+        meta.className = "request-trace-step-meta";
+
+        const group = String(item?.group || "").trim();
+        if (group) {
+          const groupEl = document.createElement("span");
+          groupEl.className = "request-trace-group";
+          groupEl.textContent = group;
+          meta.appendChild(groupEl);
+        }
+
+        const status = document.createElement("span");
+        status.textContent = isError ? "Hata" : "OK";
+        meta.appendChild(status);
+
+        const duration = document.createElement("span");
+        duration.textContent = `${Math.max(0, Math.round(Number(item?.durationMs) || 0))} ms`;
+        meta.appendChild(duration);
+
+        header.appendChild(title);
+        header.appendChild(meta);
+        step.appendChild(header);
+
+        const grid = document.createElement("div");
+        grid.className = "request-trace-grid";
+        appendTraceBlock(grid, "Req", item?.request);
+        appendTraceBlock(grid, "Res", item?.response);
+        appendTraceBlock(grid, "Timing", item?.timings);
+        if (String(item?.note || "").trim()) {
+          appendTraceBlock(grid, "Not", item.note);
+        }
+        step.appendChild(grid);
+
+        requestTraceList.appendChild(step);
+      });
+    };
+
     const getDefaultResponseState = () => ({
       statusText: "",
       badgeText: "Bekleniyor",
       badgeClass: "muted",
       body: "{}",
       url: "",
-      time: ""
+      time: "",
+      clearTrace: true
     });
 
     const normalizeResponseState = (state = {}) => {
@@ -8334,6 +8445,11 @@
       if (responseBody) responseBody.textContent = nextState.body;
       if (responseUrl) responseUrl.textContent = nextState.url;
       if (responseTime) responseTime.textContent = nextState.time;
+      if (Array.isArray(state?.trace)) {
+        renderRequestTrace(state.trace, state.traceSummary || {});
+      } else if (state?.clearTrace) {
+        renderRequestTrace([]);
+      }
     };
 
     const saveLastResponseForEndpoint = (endpointId, state) => {
@@ -8352,7 +8468,7 @@
         setResponseState(getDefaultResponseState());
         return;
       }
-      setResponseState(saved);
+      setResponseState({ ...saved, clearTrace: true });
     };
 
     showStoredResponseForEndpoint(selected);
@@ -8520,6 +8636,38 @@
       }
     };
 
+    const appendExecutionTrace = (target, group, result) => {
+      if (!Array.isArray(target)) return;
+      const label = String(group || "İstek").trim() || "İstek";
+      const sourceTrace = Array.isArray(result?.data?.trace)
+        ? result.data.trace
+        : Array.isArray(result?.trace)
+          ? result.trace
+          : [];
+      if (sourceTrace.length) {
+        sourceTrace.forEach((item) => {
+          target.push({
+            ...item,
+            group: label
+          });
+        });
+        return;
+      }
+      if (result && result.ok === false) {
+        target.push({
+          title: "Client -> /api/execute",
+          status: "error",
+          durationMs: 0,
+          group: label,
+          request: null,
+          response: {
+            error: result.error || "İstek başarısız.",
+            details: result.details || ""
+          }
+        });
+      }
+    };
+
     const ensureSuccessfulStep = (stepName, result) => {
       if (!result.ok) {
         throw new Error(`${stepName} başarısız: ${result.error || "İstek tamamlanamadı."}`);
@@ -8583,11 +8731,14 @@
 
     sendBtn?.addEventListener("click", async () => {
       let currentEndpointId = Number(selected);
+      const workflowStartedAt = Date.now();
+      const workflowTrace = [];
       setResponseState({
         statusText: "İstek gönderiliyor...",
         badgeText: "İşleniyor",
         badgeClass: "muted",
-        body: "..."
+        body: "...",
+        trace: []
       });
 
       try {
@@ -8635,6 +8786,8 @@
             targetUrlOverride: activeTargetUrl
           });
           const getSessionResult = await executePayload(getSessionPayload);
+          appendExecutionTrace(workflowTrace, "GetSession", getSessionResult);
+          renderRequestTrace(workflowTrace, { totalMs: Date.now() - workflowStartedAt });
           const getSessionData = ensureSuccessfulStep("GetSession", getSessionResult);
           const extracted = extractSessionVariables(getSessionData.body || "");
           if (!extracted.sessionId || !extracted.deviceId) {
@@ -8664,6 +8817,8 @@
             targetUrlOverride: activeTargetUrl
           });
           const getParameterResult = await executePayload(getParameterPayload);
+          appendExecutionTrace(workflowTrace, "GetParameter", getParameterResult);
+          renderRequestTrace(workflowTrace, { totalMs: Date.now() - workflowStartedAt });
           ensureSuccessfulStep("GetParameter", getParameterResult);
 
           setResponseState({
@@ -8687,12 +8842,15 @@
           targetUrlOverride: activeTargetUrl
         });
         const execution = await executePayload(payload);
+        appendExecutionTrace(workflowTrace, current.title || current.path || "Endpoint", execution);
         if (!execution.ok || !execution.data) {
           const errorState = {
             statusText: execution.error || "İstek başarısız.",
             badgeText: "Hata",
             badgeClass: "muted",
-            body: execution.details || "{}"
+            body: execution.details || "{}",
+            trace: workflowTrace,
+            traceSummary: { totalMs: Date.now() - workflowStartedAt }
           };
           setResponseState(errorState);
           saveLastResponseForEndpoint(currentEndpointId, errorState);
@@ -8709,13 +8867,19 @@
             ? `405 Method Not Allowed (Allow: ${allowHeader})`
             : "405 Method Not Allowed (method/path kontrol et)";
         }
+        const timingText = [
+          Number.isFinite(Number(data.durationMs)) ? `Dış API: ${Math.round(Number(data.durationMs))} ms` : "",
+          Number.isFinite(Number(data.serverDurationMs)) ? `Server: ${Math.round(Number(data.serverDurationMs))} ms` : ""
+        ].filter(Boolean).join(" · ");
         const successState = {
           statusText: statusLine,
           badgeText: `${data.status} ${data.statusText}`,
           badgeClass,
           body: formatted || "{}",
           url: data.url ? `URL: ${data.url}` : "",
-          time: data.durationMs ? `Süre: ${data.durationMs} ms` : ""
+          time: timingText,
+          trace: workflowTrace,
+          traceSummary: { totalMs: Date.now() - workflowStartedAt }
         };
         setResponseState(successState);
         saveLastResponseForEndpoint(currentEndpointId, successState);
@@ -8727,7 +8891,9 @@
           statusText: err.message || "İstek hatası.",
           badgeText: "Hata",
           badgeClass: "muted",
-          body: "{}"
+          body: "{}",
+          trace: workflowTrace,
+          traceSummary: { totalMs: Date.now() - workflowStartedAt }
         };
         setResponseState(errorState);
         saveLastResponseForEndpoint(currentEndpointId, errorState);

@@ -326,6 +326,8 @@ const APP_ASSET_VERSION = String(
 const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "25mb").trim() || "25mb";
 const REQUEST_BODY_PARAMETER_LIMIT =
   Number.parseInt(process.env.REQUEST_BODY_PARAMETER_LIMIT || "50000", 10) || 50000;
+const EXECUTE_TRACE_PREVIEW_LIMIT =
+  Number.parseInt(process.env.EXECUTE_TRACE_PREVIEW_LIMIT || "12000", 10) || 12000;
 const initDbOnly = String(process.env.INIT_DB_ONLY || "")
   .trim()
   .toLowerCase() === "true";
@@ -1133,6 +1135,7 @@ async function initDb() {
       response_text TEXT,
       response_headers TEXT,
       duration_ms INTEGER,
+      trace_json TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       FOREIGN KEY (endpoint_id) REFERENCES api_endpoints(id) ON DELETE CASCADE
     )
@@ -1148,6 +1151,7 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS response_text TEXT,
       ADD COLUMN IF NOT EXISTS response_headers TEXT,
       ADD COLUMN IF NOT EXISTS duration_ms INTEGER,
+      ADD COLUMN IF NOT EXISTS trace_json TEXT,
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   `);
 
@@ -7691,6 +7695,78 @@ function buildExecuteRequestBody(body) {
 
   connection["ip-address"] = getObusSessionConnectionIpAddress();
   return JSON.stringify(parsedBody);
+}
+
+function isSensitiveExecuteTraceHeader(key) {
+  return /authorization|cookie|token|api[-_]?key|secret|password/i.test(String(key || "").trim());
+}
+
+function redactExecuteTraceHeaders(headers = {}) {
+  if (!headers || typeof headers !== "object") return {};
+  return Object.entries(headers).reduce((acc, [key, value]) => {
+    if (!key) return acc;
+    acc[key] = isSensitiveExecuteTraceHeader(key) ? "***" : String(value ?? "");
+    return acc;
+  }, {});
+}
+
+function limitExecuteTraceText(value, maxLength = EXECUTE_TRACE_PREVIEW_LIMIT) {
+  const text = String(value ?? "");
+  const limit = Math.max(200, Number(maxLength) || EXECUTE_TRACE_PREVIEW_LIMIT);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}\n... (${text.length - limit} karakter daha var)`;
+}
+
+function buildExecuteTraceBodyPreview(value) {
+  if (value === undefined) return "";
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    try {
+      return limitExecuteTraceText(JSON.stringify(JSON.parse(trimmed), null, 2));
+    } catch (err) {
+      return limitExecuteTraceText(trimmed);
+    }
+  }
+  try {
+    return limitExecuteTraceText(JSON.stringify(value, null, 2));
+  } catch (err) {
+    return limitExecuteTraceText(String(value ?? ""));
+  }
+}
+
+function addExecuteTraceStep(trace, step) {
+  const startedAt = Number(step?.startedAt) || Date.now();
+  const endedAt = Number(step?.endedAt) || Date.now();
+  trace.push({
+    title: String(step?.title || "").trim() || "Adım",
+    status: String(step?.status || "ok").trim() || "ok",
+    startedAt: new Date(startedAt).toISOString(),
+    endedAt: new Date(endedAt).toISOString(),
+    durationMs: Math.max(0, endedAt - startedAt),
+    request: step?.request === undefined ? null : step.request,
+    response: step?.response === undefined ? null : step.response,
+    timings: step?.timings && typeof step.timings === "object" ? step.timings : null,
+    note: String(step?.note || "").trim()
+  });
+}
+
+function buildExecuteClientRequestTrace(req, body) {
+  return {
+    method: req.method,
+    url: req.originalUrl || req.path || "/api/execute",
+    headers: redactExecuteTraceHeaders(req.headers),
+    body: {
+      endpointId: body?.endpointId ?? null,
+      targetUrl: body?.targetUrl ?? "",
+      path: body?.path ?? "",
+      method: body?.method ?? "",
+      headers: redactExecuteTraceHeaders(body?.headers || {}),
+      params: body?.params || {},
+      body: buildExecuteTraceBodyPreview(body?.body)
+    }
+  };
 }
 
 async function fetchPartnerSessionCredentials(
@@ -24309,12 +24385,71 @@ app.put("/api/endpoints/:id", requireAuth, async (req, res) => {
 });
 
 app.post("/api/execute", requireAuth, async (req, res) => {
+  const routeStartedAt = Date.now();
+  const trace = [];
   const { endpointId, targetUrl, path, method, headers, params, body } = req.body || {};
+
+  addExecuteTraceStep(trace, {
+    title: "Browser -> Server",
+    startedAt: routeStartedAt,
+    endedAt: Date.now(),
+    request: buildExecuteClientRequestTrace(req, req.body || {}),
+    response: {
+      status: "received",
+      route: "/api/execute"
+    }
+  });
+
+  const finishExecuteResponse = (statusCode, payload) => {
+    const responseStartedAt = Date.now();
+    const serverDurationMs = responseStartedAt - routeStartedAt;
+    addExecuteTraceStep(trace, {
+      title: "Server -> Browser",
+      startedAt: responseStartedAt,
+      endedAt: Date.now(),
+      status: statusCode >= 400 || payload?.ok === false ? "error" : "ok",
+      response: {
+        status: statusCode,
+        body: {
+          ...payload,
+          trace: `[${trace.length + 1} adım]`,
+          serverDurationMs
+        }
+      }
+    });
+    return res.status(statusCode).json({
+      ...payload,
+      trace,
+      serverDurationMs: Date.now() - routeStartedAt
+    });
+  };
+
+  const validationStartedAt = Date.now();
   if (!targetUrl && !path) {
-    return res.status(400).json({ ok: false, error: "Hedef URL eksik." });
+    addExecuteTraceStep(trace, {
+      title: "Server hazırlığı",
+      startedAt: validationStartedAt,
+      endedAt: Date.now(),
+      status: "error",
+      response: {
+        status: 400,
+        error: "Hedef URL eksik."
+      }
+    });
+    return finishExecuteResponse(400, { ok: false, error: "Hedef URL eksik." });
   }
   if (!Number.isInteger(Number(endpointId))) {
-    return res.status(400).json({ ok: false, error: "Endpoint seçilmeli." });
+    addExecuteTraceStep(trace, {
+      title: "Server hazırlığı",
+      startedAt: validationStartedAt,
+      endedAt: Date.now(),
+      status: "error",
+      response: {
+        status: 400,
+        error: "Endpoint seçilmeli."
+      }
+    });
+    return finishExecuteResponse(400, { ok: false, error: "Endpoint seçilmeli." });
   }
 
   let url;
@@ -24327,7 +24462,18 @@ app.post("/api/execute", requireAuth, async (req, res) => {
       url = new URL(path);
     }
   } catch (err) {
-    return res.status(400).json({ ok: false, error: "Geçersiz URL." });
+    addExecuteTraceStep(trace, {
+      title: "Server hazırlığı",
+      startedAt: validationStartedAt,
+      endedAt: Date.now(),
+      status: "error",
+      response: {
+        status: 400,
+        error: "Geçersiz URL.",
+        details: err.message || ""
+      }
+    });
+    return finishExecuteResponse(400, { ok: false, error: "Geçersiz URL." });
   }
 
   if (params && typeof params === "object") {
@@ -24367,27 +24513,79 @@ app.post("/api/execute", requireAuth, async (req, res) => {
   }
 
   const requestBody = hasBody ? buildExecuteRequestBody(body) : undefined;
+  addExecuteTraceStep(trace, {
+    title: "Server hazırlığı",
+    startedAt: validationStartedAt,
+    endedAt: Date.now(),
+    request: {
+      endpointId: Number(endpointId),
+      targetUrl: targetUrl || "",
+      path: path || "",
+      params: params || {},
+      headers: redactExecuteTraceHeaders(headers || {}),
+      body: buildExecuteTraceBodyPreview(body)
+    },
+    response: {
+      method: httpMethod,
+      url: url.toString(),
+      headers: redactExecuteTraceHeaders(finalHeaders),
+      hasBody
+    }
+  });
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   const startedAt = Date.now();
 
   try {
+    const targetStartedAt = Date.now();
     const response = await fetch(url.toString(), {
       method: httpMethod,
       headers: finalHeaders,
       body: requestBody,
       signal: controller.signal
     });
+    const headersReceivedAt = Date.now();
 
     const text = await response.text();
+    const bodyReadAt = Date.now();
     clearTimeout(timeout);
 
-    const durationMs = Date.now() - startedAt;
+    const responseHeaders = Object.fromEntries(response.headers.entries());
+    const durationMs = bodyReadAt - startedAt;
+    addExecuteTraceStep(trace, {
+      title: "Server -> Dış API",
+      startedAt: targetStartedAt,
+      endedAt: bodyReadAt,
+      status: response.ok ? "ok" : "error",
+      request: {
+        method: httpMethod,
+        url: url.toString(),
+        headers: redactExecuteTraceHeaders(finalHeaders),
+        body: buildExecuteTraceBodyPreview(requestBody),
+        bodyBytes: requestBody ? Buffer.byteLength(requestBody, "utf8") : 0
+      },
+      response: {
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url,
+        headers: redactExecuteTraceHeaders(responseHeaders),
+        body: buildExecuteTraceBodyPreview(text),
+        bodyBytes: Buffer.byteLength(text || "", "utf8")
+      },
+      timings: {
+        headersMs: Math.max(0, headersReceivedAt - targetStartedAt),
+        bodyReadMs: Math.max(0, bodyReadAt - headersReceivedAt),
+        totalMs: Math.max(0, bodyReadAt - targetStartedAt)
+      }
+    });
+
+    const logStartedAt = Date.now();
     try {
       await pool.query(
         `INSERT INTO api_requests
-         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms, trace_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           Number(endpointId),
           url.origin,
@@ -24398,30 +24596,80 @@ app.post("/api/execute", requireAuth, async (req, res) => {
           requestBody || "",
           response.status,
           text,
-          JSON.stringify(Object.fromEntries(response.headers.entries())),
-          durationMs
+          JSON.stringify(responseHeaders),
+          durationMs,
+          JSON.stringify(trace)
         ]
       );
+      addExecuteTraceStep(trace, {
+        title: "DB request log",
+        startedAt: logStartedAt,
+        endedAt: Date.now(),
+        request: {
+          table: "api_requests",
+          endpointId: Number(endpointId)
+        },
+        response: {
+          ok: true
+        }
+      });
     } catch (err) {
       console.error("Request log insert error:", err);
+      addExecuteTraceStep(trace, {
+        title: "DB request log",
+        startedAt: logStartedAt,
+        endedAt: Date.now(),
+        status: "error",
+        request: {
+          table: "api_requests",
+          endpointId: Number(endpointId)
+        },
+        response: {
+          ok: false,
+          error: err.message || "Request log insert error"
+        }
+      });
     }
 
-    res.json({
+    return finishExecuteResponse(200, {
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
       url: response.url,
       durationMs,
       body: text,
-      headers: Object.fromEntries(response.headers.entries())
+      headers: responseHeaders
     });
   } catch (err) {
     clearTimeout(timeout);
+    const failedAt = Date.now();
+    addExecuteTraceStep(trace, {
+      title: "Server -> Dış API",
+      startedAt,
+      endedAt: failedAt,
+      status: "error",
+      request: {
+        method: httpMethod,
+        url: url.toString(),
+        headers: redactExecuteTraceHeaders(finalHeaders),
+        body: buildExecuteTraceBodyPreview(requestBody),
+        bodyBytes: requestBody ? Buffer.byteLength(requestBody, "utf8") : 0
+      },
+      response: {
+        error: err.name === "AbortError" ? "Timeout" : err.message || "İstek hatası.",
+        details: err.message || ""
+      },
+      timings: {
+        totalMs: Math.max(0, failedAt - startedAt)
+      }
+    });
+
+    const logStartedAt = Date.now();
     try {
       await pool.query(
         `INSERT INTO api_requests
-         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         (endpoint_id, target_url, method, path, headers, params, body, response_status, response_text, response_headers, duration_ms, trace_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           Number(endpointId),
           url.origin,
@@ -24433,13 +24681,40 @@ app.post("/api/execute", requireAuth, async (req, res) => {
           null,
           err.message || "İstek hatası.",
           "{}",
-          Date.now() - startedAt
+          Date.now() - startedAt,
+          JSON.stringify(trace)
         ]
       );
+      addExecuteTraceStep(trace, {
+        title: "DB request log",
+        startedAt: logStartedAt,
+        endedAt: Date.now(),
+        request: {
+          table: "api_requests",
+          endpointId: Number(endpointId)
+        },
+        response: {
+          ok: true
+        }
+      });
     } catch (logErr) {
       console.error("Request log insert error:", logErr);
+      addExecuteTraceStep(trace, {
+        title: "DB request log",
+        startedAt: logStartedAt,
+        endedAt: Date.now(),
+        status: "error",
+        request: {
+          table: "api_requests",
+          endpointId: Number(endpointId)
+        },
+        response: {
+          ok: false,
+          error: logErr.message || "Request log insert error"
+        }
+      });
     }
-    res.status(502).json({
+    return finishExecuteResponse(502, {
       ok: false,
       error: "İstek hatası.",
       details: err.message
@@ -24474,7 +24749,7 @@ app.get("/api/requests/:endpointId", requireAuth, async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `SELECT id, method, path, target_url, response_status, duration_ms, created_at, body, headers, params, response_text
+      `SELECT id, method, path, target_url, response_status, duration_ms, created_at, body, headers, params, response_text, trace_json
        FROM api_requests
        WHERE endpoint_id = $1
        ORDER BY id DESC
@@ -24496,7 +24771,7 @@ app.get("/api/requests/item/:id", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, endpoint_id, method, path, target_url, headers, params, body,
-              response_status, response_text, response_headers, duration_ms, created_at
+              response_status, response_text, response_headers, duration_ms, trace_json, created_at
        FROM api_requests
        WHERE id = $1`,
       [id]
