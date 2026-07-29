@@ -3947,6 +3947,23 @@ function buildMembershipUserLoginUrl(partnerUrl) {
   }
 }
 
+function buildInventoryGetBranchesUrl(baseUrl, clusterLabel = "") {
+  const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
+  try {
+    const parsed = new URL(String(clusteredUrl || ""));
+    const pathname = String(parsed.pathname || "/");
+    const apiMatch = pathname.match(/^(.+?\/api\/?)/i);
+    const apiPrefixRaw = apiMatch ? apiMatch[1] : "/api/";
+    const apiPrefix = apiPrefixRaw.endsWith("/") ? apiPrefixRaw : `${apiPrefixRaw}/`;
+    parsed.pathname = normalizeApiPath(`${apiPrefix}inventory/getbranches`, "/api/inventory/getbranches");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (err) {
+    return "";
+  }
+}
+
 function buildMembershipCreateUserUrl(baseUrl, clusterLabel = "") {
   const clusteredUrl = buildUrlForCluster(baseUrl, clusterLabel);
   try {
@@ -8026,15 +8043,24 @@ async function fetchObusMerkezBranchMapForTarget({
   clusterLabel,
   partnerCode,
   fallbackPartnerId = "",
+  companyUrl = "",
   signal
 }) {
   const inventoryLogin = getInventoryBranchesLoginCredentials();
   const cluster = extractClusterLabel(clusterLabel);
-  const endpointUrl = normalizeTargetUrl(buildUrlForCluster(INVENTORY_BRANCHES_API_URL, cluster));
+  const endpointCandidates = [];
+  [
+    buildInventoryGetBranchesUrl(companyUrl, cluster),
+    buildInventoryGetBranchesUrl(INVENTORY_BRANCHES_API_URL, cluster)
+  ].forEach((url) => {
+    const normalizedUrl = normalizeTargetUrl(url);
+    if (!normalizedUrl || endpointCandidates.includes(normalizedUrl)) return;
+    endpointCandidates.push(normalizedUrl);
+  });
   const normalizedPartnerCode = String(partnerCode || "").trim();
   const normalizedFallbackPartnerId = String(fallbackPartnerId || "").trim();
 
-  if (!endpointUrl) {
+  if (endpointCandidates.length === 0) {
     return {
       cluster,
       map: new Map(),
@@ -8056,153 +8082,170 @@ async function fetchObusMerkezBranchMapForTarget({
     };
   }
 
-  const loginResult = await fetchAuthorizedLinesLoginInfo({
-    endpointUrl,
-    companyUrl: endpointUrl,
-    partnerCode: normalizedPartnerCode,
-    partnerId: normalizedFallbackPartnerId,
-    username: inventoryLogin.username,
-    password: inventoryLogin.password,
-    fallbackBranchId: normalizedFallbackPartnerId,
-    timeoutMs: 20000,
-    authorization: INVENTORY_BRANCHES_API_AUTH,
-    allowEmptyPartnerCode: false
-  });
-  const serviceLogs = Array.isArray(loginResult?.serviceLogs) ? [...loginResult.serviceLogs] : [];
+  const serviceLogs = [];
+  const errors = [];
+  let lastFailedServiceLog = null;
+  let lastEmptyResult = null;
 
-  if (!loginResult.ok) {
-    return {
-      cluster,
-      map: new Map(),
-      rows: [],
-      error: `UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`,
-      serviceLogs,
-      failedServiceLog: loginResult?.failedServiceLog || getLastObusServiceTrace(serviceLogs)
-    };
-  }
-
-  const sessionId = String(loginResult.sessionId || "").trim();
-  const deviceId = String(loginResult.deviceId || "").trim();
-  const token = String(loginResult.token || "").trim();
-  const loginObusMerkezBranchKey = String(loginResult.obusMerkezBranchKey || "").trim();
-  if (loginObusMerkezBranchKey) {
-    const map = new Map();
-    const rows = [];
-    const partnerClusterKey = buildObusMerkezPartnerClusterKey(normalizedFallbackPartnerId, cluster);
-    if (normalizedFallbackPartnerId) {
-      if (partnerClusterKey) {
-        map.set(partnerClusterKey, loginObusMerkezBranchKey);
-      }
-      rows.push({
-        partnerId: normalizedFallbackPartnerId,
-        name: "OBUSMERKEZ",
-        branchId: loginObusMerkezBranchKey,
-        cluster
-      });
-    } else {
-      rows.push({
-        partnerId: "",
-        name: "OBUSMERKEZ",
-        branchId: loginObusMerkezBranchKey,
-        cluster
-      });
+  for (const endpointUrl of endpointCandidates) {
+    const loginResult = await fetchAuthorizedLinesLoginInfo({
+      endpointUrl,
+      companyUrl: normalizeTargetUrl(companyUrl) || endpointUrl,
+      partnerCode: normalizedPartnerCode,
+      partnerId: normalizedFallbackPartnerId,
+      username: inventoryLogin.username,
+      password: inventoryLogin.password,
+      fallbackBranchId: normalizedFallbackPartnerId,
+      timeoutMs: 20000,
+      authorization: INVENTORY_BRANCHES_API_AUTH,
+      allowEmptyPartnerCode: false
+    });
+    if (Array.isArray(loginResult?.serviceLogs)) {
+      serviceLogs.push(...loginResult.serviceLogs);
     }
-    return { cluster, map, rows, error: null, serviceLogs, failedServiceLog: null };
-  }
 
-  const missingFields = [];
-  if (!sessionId) missingFields.push("session-id");
-  if (!deviceId) missingFields.push("device-id");
-  if (!token) missingFields.push("token");
-  if (missingFields.length > 0) {
-    return {
-      cluster,
-      map: new Map(),
-      rows: [],
-      error: `UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`,
-      serviceLogs,
-      failedServiceLog: getLastObusServiceTrace(serviceLogs)
-    };
-  }
+    if (!loginResult.ok) {
+      errors.push(`${endpointUrl}: UserLogin başarısız: ${loginResult.error || "Bilinmeyen hata"}`);
+      lastFailedServiceLog = loginResult?.failedServiceLog || getLastObusServiceTrace(loginResult?.serviceLogs);
+      continue;
+    }
 
-  const body = {
-    data: "{}",
-    "device-session": {
-      "session-id": sessionId,
-      "device-id": deviceId
-    },
-    token,
-    date: "2016-03-11T11:33:00",
-    language: "tr-TR"
-  };
+    const sessionId = String(loginResult.sessionId || "").trim();
+    const deviceId = String(loginResult.deviceId || "").trim();
+    const token = String(loginResult.token || "").trim();
+    const loginObusMerkezBranchKey = String(loginResult.obusMerkezBranchKey || "").trim();
+    if (loginObusMerkezBranchKey) {
+      const map = new Map();
+      const rows = [];
+      const partnerClusterKey = buildObusMerkezPartnerClusterKey(normalizedFallbackPartnerId, cluster);
+      if (normalizedFallbackPartnerId) {
+        if (partnerClusterKey) {
+          map.set(partnerClusterKey, loginObusMerkezBranchKey);
+        }
+        rows.push({
+          partnerId: normalizedFallbackPartnerId,
+          name: "OBUSMERKEZ",
+          branchId: loginObusMerkezBranchKey,
+          cluster
+        });
+      } else {
+        rows.push({
+          partnerId: "",
+          name: "OBUSMERKEZ",
+          branchId: loginObusMerkezBranchKey,
+          cluster
+        });
+      }
+      return { cluster, map, rows, error: null, serviceLogs, failedServiceLog: null };
+    }
 
-  try {
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: INVENTORY_BRANCHES_API_AUTH
+    const missingFields = [];
+    if (!sessionId) missingFields.push("session-id");
+    if (!deviceId) missingFields.push("device-id");
+    if (!token) missingFields.push("token");
+    if (missingFields.length > 0) {
+      errors.push(`${endpointUrl}: UserLogin sonucu eksik alan: ${missingFields.join(", ")}.`);
+      lastFailedServiceLog = getLastObusServiceTrace(loginResult?.serviceLogs);
+      continue;
+    }
+
+    const body = {
+      data: "{}",
+      "device-session": {
+        "session-id": sessionId,
+        "device-id": deviceId
       },
-      body: JSON.stringify(body),
-      signal
-    });
+      token,
+      date: "2016-03-11T11:33:00",
+      language: "tr-TR"
+    };
 
-    const raw = await response.text();
-    const parsed = parseJsonSafe(raw);
-    const getBranchesTrace = buildObusServiceTraceEntry({
-      service: "GetBranches",
-      url: endpointUrl,
-      status: response.status,
-      requestBody: body,
-      responseBody: parsed ?? raw
-    });
-    serviceLogs.push(getBranchesTrace);
-    if (!response.ok) {
-      const reason =
-        (parsed &&
-          typeof parsed === "object" &&
-          String(parsed.message || parsed.error || "").trim()) ||
-        response.statusText ||
-        "Bilinmeyen hata";
-      return {
+    try {
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: INVENTORY_BRANCHES_API_AUTH
+        },
+        body: JSON.stringify(body),
+        signal
+      });
+
+      const raw = await response.text();
+      const parsed = parseJsonSafe(raw);
+      const getBranchesTrace = buildObusServiceTraceEntry({
+        service: "GetBranches",
+        url: endpointUrl,
+        status: response.status,
+        requestBody: body,
+        responseBody: parsed ?? raw
+      });
+      serviceLogs.push(getBranchesTrace);
+      if (!response.ok) {
+        const reason =
+          (parsed &&
+            typeof parsed === "object" &&
+            String(parsed.message || parsed.error || "").trim()) ||
+          response.statusText ||
+          "Bilinmeyen hata";
+        errors.push(`${endpointUrl}: GetBranches HTTP ${response.status}: ${reason}`);
+        lastFailedServiceLog = getBranchesTrace;
+        continue;
+      }
+
+      const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId, cluster);
+      const map = extractObusMerkezBranchMapFromRows(rows);
+      if (rows.length > 0) {
+        return {
+          cluster,
+          map,
+          rows,
+          error: null,
+          serviceLogs,
+          failedServiceLog: null
+        };
+      }
+
+      lastEmptyResult = {
         cluster,
-        map: new Map(),
-        rows: [],
-        error: `GetBranches HTTP ${response.status}: ${reason}`,
+        map,
+        rows,
+        error: null,
         serviceLogs,
         failedServiceLog: getBranchesTrace
       };
+      lastFailedServiceLog = getBranchesTrace;
+    } catch (err) {
+      const getBranchesTrace = buildObusServiceTraceEntry({
+        service: "GetBranches",
+        url: endpointUrl,
+        requestBody: body,
+        responseBody: "",
+        error: err?.message || "GetBranches isteği başarısız."
+      });
+      serviceLogs.push(getBranchesTrace);
+      errors.push(`${endpointUrl}: ${err?.message || "GetBranches isteği başarısız."}`);
+      lastFailedServiceLog = getBranchesTrace;
     }
-
-    const rows = extractObusMerkezBranchRowsFromPayload(parsed ?? raw, normalizedFallbackPartnerId, cluster);
-    const map = extractObusMerkezBranchMapFromRows(rows);
-    return {
-      cluster,
-      map,
-      rows,
-      error: null,
-      serviceLogs,
-      failedServiceLog: rows.length > 0 ? null : getBranchesTrace
-    };
-  } catch (err) {
-    const getBranchesTrace = buildObusServiceTraceEntry({
-      service: "GetBranches",
-      url: endpointUrl,
-      requestBody: body,
-      responseBody: "",
-      error: err?.message || "GetBranches isteği başarısız."
-    });
-    serviceLogs.push(getBranchesTrace);
-    return {
-      cluster,
-      map: new Map(),
-      rows: [],
-      error: err?.message || "GetBranches isteği başarısız.",
-      serviceLogs,
-      failedServiceLog: getBranchesTrace
-    };
   }
+
+  if (lastEmptyResult) {
+    return lastEmptyResult;
+  }
+
+  const uniqueErrors = Array.from(new Set(errors.filter(Boolean)));
+  return {
+    cluster,
+    map: new Map(),
+    rows: [],
+    error:
+      uniqueErrors.length > 0
+        ? uniqueErrors.slice(0, 2).join(" | ")
+        : "GetBranches isteği başarısız.",
+    serviceLogs,
+    failedServiceLog: lastFailedServiceLog || getLastObusServiceTrace(serviceLogs)
+  };
 }
 
 async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
@@ -8322,6 +8365,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal) {
             clusterLabel,
             partnerCode,
             fallbackPartnerId: partnerId,
+            companyUrl: String(row?.url || "").trim(),
             signal
           })
         );
