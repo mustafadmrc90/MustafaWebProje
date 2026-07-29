@@ -221,7 +221,8 @@ function normalizeCreateTableBodyByTable(tableName, body) {
       .replace(/\bobilet_partner_id\s+NVARCHAR\(MAX\)\b/i, "obilet_partner_id NVARCHAR(255)")
       .replace(/\bbiletall_partner_id\s+NVARCHAR\(MAX\)\b/i, "biletall_partner_id NVARCHAR(255)")
       .replace(/\burl\s+NVARCHAR\(MAX\)\b/i, "url NVARCHAR(2048)")
-      .replace(/\bobus_merkez_sube_id\s+NVARCHAR\(MAX\)\b/i, "obus_merkez_sube_id NVARCHAR(255)");
+      .replace(/\bobus_merkez_sube_id\s+NVARCHAR\(MAX\)\b/i, "obus_merkez_sube_id NVARCHAR(255)")
+      .replace(/\bobus_merkez_sube_id_debug\s+NVARCHAR\(MAX\)\b/i, "obus_merkez_sube_id_debug NVARCHAR(MAX)");
   }
 
   return text;

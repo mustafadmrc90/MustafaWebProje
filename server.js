@@ -1396,6 +1396,7 @@ async function initDb() {
       url TEXT,
       is_abroad BOOLEAN,
       obus_merkez_sube_id TEXT,
+      obus_merkez_sube_id_debug TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (id, source, code)
@@ -1409,6 +1410,7 @@ async function initDb() {
       ADD COLUMN IF NOT EXISTS url TEXT,
       ADD COLUMN IF NOT EXISTS is_abroad BOOLEAN,
       ADD COLUMN IF NOT EXISTS obus_merkez_sube_id TEXT,
+      ADD COLUMN IF NOT EXISTS obus_merkez_sube_id_debug TEXT,
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   `);
@@ -2701,6 +2703,9 @@ const ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS = Object.freeze([
   "`old` ile başlayan veya biten code'lar"
 ]);
 
+const ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE =
+  "Detay: SQL kaydinda ObusMerkezSubeID yok. Guncelleme yapilmadi veya eslesme bulunamadi.";
+
 function shouldExcludeAllCompaniesCode(codeValue) {
   const rawCode = String(codeValue || "").trim().toLocaleLowerCase("tr");
   if (!rawCode) return false;
@@ -2720,6 +2725,10 @@ function buildAllCompaniesExclusionSummary() {
     exactCodes: Array.from(ALL_COMPANIES_EXCLUDED_EXACT_CODES),
     automaticRules: Array.from(ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS)
   };
+}
+
+function isAllCompaniesMissingObusSqlFallbackDebug(value) {
+  return String(value || "").trim() === ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE;
 }
 
 function attachAllCompaniesMissingObusDebug(rows, fallbackMessage = "") {
@@ -2846,6 +2855,9 @@ function normalizeAllCompaniesCacheRow(row) {
   const code = formatPartnerCellValue(row?.code);
   if (shouldExcludeAllCompaniesCode(code)) return null;
   const source = extractClusterLabel(formatPartnerCellValue(row?.source));
+  const obusMerkezSubeIDDebug = formatPartnerCellValue(
+    row?.ObusMerkezSubeIDDebug ?? row?.obus_merkez_sube_id_debug
+  );
   return {
     id,
     code,
@@ -2855,7 +2867,9 @@ function normalizeAllCompaniesCacheRow(row) {
     url: formatPartnerCellValue(row?.url),
     isabroad: formatAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad ?? row?.["is-abroad"]),
     ObusMerkezSubeID: formatPartnerCellValue(row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id),
-    ObusMerkezSubeIDDebug: formatPartnerCellValue(row?.ObusMerkezSubeIDDebug ?? row?.obus_merkez_sube_id_debug)
+    ObusMerkezSubeIDDebug: isAllCompaniesMissingObusSqlFallbackDebug(obusMerkezSubeIDDebug)
+      ? ""
+      : obusMerkezSubeIDDebug
   };
 }
 
@@ -9026,6 +9040,7 @@ async function fetchAllCompaniesRowsFromCache() {
         url,
         is_abroad,
         obus_merkez_sube_id,
+        obus_merkez_sube_id_debug,
         updated_at
       FROM all_companies_cache
       ORDER BY source ASC, code ASC, id ASC
@@ -9033,7 +9048,7 @@ async function fetchAllCompaniesRowsFromCache() {
     const result = await pool.query(query);
     const rows = attachAllCompaniesMissingObusDebug(
       normalizeAllCompaniesCacheRows(result.rows || []),
-      "Detay: SQL kaydinda ObusMerkezSubeID yok. Guncelleme yapilmadi veya eslesme bulunamadi."
+      ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE
     );
     const columns = normalizeAllCompaniesReportRows([]).columns;
     const clusterCount = new Set(rows.map((row) => extractClusterLabel(row?.source)).filter(Boolean)).size;
@@ -9074,7 +9089,7 @@ async function fetchAllCompaniesObusMerkezSubeIdMap() {
       const source = extractClusterLabel(String(row?.source || "").trim());
       const obusMerkezSubeId = String(row?.obus_merkez_sube_id || "").trim();
       if (!code || !source || !obusMerkezSubeId) return;
-      const key = `${code}|||${id}|||${source}`;
+      const key = buildCompanyOptionValue({ code, id, cluster: source });
       map.set(key, obusMerkezSubeId);
     });
 
@@ -9168,6 +9183,11 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
       const url = String(row?.url || "").trim() || null;
       const isAbroad = parseAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad);
       const obusMerkezSubeId = String(row?.ObusMerkezSubeID || "").trim() || null;
+      const rawObusMerkezSubeIdDebug = String(row?.ObusMerkezSubeIDDebug || "").trim();
+      const obusMerkezSubeIdDebug =
+        rawObusMerkezSubeIdDebug && !isAllCompaniesMissingObusSqlFallbackDebug(rawObusMerkezSubeIdDebug)
+          ? rawObusMerkezSubeIdDebug
+          : null;
       const updateResult = await client.query(
         `
           UPDATE all_companies_cache
@@ -9176,6 +9196,11 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
               url = $6,
               is_abroad = COALESCE($7, is_abroad),
               obus_merkez_sube_id = COALESCE(NULLIF($8, ''), obus_merkez_sube_id),
+              obus_merkez_sube_id_debug = CASE
+                WHEN NULLIF($8, '') IS NOT NULL THEN NULL
+                WHEN NULLIF($9, '') IS NOT NULL THEN $9
+                ELSE obus_merkez_sube_id_debug
+              END,
               updated_at = now()
           WHERE id = $1
             AND source = $2
@@ -9189,7 +9214,8 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
           biletallPartnerId,
           url,
           isAbroad,
-          obusMerkezSubeId
+          obusMerkezSubeId,
+          obusMerkezSubeIdDebug
         ]
       );
       if (updateResult.rowCount) continue;
@@ -9205,9 +9231,10 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
             url,
             is_abroad,
             obus_merkez_sube_id,
+            obus_merkez_sube_id_debug,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
         `,
         [
           id,
@@ -9217,7 +9244,8 @@ async function upsertAllCompaniesCacheRows(rows, options = {}) {
           biletallPartnerId,
           url,
           isAbroad,
-          obusMerkezSubeId
+          obusMerkezSubeId,
+          obusMerkezSubeIdDebug
         ]
       );
     }
