@@ -431,7 +431,8 @@ const OBUS_USER_DEACTIVATE_API_URL =
 const OBUS_USER_DEACTIVATE_API_AUTH =
   process.env.OBUS_USER_DEACTIVATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "45000", 10) || 45000;
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "10000", 10) || 10000;
+const OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS = Math.max(1, Math.round(OBUS_USER_DEACTIVATE_TIMEOUT_MS / 1000));
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "16", 10) || 16;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
@@ -16305,6 +16306,13 @@ function buildObusUserDeactivateRequestBody({ sessionId = "", deviceId = "", tok
   };
 }
 
+function appendObusUserDeactivateSkipNotice(error = "") {
+  const text = String(error || "").trim();
+  if (!text) return "";
+  if (!/saniyede yanıt vermedi|zaman aşımına uğradı/i.test(text)) return text;
+  return /sonraki firmaya geçildi/i.test(text) ? text : `${text}; sonraki firmaya geçildi.`;
+}
+
 function buildObusUserDeleteRequestBody({
   userIds = [],
   sessionId = "",
@@ -16548,8 +16556,11 @@ async function fetchObusUserDeactivateCompanyResult({
   });
 
   if (!loginResult?.ok) {
+    const loginError = appendObusUserDeactivateSkipNotice(
+      String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız."
+    );
     const failure = buildFailure(
-      String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
+      loginError,
       String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim(),
       null,
       String(loginResult?.rawLoginBody || "").trim()
@@ -16682,19 +16693,20 @@ async function fetchObusUserDeactivateCompanyResult({
       failedRequestPreview: null
     };
   } catch (err) {
+    const timeoutError = `GetUsersWithoutPermissions isteği ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
     const requestTrace = buildObusServiceTraceEntry({
       service: "Membership GetUsersWithoutPermissions",
       url: requestUrl,
       requestBody: requestBodyObject,
       responseBody: "",
-      error: err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     });
     const failure = buildFailure(
-      err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+      err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     );
     failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
     failure.failedRequestPreview = buildPreview(requestTrace, {
-      error: err?.name === "AbortError" ? "GetUsersWithoutPermissions isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     });
     return failure;
   } finally {
@@ -16789,8 +16801,11 @@ async function deactivateObusUsersForCompany({
   });
 
   if (!loginResult?.ok) {
+    const loginError = appendObusUserDeactivateSkipNotice(
+      String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız."
+    );
     const failure = buildFailure(
-      String(loginResult?.error || "UserLogin başarısız.").trim() || "UserLogin başarısız.",
+      loginError,
       String(loginResult?.errorDetail || loginResult?.tokenMissingDetail || "").trim(),
       null,
       String(loginResult?.rawLoginBody || "").trim()
@@ -16913,19 +16928,20 @@ async function deactivateObusUsersForCompany({
         `${normalizedUserMeta.length} kullanıcı pasife alındı.`
     };
   } catch (err) {
+    const timeoutError = `DeleteUser isteği ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
     const requestTrace = buildObusServiceTraceEntry({
       service: "Membership DeleteUser",
       url: requestUrl,
       requestBody: requestBodyObject,
       responseBody: "",
-      error: err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     });
     const failure = buildFailure(
-      err?.name === "AbortError" ? "DeleteUser isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+      err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     );
     failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
     failure.failedRequestPreview = buildPreview(requestTrace, {
-      error: err?.name === "AbortError" ? "DeleteUser isteği zaman aşımına uğradı." : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
     });
     return failure;
   } finally {
@@ -17517,10 +17533,9 @@ async function fetchAuthorizedLinesLoginInfo({
       signal.addEventListener("abort", abortFromOuterSignal, { once: true });
     }
   }
-  const timeout = setTimeout(
-    () => controller.abort(),
-    toBoundedInt(timeoutMs, 90000, 5000, 180000)
-  );
+  const boundedTimeoutMs = toBoundedInt(timeoutMs, 90000, 5000, 180000);
+  const timeoutSeconds = Math.max(1, Math.round(boundedTimeoutMs / 1000));
+  const timeout = setTimeout(() => controller.abort(), boundedTimeoutMs);
   try {
     const allServiceLogs = [];
     let lastError = "UserLogin çağrısı başarısız.";
@@ -17563,7 +17578,10 @@ async function fetchAuthorizedLinesLoginInfo({
         allServiceLogs.push(sessionResult.debug);
       }
       if (sessionResult.error) {
-        lastError = `${sessionResult.error} (Session URL: ${sessionUrl})`;
+        const sessionError = controller.signal.aborted
+          ? `GetSession isteği ${timeoutSeconds} saniyede yanıt vermedi.`
+          : sessionResult.error;
+        lastError = `${sessionError} (Session URL: ${sessionUrl})`;
         lastErrorDetail = "";
         lastFailedServiceLog = sessionResult?.debug || lastFailedServiceLog;
         continue;
@@ -17713,15 +17731,18 @@ async function fetchAuthorizedLinesLoginInfo({
           failedServiceLog: null
         };
       } catch (err) {
+        const loginError = err?.name === "AbortError"
+          ? `Membership UserLogin isteği ${timeoutSeconds} saniyede yanıt vermedi.`
+          : err?.message || "Membership UserLogin isteği başarısız.";
         const loginTrace = buildObusServiceTraceEntry({
           service: "Membership UserLogin",
           url: loginUrl,
           requestBody: payload,
           responseBody: "",
-          error: err?.message || "Membership UserLogin isteği başarısız."
+          error: loginError
         });
         allServiceLogs.push(loginTrace);
-        lastError = `${err?.message || "Membership UserLogin isteği başarısız."} (URL: ${loginUrl})`;
+        lastError = `${loginError} (URL: ${loginUrl})`;
         lastErrorDetail = "";
         lastFailedServiceLog = loginTrace;
       }
@@ -17743,9 +17764,10 @@ async function fetchAuthorizedLinesLoginInfo({
       failedServiceLog: lastFailedServiceLog
     };
   } catch (err) {
+    const timeoutError = `UserLogin isteği ${timeoutSeconds} saniyede yanıt vermedi.`;
     return {
       ok: false,
-      error: err?.message || "UserLogin isteği gönderilemedi.",
+      error: err?.name === "AbortError" ? timeoutError : err?.message || "UserLogin isteği gönderilemedi.",
       errorDetail: "",
       sessionId: "",
       deviceId: "",
