@@ -3737,6 +3737,19 @@ function buildUserLoginBaseUrlsWithOverrides({
   const baseUrls = normalizedSessionCluster
     ? buildUserLoginBaseUrls(endpointUrl, companyUrl)
     : buildUserLoginBaseUrls(companyUrl, endpointUrl);
+  if (shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId })) {
+    const preprodBaseUrl = normalizeTargetUrl(PARTNERS_REQUIRED_EXTRA_API_URL);
+    if (!preprodBaseUrl) return baseUrls;
+
+    const preferredBaseUrls = [preprodBaseUrl];
+    baseUrls.forEach((item) => {
+      const normalized = normalizeTargetUrl(item);
+      if (!normalized) return;
+      if (!preferredBaseUrls.includes(normalized)) preferredBaseUrls.push(normalized);
+    });
+    return preferredBaseUrls;
+  }
+
   if (normalizedSessionCluster) {
     const clusteredBaseUrls = [];
     const coreProdBaseUrl = buildObusCoreProdApiUrl(normalizedSessionCluster, "/api");
@@ -3749,18 +3762,7 @@ function buildUserLoginBaseUrlsWithOverrides({
     });
     if (clusteredBaseUrls.length > 0) return clusteredBaseUrls;
   }
-  if (!shouldUsePreprodUserLoginForPartner({ partnerCode, partnerId })) return baseUrls;
-
-  const preprodBaseUrl = normalizeTargetUrl(PARTNERS_REQUIRED_EXTRA_API_URL);
-  if (!preprodBaseUrl) return baseUrls;
-
-  const preferredBaseUrls = [preprodBaseUrl];
-  baseUrls.forEach((item) => {
-    const normalized = normalizeTargetUrl(item);
-    if (!normalized) return;
-    if (!preferredBaseUrls.includes(normalized)) preferredBaseUrls.push(normalized);
-  });
-  return preferredBaseUrls;
+  return baseUrls;
 }
 
 function buildUniqueLoginBranchCandidates(...values) {
@@ -4516,7 +4518,7 @@ async function fetchJourneySearchStations({ company } = {}) {
   const clusterLabel = extractClusterLabel(String(company?.cluster || company?.url || "").trim());
   const companyUrl = normalizeTargetUrl(company?.url || "");
   const baseClusterUrl = buildUrlForCluster(PARTNERS_API_URL, clusterLabel) || companyUrl;
-  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl, clusterLabel);
   const requestUrl = buildJourneySearchStationsUrl(baseClusterUrl, clusterLabel);
   const companyRef = `${partnerCode || "code?"}${clusterLabel ? ` / ${clusterLabel}` : ""}`;
   const requestBodyTemplate = JSON.stringify(buildJourneySearchStationsRequestBody({ usePlaceholders: true }), null, 2);
@@ -4714,7 +4716,7 @@ async function fetchJourneySearchJourneys({
   const clusterLabel = extractClusterLabel(String(company?.cluster || company?.url || "").trim());
   const companyUrl = normalizeTargetUrl(company?.url || "");
   const baseClusterUrl = buildUrlForCluster(PARTNERS_API_URL, clusterLabel) || companyUrl;
-  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(baseClusterUrl, clusterLabel);
   const requestUrl = buildJourneySearchGetJourneysUrl(baseClusterUrl, clusterLabel);
   const companyRef = `${partnerCode || "code?"}${clusterLabel ? ` / ${clusterLabel}` : ""}`;
   const requestBodyTemplate = JSON.stringify(
@@ -7970,7 +7972,7 @@ async function fetchPartnerSessionCredentials(
 
 async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
   const clusterLabel = extractClusterLabel(partnerUrl);
-  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl, clusterLabel);
 
   try {
     const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal);
@@ -8040,7 +8042,7 @@ async function fetchPartnerCodesFromCluster(partnerUrl, signal) {
 
 async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
   const clusterLabel = extractClusterLabel(partnerUrl);
-  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(partnerUrl, clusterLabel);
 
   try {
     const sessionResult = await fetchPartnerSessionCredentials(sessionUrl, signal);
@@ -14104,7 +14106,7 @@ async function fetchSalesReportFromCluster({
   sessionCache = null
 }) {
   const cluster = extractClusterLabel(clusterLabel || reportUrl);
-  const sessionUrl = buildSessionUrlForPartnerUrl(reportUrl);
+  const sessionUrl = buildSessionUrlForPartnerUrl(reportUrl, cluster);
 
   let sessionResult = null;
   if (sessionCache && sessionCache.has(sessionUrl)) {
@@ -14223,7 +14225,9 @@ async function fetchSalesReports({ startDate, endDate, selectedCompany }) {
     const rangeConcurrency = toBoundedInt(SALES_REPORT_RANGE_CONCURRENCY, 4, 1, 20);
     const targetConcurrency = toBoundedInt(SALES_REPORT_TARGET_CONCURRENCY, 4, 1, 20);
     const sessionConcurrency = toBoundedInt(SALES_REPORT_SESSION_CONCURRENCY, 8, 1, 20);
-    const sessionUrls = Array.from(new Set(targets.map((target) => buildSessionUrlForPartnerUrl(target.reportUrl))));
+    const sessionUrls = Array.from(
+      new Set(targets.map((target) => buildSessionUrlForPartnerUrl(target.reportUrl, target.clusterLabel)))
+    );
 
     await runWithConcurrency(
       sessionUrls,
@@ -17428,12 +17432,17 @@ async function fetchAuthorizedLinesLoginInfo({
   signal = null,
   onProgress = null
 }) {
+  const effectiveSessionClusterLabel =
+    normalizeObusClusterLabel(sessionClusterLabel) ||
+    normalizeObusClusterLabel(extractClusterLabel(endpointUrl)) ||
+    normalizeObusClusterLabel(extractClusterLabel(companyUrl)) ||
+    "";
   const loginBaseUrls = buildUserLoginBaseUrlsWithOverrides({
     companyUrl,
     endpointUrl,
     partnerCode,
     partnerId,
-    sessionClusterLabel
+    sessionClusterLabel: effectiveSessionClusterLabel
   });
   if (loginBaseUrls.length === 0) {
     return {
@@ -17498,7 +17507,7 @@ async function fetchAuthorizedLinesLoginInfo({
     let lastFailedServiceLog = null;
 
     for (const baseUrl of loginBaseUrls) {
-      const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl, sessionClusterLabel);
+      const sessionUrl = buildSessionUrlForPartnerUrl(baseUrl, effectiveSessionClusterLabel);
       const loginUrl = buildMembershipUserLoginUrl(baseUrl);
       if (!loginUrl) {
         lastError = "Membership UserLogin URL oluşturulamadı.";
@@ -17517,7 +17526,7 @@ async function fetchAuthorizedLinesLoginInfo({
             url: sessionUrl,
             partnerCode: normalizedPartnerCode,
             partnerId,
-            clusterLabel: sessionClusterLabel || extractClusterLabel(baseUrl)
+            clusterLabel: effectiveSessionClusterLabel || extractClusterLabel(baseUrl)
           });
         }
         sessionResult = await fetchPartnerSessionCredentials(sessionUrl, controller.signal, authorization);
@@ -17562,7 +17571,7 @@ async function fetchAuthorizedLinesLoginInfo({
             requestBody: payload,
             partnerCode: normalizedPartnerCode,
             partnerId,
-            clusterLabel: sessionClusterLabel || extractClusterLabel(baseUrl)
+            clusterLabel: effectiveSessionClusterLabel || extractClusterLabel(baseUrl)
           });
         }
         const response = await fetch(loginUrl, {
