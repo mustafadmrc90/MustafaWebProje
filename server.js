@@ -3712,6 +3712,21 @@ function buildUserLoginBaseUrls(companyUrl, endpointUrl) {
   return deduped;
 }
 
+function isObusCompanyDomainUrl(value) {
+  const normalized = normalizeTargetUrl(value);
+  if (!normalized) return false;
+  try {
+    const hostname = new URL(normalized).hostname.toLowerCase();
+    return hostname.endsWith(".obus.com.tr") && !hostname.startsWith("api-");
+  } catch (err) {
+    return false;
+  }
+}
+
+function filterUserLoginBaseUrls(baseUrls = []) {
+  return (Array.isArray(baseUrls) ? baseUrls : []).filter((item) => !isObusCompanyDomainUrl(item));
+}
+
 function normalizePartnerIdForRouting(partnerId) {
   const text = String(partnerId || "").trim();
   if (!/^-?\d+$/.test(text)) return "";
@@ -3747,7 +3762,7 @@ function buildUserLoginBaseUrlsWithOverrides({
       if (!normalized) return;
       if (!preferredBaseUrls.includes(normalized)) preferredBaseUrls.push(normalized);
     });
-    return preferredBaseUrls;
+    return filterUserLoginBaseUrls(preferredBaseUrls);
   }
 
   if (normalizedSessionCluster) {
@@ -3762,7 +3777,7 @@ function buildUserLoginBaseUrlsWithOverrides({
     });
     if (clusteredBaseUrls.length > 0) return clusteredBaseUrls;
   }
-  return baseUrls;
+  return filterUserLoginBaseUrls(baseUrls);
 }
 
 function buildUniqueLoginBranchCandidates(...values) {
@@ -3933,15 +3948,8 @@ function buildSessionUrlForPartnerUrl(partnerUrl, sessionClusterLabel = "") {
     return coreProdSessionUrl;
   }
 
-  try {
-    const parsed = new URL(String(partnerUrl || ""));
-    parsed.pathname = "/api/client/getsession";
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch (err) {
-    return PARTNERS_SESSION_API_URL;
-  }
+  const defaultSessionUrl = normalizeTargetUrl(PARTNERS_SESSION_API_URL);
+  return normalizeObusClusterLabel(extractClusterLabel(defaultSessionUrl)) ? defaultSessionUrl : "";
 }
 
 function buildJourneySearchStationsUrl(companyUrl, clusterLabel = "") {
@@ -7883,10 +7891,27 @@ async function fetchPartnerSessionCredentials(
   signal,
   authorization = PARTNERS_API_AUTH
 ) {
+  const normalizedSessionUrl = normalizeTargetUrl(sessionUrl);
   const payload = buildObusSessionRequestBody();
 
+  if (!normalizedSessionUrl) {
+    const debug = buildObusServiceTraceEntry({
+      service: "GetSession",
+      url: String(sessionUrl || "").trim(),
+      requestBody: payload,
+      responseBody: "",
+      error: "GetSession URL oluşturulamadı."
+    });
+    return {
+      sessionId: "",
+      deviceId: "",
+      error: "GetSession URL oluşturulamadı.",
+      debug
+    };
+  }
+
   try {
-    const response = await fetch(sessionUrl, {
+    const response = await fetch(normalizedSessionUrl, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -7901,7 +7926,7 @@ async function fetchPartnerSessionCredentials(
     const parsed = parseJsonSafe(raw);
     const debug = buildObusServiceTraceEntry({
       service: "GetSession",
-      url: sessionUrl,
+      url: normalizedSessionUrl,
       status: response.status,
       requestBody: payload,
       responseBody: parsed ?? raw
@@ -7956,7 +7981,7 @@ async function fetchPartnerSessionCredentials(
   } catch (err) {
     const debug = buildObusServiceTraceEntry({
       service: "GetSession",
-      url: sessionUrl,
+      url: normalizedSessionUrl,
       requestBody: payload,
       responseBody: "",
       error: err?.message || "GetSession isteği başarısız."
