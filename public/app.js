@@ -7111,10 +7111,11 @@
         processed: 0,
         total: 0,
         success: 0,
-        failure: 0
+        failure: 0,
+        message: runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek..."
       };
 
-      renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+      renderStatusBox(statusBox, latestState.message, {
         busy: true,
         showCounts,
         processed: latestState.processed,
@@ -7125,7 +7126,7 @@
       });
 
       const timerId = window.setInterval(() => {
-        renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+        renderStatusBox(statusBox, latestState.message, {
           busy: true,
           showCounts,
           processed: latestState.processed,
@@ -7164,9 +7165,13 @@
             processed: Number(data.processedCount || 0),
             total: Number(data.totalCount || 0),
             success: Number(data.successCount || 0),
-            failure: Number(data.failureCount || 0)
+            failure: Number(data.failureCount || 0),
+            message:
+              String(data.statusMessage || "").trim() ||
+              runningMessage ||
+              "İşlem sürüyor. Sayfa otomatik yenilenecek..."
           };
-          renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+          renderStatusBox(statusBox, latestState.message, {
             busy: true,
             showCounts,
             processed: latestState.processed,
@@ -7185,7 +7190,7 @@
           const errorCode = String(err?.message || "").trim();
           if (errorCode === "__TRANSIENT__" || !errorCode || /Failed to fetch/i.test(errorCode)) {
             transientFailureCount += 1;
-            renderStatusBox(statusBox, runningMessage || "İşlem sürüyor. Sayfa otomatik yenilenecek...", {
+            renderStatusBox(statusBox, latestState.message, {
               busy: true,
               showCounts,
               processed: latestState.processed,
