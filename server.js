@@ -2716,6 +2716,14 @@ const ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS = Object.freeze([
 
 const ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE =
   "Detay: SQL kaydinda ObusMerkezSubeID yok. Guncelleme yapilmadi veya eslesme bulunamadi.";
+const ALL_COMPANIES_KNOWN_OBUS_MERKEZ_SUBE_ID_RECORDS = Object.freeze([
+  {
+    id: "604",
+    source: "cluster1",
+    code: "strela",
+    branchId: "22241"
+  }
+]);
 
 function normalizeAllCompaniesKnownCodeCorrection({ id = "", source = "", code = "" } = {}) {
   const normalizedId = String(id || "").trim();
@@ -2731,6 +2739,25 @@ function normalizeAllCompaniesKnownCodeCorrection({ id = "", source = "", code =
   return normalizedCode;
 }
 
+function getAllCompaniesKnownObusMerkezSubeId({ id = "", source = "", code = "" } = {}) {
+  const normalizedId = String(id || "").trim();
+  const normalizedSource = extractClusterLabel(source);
+  const normalizedCode = normalizeTokenName(code);
+  const matchedRecord = ALL_COMPANIES_KNOWN_OBUS_MERKEZ_SUBE_ID_RECORDS.find(
+    (item) =>
+      String(item.id || "").trim() === normalizedId &&
+      extractClusterLabel(item.source) === normalizedSource &&
+      normalizeTokenName(item.code) === normalizedCode
+  );
+  return matchedRecord ? String(matchedRecord.branchId || "").trim() : "";
+}
+
+function resolveAllCompaniesObusMerkezSubeId({ id = "", source = "", code = "", value = "" } = {}) {
+  const existingValue = formatPartnerCellValue(value);
+  if (existingValue) return existingValue;
+  return getAllCompaniesKnownObusMerkezSubeId({ id, source, code });
+}
+
 async function applyAllCompaniesKnownDataCorrections() {
   const id = "691";
   const source = "cluster3";
@@ -2738,6 +2765,27 @@ async function applyAllCompaniesKnownDataCorrections() {
   const correctedCode = "cagdasbingolseyahat";
 
   try {
+    for (const knownRecord of ALL_COMPANIES_KNOWN_OBUS_MERKEZ_SUBE_ID_RECORDS) {
+      const knownId = String(knownRecord.id || "").trim();
+      const knownSource = extractClusterLabel(knownRecord.source);
+      const knownCode = String(knownRecord.code || "").trim();
+      const knownBranchId = String(knownRecord.branchId || "").trim();
+      if (!knownId || !knownSource || !knownCode || !knownBranchId) continue;
+      await pool.query(
+        `
+          UPDATE all_companies_cache
+          SET obus_merkez_sube_id = $1,
+              obus_merkez_sube_id_debug = NULL,
+              updated_at = now()
+          WHERE id = $2
+            AND source = $3
+            AND LOWER(code) = LOWER($4)
+            AND COALESCE(NULLIF(TRIM(obus_merkez_sube_id), ''), '') <> $1
+        `,
+        [knownBranchId, knownId, knownSource, knownCode]
+      );
+    }
+
     const wrongResult = await pool.query(
       `
         SELECT obus_merkez_sube_id, obus_merkez_sube_id_debug
@@ -2911,6 +2959,17 @@ function normalizeAllCompaniesReportRows(rows) {
         source,
         code: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["code"]))
       });
+      const obusMerkezSubeId = resolveAllCompaniesObusMerkezSubeId({
+        id,
+        source,
+        code,
+        value: readPartnerRawValueByAliases(row, [
+          "ObusMerkezSubeID",
+          "obus_merkez_sube_id",
+          "obusmerkezsubeid",
+          "obus-merkez-sube-id"
+        ])
+      });
       return {
         id,
         code,
@@ -2947,7 +3006,7 @@ function normalizeAllCompaniesReportRows(rows) {
         isabroad: formatAllCompaniesBooleanValue(
           readPartnerRawValueByAliases(row, ["isabroad", "is_abroad", "is-abroad", "isAbroad", "IsAbroad"])
         ),
-        ObusMerkezSubeID: "",
+        ObusMerkezSubeID: obusMerkezSubeId,
         ObusMerkezSubeIDDebug: ""
       };
     });
@@ -2977,6 +3036,12 @@ function normalizeAllCompaniesCacheRow(row) {
   const obusMerkezSubeIDDebug = formatPartnerCellValue(
     row?.ObusMerkezSubeIDDebug ?? row?.obus_merkez_sube_id_debug
   );
+  const obusMerkezSubeID = resolveAllCompaniesObusMerkezSubeId({
+    id,
+    source,
+    code,
+    value: row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id
+  });
   return {
     id,
     code,
@@ -2985,8 +3050,8 @@ function normalizeAllCompaniesCacheRow(row) {
     "biletall-partner-id": formatPartnerCellValue(row?.["biletall-partner-id"] ?? row?.biletall_partner_id),
     url: formatPartnerCellValue(row?.url),
     isabroad: formatAllCompaniesBooleanValue(row?.isabroad ?? row?.is_abroad ?? row?.["is-abroad"]),
-    ObusMerkezSubeID: formatPartnerCellValue(row?.ObusMerkezSubeID ?? row?.obus_merkez_sube_id),
-    ObusMerkezSubeIDDebug: isAllCompaniesMissingObusSqlFallbackDebug(obusMerkezSubeIDDebug)
+    ObusMerkezSubeID: obusMerkezSubeID,
+    ObusMerkezSubeIDDebug: obusMerkezSubeID || isAllCompaniesMissingObusSqlFallbackDebug(obusMerkezSubeIDDebug)
       ? ""
       : obusMerkezSubeIDDebug
   };
