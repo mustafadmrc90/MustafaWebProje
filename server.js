@@ -3029,9 +3029,7 @@ function normalizeSearchTokenName(value) {
 
 function isObusMerkezBranchName(value) {
   const normalized = normalizeSearchTokenName(value);
-  if (!normalized.startsWith("obusmerkez")) return false;
-  const suffix = normalized.slice("obusmerkez".length);
-  return ["", "sube", "subesi", "merkezsube", "merkezsubesi"].includes(suffix);
+  return normalized.startsWith("obusmerkez");
 }
 
 function findNestedValue(node, keySet) {
@@ -8274,6 +8272,7 @@ async function fetchPartnerRawRowsFromCluster(partnerUrl, signal) {
 function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "", clusterLabel = "") {
   const rows = [];
   const normalizedClusterLabel = extractClusterLabel(clusterLabel);
+  const normalizedFallbackPartnerId = formatPartnerCellValue(fallbackPartnerId);
   const partnerIdAliases = [
     "partner-id",
     "partner_id",
@@ -8309,27 +8308,54 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     "displayName",
     "value"
   ];
+  const nestedPartnerAliases = ["partner", "company", "provider", "firm", "operator"];
+  const normalizeBranchText = (value) => String(value === undefined || value === null ? "" : value).trim();
+  const readExplicitPartnerId = (node) => {
+    const directPartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+    if (directPartnerId) return directPartnerId;
 
-  const walk = (node) => {
+    const nestedPartner = readPartnerRawValueByAliases(node, nestedPartnerAliases);
+    if (nestedPartner && typeof nestedPartner === "object" && !Array.isArray(nestedPartner)) {
+      return formatPartnerCellValue(readPartnerRawValueByAliases(nestedPartner, ["id", ...partnerIdAliases]));
+    }
+    return "";
+  };
+  const hasNestedBranchCollection = (node) =>
+    Object.entries(node || {}).some(([key, value]) => {
+      if (!value || typeof value !== "object") return false;
+      const normalizedKey = normalizeSearchTokenName(key);
+      return normalizedKey.includes("branch") || normalizedKey.includes("sube");
+    });
+  const readContainerPartnerId = (node, branchName = "") => {
+    const explicitPartnerId = readExplicitPartnerId(node);
+    if (explicitPartnerId) return explicitPartnerId;
+    if (isObusMerkezBranchName(branchName) || !hasNestedBranchCollection(node)) return "";
+    return formatPartnerCellValue(readPartnerRawValueByAliases(node, ["id", "partner-id", "partner_id", "partnerId"]));
+  };
+
+  const walk = (node, inheritedPartnerId = "") => {
     if (node === null || node === undefined) return;
     if (typeof node === "string") {
       const trimmed = node.trim();
       if (!trimmed) return;
       if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
         const parsed = parseJsonSafe(trimmed);
-        if (parsed !== null) walk(parsed);
+        if (parsed !== null) walk(parsed, inheritedPartnerId);
       }
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((item) => walk(item));
+      node.forEach((item) => walk(item, inheritedPartnerId));
       return;
     }
     if (typeof node !== "object") return;
 
     const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
+    const directPartnerId = readExplicitPartnerId(node);
+    const containerPartnerId = readContainerPartnerId(node, branchName);
+    const nextPartnerId = directPartnerId || containerPartnerId || normalizeBranchText(inheritedPartnerId);
     if (isObusMerkezBranchName(branchName)) {
-      const partnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
+      const partnerId = directPartnerId || normalizeBranchText(inheritedPartnerId) || normalizedFallbackPartnerId;
       const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
       if (partnerId && branchId) {
         rows.push({
@@ -8341,10 +8367,14 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
       }
     }
 
-    Object.values(node).forEach((value) => walk(value));
+    Object.entries(node).forEach(([key, value]) => {
+      const keyPartnerId =
+        !nextPartnerId && /^\d+$/.test(String(key || "").trim()) ? String(key || "").trim() : nextPartnerId;
+      walk(value, keyPartnerId);
+    });
   };
 
-  walk(payload);
+  walk(payload, normalizedFallbackPartnerId);
   return rows;
 }
 
