@@ -5136,7 +5136,8 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
   authorization = PARTNERS_API_AUTH,
   timeoutMs = 90000,
   sessionCache = null,
-  signal = null
+  signal = null,
+  loginBranchId = ""
 }) {
   const initialResult = await fetchAuthorizedLinesLoginInfo({
     endpointUrl,
@@ -5150,15 +5151,17 @@ async function resolveAuthorizedLinesLoginResultWithBranchFallback({
     authorization,
     timeoutMs,
     sessionCache,
-    signal
+    signal,
+    loginBranchId
   });
   const initialToken = String(initialResult?.token || "").trim();
   const retryBranchCandidates = buildUniqueLoginBranchCandidates(
+    loginBranchId,
     initialResult?.obusMerkezBranchKey,
     initialResult?.branchId,
     fallbackBranchId,
     partnerId
-  );
+  ).filter((item) => item !== String(loginBranchId || "").trim());
 
   if (!(initialResult?.ok === true && !initialToken && retryBranchCandidates.length > 0)) {
     return initialResult;
@@ -16953,7 +16956,7 @@ async function fetchObusUserDeactivateCompanyResult({
 }) {
   const companyCode = String(company?.code || "").trim();
   const partnerId = String(company?.id || "").trim();
-  const branchId = String(company?.branchId || company?.id || "").trim();
+  const branchId = String(company?.branchId || "").trim();
   const clusterLabel =
     normalizeObusClusterLabel(company?.cluster || "") ||
     normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
@@ -17002,6 +17005,7 @@ async function fetchObusUserDeactivateCompanyResult({
     username: String(loginCredentials?.username || "").trim(),
     password: typeof loginCredentials?.password === "string" ? loginCredentials.password : "",
     fallbackBranchId: branchId,
+    loginBranchId: branchId,
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
@@ -17201,7 +17205,7 @@ async function deactivateObusUsersForCompany({
   );
   const companyCode = String(company?.code || "").trim();
   const partnerId = String(company?.id || "").trim();
-  const branchId = String(company?.branchId || company?.id || "").trim();
+  const branchId = String(company?.branchId || "").trim();
   const clusterLabel =
     normalizeObusClusterLabel(company?.cluster || "") ||
     normalizeObusClusterLabel(extractClusterLabel(company?.url || "")) ||
@@ -17260,6 +17264,7 @@ async function deactivateObusUsersForCompany({
     username: String(loginCredentials?.username || "").trim(),
     password: typeof loginCredentials?.password === "string" ? loginCredentials.password : "",
     fallbackBranchId: branchId,
+    loginBranchId: branchId,
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
     timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
