@@ -3464,6 +3464,24 @@ function buildObusServiceTraceText(trace, fallbackError = "", { bodyMaxLen = 160
   return parts.join(" | ");
 }
 
+function buildObusServiceResponseDebugText(trace, fallbackError = "", responseMaxLen = 1100) {
+  const entry = trace && typeof trace === "object" ? trace : null;
+  const urlText = String(entry?.url || "").trim();
+  const responseText = truncateObusDebugText(entry?.responseBody || "", responseMaxLen);
+  const errorText = truncateObusDebugText(
+    String(entry?.error || entry?.note || fallbackError || "").trim(),
+    responseMaxLen
+  );
+
+  if (responseText) {
+    return `${urlText ? `URL: ${truncateObusDebugText(urlText, 180)}. ` : ""}Response: ${responseText}`;
+  }
+  if (errorText) {
+    return `${urlText ? `URL: ${truncateObusDebugText(urlText, 180)}. ` : ""}Response alınamadı: ${errorText}`;
+  }
+  return "";
+}
+
 function formatObusMerkezServiceStepLabel(service = "") {
   const normalized = normalizeTokenName(service);
   if (normalized.includes("getsession")) return "GetSession";
@@ -8809,6 +8827,10 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
         failedServiceTrace,
         result?.error || ""
       );
+      const resultResponseDebugText = buildObusServiceResponseDebugText(
+        failedServiceTrace,
+        result?.error || ""
+      );
       const resultStuckLogText = buildObusMerkezStuckLogText({
         rowRef,
         serviceLogs: result?.serviceLogs,
@@ -8837,7 +8859,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
         return {
           branchId: "",
           errorMessage: `${rowRef}: ${compactErrorText(result.error)}`,
-          debugDetail: resultStuckLogText || resultTraceText || compactErrorText(result.error, 520)
+          debugDetail: resultResponseDebugText || resultStuckLogText || resultTraceText || compactErrorText(result.error, 520)
         };
       }
 
@@ -8885,6 +8907,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
       }
 
       const notFoundDebugDetail =
+        resultResponseDebugText ||
         buildObusMerkezStuckLogText(
           {
             rowRef,
@@ -9078,7 +9101,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
       .join(" || fallback=");
     const debugText = `Detay: ${compactErrorText(
       debugSource || item.errorMessage || fallbackErrorMessage || "Bilinmeyen hata",
-      760
+      1200
     )}`;
     row.ObusMerkezSubeIDDebug = debugText;
     if (item.isDebugTarget === true) {
