@@ -1429,6 +1429,8 @@ async function initDb() {
     ON all_companies_cache (source, code, id)
   `);
 
+  await applyAllCompaniesKnownDataCorrections();
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS obus_bulk_user_templates (
       id SERIAL PRIMARY KEY,
@@ -2715,6 +2717,100 @@ const ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS = Object.freeze([
 const ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE =
   "Detay: SQL kaydinda ObusMerkezSubeID yok. Guncelleme yapilmadi veya eslesme bulunamadi.";
 
+function normalizeAllCompaniesKnownCodeCorrection({ id = "", source = "", code = "" } = {}) {
+  const normalizedId = String(id || "").trim();
+  const normalizedSource = extractClusterLabel(source);
+  const normalizedCode = String(code || "").trim();
+  if (
+    normalizedId === "691" &&
+    normalizedSource === "cluster3" &&
+    normalizeTokenName(normalizedCode) === "cagdashatayseyehat"
+  ) {
+    return "cagdasbingolseyahat";
+  }
+  return normalizedCode;
+}
+
+async function applyAllCompaniesKnownDataCorrections() {
+  const id = "691";
+  const source = "cluster3";
+  const wrongCode = "cagdashatayseyehat";
+  const correctedCode = "cagdasbingolseyahat";
+
+  try {
+    const wrongResult = await pool.query(
+      `
+        SELECT obus_merkez_sube_id, obus_merkez_sube_id_debug
+        FROM all_companies_cache
+        WHERE id = $1
+          AND source = $2
+          AND code = $3
+      `,
+      [id, source, wrongCode]
+    );
+    if (wrongResult.rows.length === 0) return;
+
+    const correctedResult = await pool.query(
+      `
+        SELECT obus_merkez_sube_id, obus_merkez_sube_id_debug
+        FROM all_companies_cache
+        WHERE id = $1
+          AND source = $2
+          AND code = $3
+      `,
+      [id, source, correctedCode]
+    );
+
+    if (correctedResult.rows.length === 0) {
+      await pool.query(
+        `
+          UPDATE all_companies_cache
+          SET code = $1,
+              updated_at = now()
+          WHERE id = $2
+            AND source = $3
+            AND code = $4
+        `,
+        [correctedCode, id, source, wrongCode]
+      );
+      return;
+    }
+
+    const wrongRow = wrongResult.rows[0] || {};
+    const correctedRow = correctedResult.rows[0] || {};
+    const mergedBranchId =
+      String(correctedRow.obus_merkez_sube_id || "").trim() ||
+      String(wrongRow.obus_merkez_sube_id || "").trim();
+    const mergedDebug =
+      String(correctedRow.obus_merkez_sube_id_debug || "").trim() ||
+      String(wrongRow.obus_merkez_sube_id_debug || "").trim();
+
+    await pool.query(
+      `
+        UPDATE all_companies_cache
+        SET obus_merkez_sube_id = $1,
+            obus_merkez_sube_id_debug = $2,
+            updated_at = now()
+        WHERE id = $3
+          AND source = $4
+          AND code = $5
+      `,
+      [mergedBranchId || null, mergedDebug || null, id, source, correctedCode]
+    );
+    await pool.query(
+      `
+        DELETE FROM all_companies_cache
+        WHERE id = $1
+          AND source = $2
+          AND code = $3
+      `,
+      [id, source, wrongCode]
+    );
+  } catch (err) {
+    console.warn("All companies known data correction skipped:", summarizeErrorMessage(err));
+  }
+}
+
 function shouldExcludeAllCompaniesCode(codeValue) {
   const rawCode = String(codeValue || "").trim().toLocaleLowerCase("tr");
   if (!rawCode) return false;
@@ -2798,8 +2894,8 @@ function normalizeAllCompaniesReportRows(rows) {
       if (shouldExcludeAllCompaniesCode(codeRaw)) return false;
       return true;
     })
-    .map((row) => ({
-      id: formatPartnerCellValue(
+    .map((row) => {
+      const id = formatPartnerCellValue(
         readPartnerRawValueByAliases(row, [
           "id",
           "partner-id",
@@ -2813,38 +2909,55 @@ function normalizeAllCompaniesReportRows(rows) {
           "providerId",
           "providerID"
         ])
-      ),
-      code: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["code"])),
-      source: formatPartnerCellValue(
+      );
+      const source = formatPartnerCellValue(
         readPartnerRawValueByAliases(row, ["source", "source_cluster", "sourcecluster", "cluster"])
-      ),
-      "obilet-partner-id": formatPartnerCellValue(
-        readPartnerRawValueByAliases(row, [
-          "obilet-partner-id",
-          "obilet_partner_id",
-          "obiletpartnerid",
-          "obiletPartnerId",
-          "obiletPartnerID"
-        ])
-      ),
-      "biletall-partner-id": formatPartnerCellValue(
-        readPartnerRawValueByAliases(row, [
-          "biletall-partner-id",
-          "biletall_partner_id",
-          "biletallpartnerid",
-          "biletallPartnerId",
-          "biletallPartnerID"
-        ])
-      ),
-      url: formatPartnerCellValue(
-        readPartnerRawValueByAliases(row, ["url", "api_url", "apiUrl", "endpoint_url", "endpointUrl", "base_url", "baseUrl"])
-      ),
-      isabroad: formatAllCompaniesBooleanValue(
-        readPartnerRawValueByAliases(row, ["isabroad", "is_abroad", "is-abroad", "isAbroad", "IsAbroad"])
-      ),
-      ObusMerkezSubeID: "",
-      ObusMerkezSubeIDDebug: ""
-    }));
+      );
+      const code = normalizeAllCompaniesKnownCodeCorrection({
+        id,
+        source,
+        code: formatPartnerCellValue(readPartnerRawValueByAliases(row, ["code"]))
+      });
+      return {
+        id,
+        code,
+        source,
+        "obilet-partner-id": formatPartnerCellValue(
+          readPartnerRawValueByAliases(row, [
+            "obilet-partner-id",
+            "obilet_partner_id",
+            "obiletpartnerid",
+            "obiletPartnerId",
+            "obiletPartnerID"
+          ])
+        ),
+        "biletall-partner-id": formatPartnerCellValue(
+          readPartnerRawValueByAliases(row, [
+            "biletall-partner-id",
+            "biletall_partner_id",
+            "biletallpartnerid",
+            "biletallPartnerId",
+            "biletallPartnerID"
+          ])
+        ),
+        url: formatPartnerCellValue(
+          readPartnerRawValueByAliases(row, [
+            "url",
+            "api_url",
+            "apiUrl",
+            "endpoint_url",
+            "endpointUrl",
+            "base_url",
+            "baseUrl"
+          ])
+        ),
+        isabroad: formatAllCompaniesBooleanValue(
+          readPartnerRawValueByAliases(row, ["isabroad", "is_abroad", "is-abroad", "isAbroad", "IsAbroad"])
+        ),
+        ObusMerkezSubeID: "",
+        ObusMerkezSubeIDDebug: ""
+      };
+    });
 
   return {
     columns: reportColumns,
@@ -2861,9 +2974,13 @@ function buildAllCompaniesCacheRowKey(row) {
 
 function normalizeAllCompaniesCacheRow(row) {
   const id = formatPartnerCellValue(row?.id);
-  const code = formatPartnerCellValue(row?.code);
-  if (shouldExcludeAllCompaniesCode(code)) return null;
   const source = extractClusterLabel(formatPartnerCellValue(row?.source));
+  const code = normalizeAllCompaniesKnownCodeCorrection({
+    id,
+    source,
+    code: formatPartnerCellValue(row?.code)
+  });
+  if (shouldExcludeAllCompaniesCode(code)) return null;
   const obusMerkezSubeIDDebug = formatPartnerCellValue(
     row?.ObusMerkezSubeIDDebug ?? row?.obus_merkez_sube_id_debug
   );
