@@ -9392,8 +9392,10 @@ async function fetchAllCompaniesObusMerkezSubeIdMap() {
       const source = extractClusterLabel(String(row?.source || "").trim());
       const obusMerkezSubeId = String(row?.obus_merkez_sube_id || "").trim();
       if (!code || !source || !obusMerkezSubeId) return;
-      const key = buildCompanyOptionValue({ code, id, cluster: source });
-      map.set(key, obusMerkezSubeId);
+      const companyOptionKey = buildCompanyOptionValue({ code, id, cluster: source });
+      const allCompaniesRowKey = buildAllCompaniesCacheRowKey({ source, id, code });
+      map.set(companyOptionKey, obusMerkezSubeId);
+      map.set(allCompaniesRowKey, obusMerkezSubeId);
     });
 
     return {
