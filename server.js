@@ -2716,8 +2716,6 @@ const ALL_COMPANIES_EXCLUDED_RULE_DESCRIPTIONS = Object.freeze([
 
 const ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE =
   "Detay: SQL kaydinda ObusMerkezSubeID yok. Guncelleme yapilmadi veya eslesme bulunamadi.";
-const ALL_COMPANIES_MISSING_OBUS_SERVICE_DEBUG_MESSAGE =
-  "Detay: ObusMerkezSubeID servis verisinde henuz yok.";
 
 function normalizeAllCompaniesKnownCodeCorrection({ id = "", source = "", code = "" } = {}) {
   const normalizedId = String(id || "").trim();
@@ -2837,10 +2835,7 @@ function buildAllCompaniesExclusionSummary() {
 function isAllCompaniesMissingObusSqlFallbackDebug(value) {
   const text = String(value || "").trim();
   if (!text) return false;
-  if (
-    text === ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE ||
-    text === ALL_COMPANIES_MISSING_OBUS_SERVICE_DEBUG_MESSAGE
-  ) {
+  if (text === ALL_COMPANIES_MISSING_OBUS_SQL_DEBUG_MESSAGE) {
     return true;
   }
 
@@ -3486,54 +3481,6 @@ function formatObusMerkezServiceStepLabel(service = "") {
   if (normalized.includes("userlogin")) return "Membership UserLogin";
   if (normalized.includes("getbranches")) return "Inventory GetBranches";
   return String(service || "").trim() || "Satır doğrulama";
-}
-
-function buildAllCompaniesObusMissingBranchDebugText({
-  rowRef = "",
-  partnerId = "",
-  serviceLogs = [],
-  failedServiceLog = null,
-  rows = [],
-  error = ""
-} = {}) {
-  const logs = Array.isArray(serviceLogs) ? serviceLogs.filter((item) => item && typeof item === "object") : [];
-  const trace =
-    failedServiceLog && typeof failedServiceLog === "object" ? failedServiceLog : getLastObusServiceTrace(logs);
-  const stepLabel = formatObusMerkezServiceStepLabel(trace?.service || "GetBranches");
-  const normalizedRowRef = String(rowRef || "").trim();
-  const expectedPartnerId = String(partnerId || "").trim() || "-";
-  const candidateRows = Array.isArray(rows) ? rows : [];
-  const candidateTexts = [];
-
-  candidateRows.forEach((item) => {
-    const name = String(item?.name || "OBUSMERKEZ").trim() || "OBUSMERKEZ";
-    if (!isObusMerkezBranchName(name)) return;
-    const itemPartnerId = String(item?.partnerId || "").trim() || "-";
-    const itemBranchId = String(item?.branchId || "").trim() || "-";
-    const candidateText = `partner-id=${itemPartnerId}, id=${itemBranchId}`;
-    if (!candidateTexts.includes(candidateText)) candidateTexts.push(candidateText);
-  });
-
-  const parts = [];
-  if (normalizedRowRef) parts.push(`Satır: ${normalizedRowRef}.`);
-  parts.push(`${stepLabel} aşamasına kadar gidildi.`);
-  parts.push(`Beklenen eşleşme: name=OBUSMERKEZ ve partner-id=${expectedPartnerId}.`);
-  parts.push("Sonuç: eşleşen şube id bulunamadı.");
-  if (candidateTexts.length > 0) {
-    const visibleCandidates = candidateTexts.slice(0, 8).join(" | ");
-    const remainingCount = candidateTexts.length - 8;
-    parts.push(
-      `GetBranches response içindeki OBUSMERKEZ adayları: ${visibleCandidates}${
-        remainingCount > 0 ? ` (+${remainingCount} aday)` : ""
-      }.`
-    );
-  } else {
-    parts.push("GetBranches response içinde name=OBUSMERKEZ satırı bulunamadı veya parse edilemedi.");
-  }
-
-  const responseText = buildObusServiceResponseDebugText(trace, error, 1000);
-  if (responseText) parts.push(responseText);
-  return parts.join(" ");
 }
 
 function buildObusMerkezStuckLogText({
@@ -8883,10 +8830,6 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
         failedServiceLog: failedServiceTrace,
         error: result?.error || ""
       });
-      const resultFailureDebugText =
-        resultStuckLogText && resultResponseDebugText
-          ? `${resultStuckLogText} ${resultResponseDebugText}`
-          : resultStuckLogText || resultResponseDebugText;
       if (isDebugTarget) {
         logAllCompaniesObusMerkezDebug("fetch-result", {
           rowRef,
@@ -8909,7 +8852,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
         return {
           branchId: "",
           errorMessage: `${rowRef}: ${compactErrorText(result.error)}`,
-          debugDetail: resultFailureDebugText || resultTraceText || compactErrorText(result.error, 520)
+          debugDetail: resultResponseDebugText || resultTraceText || compactErrorText(result.error, 520)
         };
       }
 
@@ -8957,14 +8900,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
       }
 
       const notFoundDebugDetail =
-        buildAllCompaniesObusMissingBranchDebugText({
-          rowRef,
-          partnerId,
-          serviceLogs: result?.serviceLogs,
-          failedServiceLog: failedServiceTrace,
-          rows: result?.rows,
-          error: "Eşleşen OBUSMERKEZ kaydı bulunamadı."
-        }) || "Eşleşen OBUSMERKEZ kaydı bulunamadı.";
+        resultResponseDebugText || resultStuckLogText || resultTraceText || "Eşleşen OBUSMERKEZ kaydı bulunamadı.";
 
       if (isDebugTarget) {
         const mapKeys =
