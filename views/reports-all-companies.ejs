@@ -59,6 +59,27 @@
       <% if (report.save && report.save.message) { %>
         <div class="inline-success"><%= report.save.message %></div>
       <% } %>
+      <% if (report.obus && report.obus.message) { %>
+        <% const obusJobRunning = Boolean(report.obus.job && !report.obus.job.done); %>
+        <% const obusElapsedSeconds = obusJobRunning ? Math.max(0, Math.floor((Date.now() - Number(report.obus.job.createdAt || 0)) / 1000)) : 0; %>
+        <% const obusElapsedText = `${String(Math.floor(obusElapsedSeconds / 60)).padStart(2, '0')}:${String(obusElapsedSeconds % 60).padStart(2, '0')}`; %>
+        <div
+          class="<%= report.obus.kind === 'warning' || report.obus.kind === 'error' ? 'alert inline-alert' : 'inline-success' %> <%= obusJobRunning ? 'all-companies-job-active' : '' %>"
+          <% if (report.obus.job) { %>
+            data-all-companies-job="1"
+            data-job-id="<%= report.obus.job.id %>"
+            data-job-done="<%= report.obus.job.done ? '1' : '0' %>"
+            data-job-created-at="<%= report.obus.job.createdAt %>"
+            data-refresh-url="<%= report.obus.job.refreshUrl %>"
+            data-running-message="<%= report.obus.job.runningMessage %>"
+            data-show-counts="0"
+          <% } %>
+        >
+          <% if (obusJobRunning) { %><span class="all-companies-job-spinner" aria-hidden="true"></span><% } %>
+          <span class="all-companies-job-text"><%= report.obus.message %></span>
+          <% if (obusJobRunning) { %><span class="all-companies-job-timer"><%= obusElapsedText %></span><% } %>
+        </div>
+      <% } %>
       <% if (report.cache && report.cache.message) { %>
         <div class="inline-success"><%= report.cache.message %></div>
       <% } %>
@@ -90,9 +111,23 @@
                 Servis verisi çekiliyor...
               </span>
             </form>
-            <button class="button-link" type="button">
-              ObusMerkezSubeID Güncelle
-            </button>
+            <form
+              class="all-companies-loading-form all-companies-obus-sync-form"
+              method="post"
+              action="/reports/all-companies/update-obus-merkez-sube-id"
+            >
+              <button
+                class="button-link"
+                type="submit"
+                data-default-label="ObusMerkezSubeID Güncelle"
+                data-loading-label="Güncelleniyor..."
+              >
+                ObusMerkezSubeID Güncelle
+              </button>
+              <span class="all-companies-loading-message" hidden>
+                Boş ObusMerkezSubeID kayıtları satır satır sorgulanıyor...
+              </span>
+            </form>
             <form class="all-companies-loading-form all-companies-save-form" method="post" action="/reports/all-companies/save-sql">
               <input type="hidden" name="saveSource" value="<%= report.sync?.hasPreview ? 'service' : 'cache' %>" />
               <button
