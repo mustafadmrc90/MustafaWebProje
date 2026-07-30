@@ -7096,6 +7096,12 @@
       }
     };
 
+    const normalizeAllCompaniesObusRowRef = (value) =>
+      String(value || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLocaleLowerCase("tr");
+
     statusBoxes.forEach((statusBox) => {
       if (statusBox.dataset.jobMonitorBound === "1") return;
       statusBox.dataset.jobMonitorBound = "1";
@@ -7108,6 +7114,66 @@
         String(statusBox.getAttribute("data-refresh-url") || "").trim() || window.location.pathname + window.location.search;
       const runningMessage = String(statusBox.getAttribute("data-running-message") || "").trim();
       const showCounts = String(statusBox.getAttribute("data-show-counts") || "").trim() === "1";
+      const showRowProgress = String(statusBox.getAttribute("data-obus-row-progress") || "").trim() === "1";
+      const rowProgressRows = showRowProgress
+        ? Array.from(document.querySelectorAll("[data-obus-row-ref]"))
+        : [];
+      let activeRowProgressCell = null;
+
+      const clearActiveRowProgress = () => {
+        if (!activeRowProgressCell) return;
+        const originalText = activeRowProgressCell.getAttribute("data-obus-progress-original-text");
+        const originalTitle = activeRowProgressCell.getAttribute("data-obus-progress-original-title");
+        if (originalText !== null) {
+          activeRowProgressCell.textContent = originalText;
+        }
+        if (originalTitle !== null) {
+          activeRowProgressCell.setAttribute("title", originalTitle);
+        } else {
+          activeRowProgressCell.removeAttribute("title");
+        }
+        activeRowProgressCell.classList.remove("all-companies-obus-cell-active");
+        activeRowProgressCell.removeAttribute("data-obus-progress-original-text");
+        activeRowProgressCell.removeAttribute("data-obus-progress-original-title");
+        const activeRow = activeRowProgressCell.closest("[data-obus-row-ref]");
+        if (activeRow) {
+          activeRow.classList.remove("all-companies-obus-row-active");
+        }
+        activeRowProgressCell = null;
+      };
+
+      const renderActiveRowProgress = (activeStep) => {
+        if (!showRowProgress) return;
+        const rowRef = normalizeAllCompaniesObusRowRef(activeStep?.rowRef);
+        if (!rowRef) return;
+        const row = rowProgressRows.find(
+          (candidate) => normalizeAllCompaniesObusRowRef(candidate.getAttribute("data-obus-row-ref")) === rowRef
+        );
+        const cell = row ? row.querySelector("[data-obus-merkez-cell='1']") : null;
+        if (!cell) return;
+
+        if (activeRowProgressCell && activeRowProgressCell !== cell) {
+          clearActiveRowProgress();
+        }
+        if (!activeRowProgressCell) {
+          activeRowProgressCell = cell;
+          cell.setAttribute("data-obus-progress-original-text", cell.textContent || "");
+          cell.setAttribute("data-obus-progress-original-title", cell.getAttribute("title") || "");
+        }
+
+        const serviceText = String(activeStep?.service || "").trim();
+        const visibleRowRef = String(activeStep?.rowRef || row.getAttribute("data-obus-row-ref") || "").trim();
+        const rowNumber = String(row.getAttribute("data-obus-row-number") || "").trim();
+        const rowPrefix = rowNumber ? `${rowNumber}. satır işleniyor` : "İşleniyor";
+        const cellText = serviceText
+          ? `${rowPrefix}: ${visibleRowRef} (${serviceText})`
+          : `${rowPrefix}: ${visibleRowRef}`;
+        cell.textContent = cellText;
+        cell.setAttribute("title", cellText);
+        cell.classList.add("all-companies-obus-cell-active");
+        row.classList.add("all-companies-obus-row-active");
+      };
+
       if (!jobId || jobDone) return;
 
       let cursor = 0;
@@ -7176,6 +7242,7 @@
               runningMessage ||
               "İşlem sürüyor. Sayfa otomatik yenilenecek..."
           };
+          renderActiveRowProgress(data.activeStep);
           renderStatusBox(statusBox, latestState.message, {
             busy: true,
             showCounts,
@@ -7188,6 +7255,7 @@
 
           if (data.done) {
             window.clearInterval(timerId);
+            clearActiveRowProgress();
             navigate(refreshUrl, { push: true });
             return;
           }
@@ -7209,6 +7277,7 @@
           }
 
           window.clearInterval(timerId);
+          clearActiveRowProgress();
           renderStatusBox(statusBox, err?.message || "İş durumu okunamadı.", {
             busy: false
           });

@@ -69,6 +69,7 @@
           data-refresh-url="<%= report.obus.job.refreshUrl %>"
           data-running-message="<%= report.obus.job.runningMessage %>"
           data-show-counts="0"
+          data-obus-row-progress="1"
         ></div>
       <% } %>
       <% if (report.cache && report.cache.message) { %>
@@ -185,8 +186,9 @@
                 </tr>
               </thead>
               <tbody>
-                <% report.rows.forEach((row) => { %>
-                  <tr>
+                <% report.rows.forEach((row, rowIndex) => { %>
+                  <% const obusRowRef = `${String(row.source || '').trim() || 'cluster?'} / ${String(row.code || '').trim() || 'code?'} / ${String(row.id || '').trim() || 'id?'}`; %>
+                  <tr data-obus-row-ref="<%= obusRowRef %>" data-obus-row-number="<%= rowIndex + 1 %>">
                     <% report.columns.forEach((column) => { %>
                       <% const isObusDebugColumn = column === "ObusMerkezSubeID"; %>
                       <% const rawValue = row[column]; %>
@@ -194,7 +196,11 @@
                       <% const normalizedValue = rawValue === undefined || rawValue === null ? "" : String(rawValue).trim(); %>
                       <% const displayValue = normalizedValue || debugValue || "-"; %>
                       <% const cellClass = isObusDebugColumn && !normalizedValue && debugValue ? "all-companies-obus-debug-cell" : ""; %>
-                      <td class="<%= cellClass %>" title="<%= displayValue %>"><%= displayValue %></td>
+                      <td
+                        class="<%= cellClass %>"
+                        title="<%= displayValue %>"
+                        <% if (isObusDebugColumn) { %>data-obus-merkez-cell="1"<% } %>
+                      ><%= displayValue %></td>
                     <% }) %>
                   </tr>
                 <% }) %>

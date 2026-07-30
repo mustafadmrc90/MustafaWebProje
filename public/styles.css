@@ -2491,6 +2491,18 @@ button.ghost {
   font-size: 13px;
 }
 
+.partners-raw-table tr.all-companies-obus-row-active td {
+  background: #fff7e6;
+}
+
+.partners-raw-table td.all-companies-obus-cell-active {
+  white-space: normal;
+  min-width: 360px;
+  max-width: 720px;
+  color: #7a4b00;
+  font-weight: 700;
+}
+
 .all-companies-loading-form {
   display: inline-flex;
   align-items: center;
