@@ -224,6 +224,9 @@ function normalizeCreateTableBodyByTable(tableName, body) {
       .replace(/\bobus_merkez_sube_id\s+NVARCHAR\(MAX\)\b/i, "obus_merkez_sube_id NVARCHAR(255)")
       .replace(/\bobus_merkez_sube_id_debug\s+NVARCHAR\(MAX\)\b/i, "obus_merkez_sube_id_debug NVARCHAR(MAX)");
   }
+  if (table === "app_sessions") {
+    text = text.replace(/\bsid\s+NVARCHAR\(MAX\)\s+PRIMARY\s+KEY\b/i, "sid NVARCHAR(255) PRIMARY KEY");
+  }
 
   return text;
 }

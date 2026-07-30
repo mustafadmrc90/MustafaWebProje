@@ -326,6 +326,7 @@ const APP_ASSET_VERSION = String(
 const REQUEST_BODY_LIMIT = String(process.env.REQUEST_BODY_LIMIT || "25mb").trim() || "25mb";
 const REQUEST_BODY_PARAMETER_LIMIT =
   Number.parseInt(process.env.REQUEST_BODY_PARAMETER_LIMIT || "50000", 10) || 50000;
+const SESSION_STORE_TTL_MS = Number.parseInt(process.env.SESSION_STORE_TTL_MS || "604800000", 10) || 604800000;
 const EXECUTE_TRACE_PREVIEW_LIMIT =
   Number.parseInt(process.env.EXECUTE_TRACE_PREVIEW_LIMIT || "12000", 10) || 12000;
 const initDbOnly = String(process.env.INIT_DB_ONLY || "")
@@ -430,9 +431,6 @@ const OBUS_USER_DEACTIVATE_API_URL =
   "https://api-coreprod-cluster4.obus.com.tr/api/Membership/GetUsersWithoutPermissions";
 const OBUS_USER_DEACTIVATE_API_AUTH =
   process.env.OBUS_USER_DEACTIVATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
-const OBUS_USER_DEACTIVATE_TIMEOUT_MS =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_TIMEOUT_MS || "90000", 10) || 90000;
-const OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS = Math.max(1, Math.round(OBUS_USER_DEACTIVATE_TIMEOUT_MS / 1000));
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "16", 10) || 16;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
@@ -874,6 +872,115 @@ const dbRuntimeState = {
   initErrorRaw: null,
   initErrorCode: null
 };
+let appSessionsTableReadyPromise = null;
+
+async function ensureAppSessionsTable() {
+  if (!appSessionsTableReadyPromise) {
+    appSessionsTableReadyPromise = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS app_sessions (
+          sid TEXT PRIMARY KEY,
+          sess TEXT NOT NULL,
+          expire TIMESTAMPTZ NOT NULL
+        )
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_app_sessions_expire
+        ON app_sessions (expire)
+      `);
+    })().catch((err) => {
+      appSessionsTableReadyPromise = null;
+      throw err;
+    });
+  }
+  return appSessionsTableReadyPromise;
+}
+
+function resolveSessionExpiry(sess) {
+  const cookieExpires = sess?.cookie?.expires ? new Date(sess.cookie.expires) : null;
+  if (cookieExpires && Number.isFinite(cookieExpires.getTime())) {
+    return cookieExpires;
+  }
+  return new Date(Date.now() + Math.max(60000, SESSION_STORE_TTL_MS));
+}
+
+class DatabaseSessionStore extends session.Store {
+  constructor({ pool: sessionPool }) {
+    super();
+    this.pool = sessionPool;
+  }
+
+  async get(sid, callback) {
+    try {
+      await ensureAppSessionsTable();
+      const result = await this.pool.query("SELECT sess, expire FROM app_sessions WHERE sid = $1", [sid]);
+      const row = result.rows[0];
+      if (!row) {
+        return callback(null, null);
+      }
+
+      const expiresAt = new Date(row.expire);
+      if (Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() <= Date.now()) {
+        await this.destroy(sid, () => {});
+        return callback(null, null);
+      }
+
+      return callback(null, JSON.parse(row.sess));
+    } catch (err) {
+      return callback(err);
+    }
+  }
+
+  async set(sid, sess, callback) {
+    let client = null;
+    try {
+      await ensureAppSessionsTable();
+      const expiresAt = resolveSessionExpiry(sess);
+      const payload = JSON.stringify(sess || {});
+      client = await this.pool.connect();
+      await client.query("BEGIN");
+      await client.query("DELETE FROM app_sessions WHERE sid = $1", [sid]);
+      await client.query("INSERT INTO app_sessions (sid, sess, expire) VALUES ($1, $2, $3)", [
+        sid,
+        payload,
+        expiresAt
+      ]);
+      await client.query("COMMIT");
+      return callback?.(null);
+    } catch (err) {
+      if (client) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (_) {
+          // Keep the original store error.
+        }
+      }
+      return callback?.(err);
+    } finally {
+      client?.release?.();
+    }
+  }
+
+  async touch(sid, sess, callback) {
+    try {
+      await ensureAppSessionsTable();
+      await this.pool.query("UPDATE app_sessions SET expire = $2 WHERE sid = $1", [sid, resolveSessionExpiry(sess)]);
+      return callback?.(null);
+    } catch (err) {
+      return callback?.(err);
+    }
+  }
+
+  async destroy(sid, callback) {
+    try {
+      await ensureAppSessionsTable();
+      await this.pool.query("DELETE FROM app_sessions WHERE sid = $1", [sid]);
+      return callback?.(null);
+    } catch (err) {
+      return callback?.(err);
+    }
+  }
+}
 
 function summarizeErrorMessage(err) {
   if (!err) return "Bilinmeyen hata";
@@ -980,6 +1087,7 @@ app.use(
 );
 app.use(
   session({
+    store: new DatabaseSessionStore({ pool }),
     secret: process.env.SESSION_SECRET || "dev-secret-change-me",
     resave: false,
     saveUninitialized: false,
@@ -994,6 +1102,8 @@ app.use(
 app.use("/public", express.static(path.join(__dirname, "public")));
 
 async function initDb() {
+  await ensureAppSessionsTable();
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -11952,6 +12062,9 @@ function cleanupObusLiveJobs() {
       obusLiveJobs.delete(jobId);
       continue;
     }
+    if (job.done !== true) {
+      continue;
+    }
     const expiresAt = Number(job.expiresAt || 0);
     if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
       obusLiveJobs.delete(jobId);
@@ -12041,6 +12154,7 @@ function pushObusLiveJobEvent(job, event) {
 
   job.nextSeq = seq + 1;
   job.events.push(record);
+  job.expiresAt = now + Math.max(60000, OBUS_LIVE_JOB_TTL_MS);
   const maxEvents = Math.max(1000, Number(OBUS_LIVE_JOB_MAX_EVENTS || 10000));
   if (job.events.length > maxEvents) {
     job.events.splice(0, job.events.length - maxEvents);
@@ -12070,8 +12184,10 @@ function finishObusLiveJob(job, errorMessage = null) {
 
 function setObusLiveJobSummary(job, summary = {}) {
   if (!job || typeof job !== "object") return;
+  const now = Date.now();
   job.summary = summary && typeof summary === "object" ? summary : {};
-  job.updatedAt = Date.now();
+  job.updatedAt = now;
+  job.expiresAt = now + Math.max(60000, OBUS_LIVE_JOB_TTL_MS);
 }
 
 function finalizeObusLiveJobSingleResult(job, ok = true) {
@@ -12128,6 +12244,15 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
     events,
     cursor: lastSeq
   };
+}
+
+function keepHttpRequestOpenUntilServiceResponse(req, res) {
+  if (typeof req?.setTimeout === "function") {
+    req.setTimeout(0);
+  }
+  if (typeof res?.setTimeout === "function") {
+    res.setTimeout(0);
+  }
 }
 
 async function listSlackChannelsForAnalysis(token, channelTypes) {
@@ -16694,10 +16819,11 @@ function buildObusUserDeactivateFailureResponseText(result = {}) {
   );
 }
 
-function buildObusUserDeactivateTimedOutCompanyResult({
+function buildObusUserDeactivateCompanyFailureResult({
   company = {},
   service = "Firma sorgusu",
-  selectedUsers = []
+  selectedUsers = [],
+  error = ""
 } = {}) {
   const clusterLabel =
     normalizeObusClusterLabel(company?.cluster || "") ||
@@ -16711,7 +16837,7 @@ function buildObusUserDeactivateTimedOutCompanyResult({
     id: partnerId,
     cluster: clusterLabel
   });
-  const error = `${service} ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
+  const errorText = String(error || "").trim() || `${service} tamamlanamadı.`;
   return {
     ok: false,
     code,
@@ -16720,7 +16846,7 @@ function buildObusUserDeactivateTimedOutCompanyResult({
     companyLabel,
     requestUrl: "",
     status: null,
-    error,
+    error: errorText,
     errorDetail: "",
     responseBody: "",
     listedRows: [],
@@ -16735,46 +16861,32 @@ function buildObusUserDeactivateTimedOutCompanyResult({
       status: null,
       requestUrl: "",
       requestBody: "{}",
-      responseBody: error
+      responseBody: errorText
     }
   };
 }
 
-async function runObusUserDeactivateCompanyWithDeadline({
+async function runObusUserDeactivateCompanyRequest({
   company = {},
   selectedUsers = [],
   service = "Firma sorgusu",
   worker
 } = {}) {
   const controller = new AbortController();
-  let timeoutId = null;
-  const timedOutResult = buildObusUserDeactivateTimedOutCompanyResult({
+  const failureResult = buildObusUserDeactivateCompanyFailureResult({
     company,
     service,
     selectedUsers
   });
-  const timeoutPromise = new Promise((resolve) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      resolve(timedOutResult);
-    }, OBUS_USER_DEACTIVATE_TIMEOUT_MS);
-  });
 
   try {
-    return await Promise.race([
-      Promise.resolve().then(() => worker(controller.signal)),
-      timeoutPromise
-    ]);
+    return await Promise.resolve().then(() => worker(controller.signal));
   } catch (err) {
-    return controller.signal.aborted
-      ? timedOutResult
-      : {
-          ...timedOutResult,
-          error: err?.message || "Firma sorgusu başarısız.",
-          failedRequestPreview: null
-        };
-  } finally {
-    clearTimeout(timeoutId);
+    return {
+      ...failureResult,
+      error: controller.signal.aborted ? `${service} isteği iptal edildi.` : err?.message || "Firma sorgusu başarısız.",
+      failedRequestPreview: null
+    };
   }
 }
 
@@ -17008,7 +17120,7 @@ async function fetchObusUserDeactivateCompanyResult({
     loginBranchId: branchId,
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
-    timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+    timeoutMs: 0,
     sessionCache,
     signal
   });
@@ -17066,8 +17178,6 @@ async function fetchObusUserDeactivateCompanyResult({
       signal.addEventListener("abort", abortFromOuterSignal, { once: true });
     }
   }
-  const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
-
   try {
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -17169,24 +17279,23 @@ async function fetchObusUserDeactivateCompanyResult({
       failedRequestPreview: null
     };
   } catch (err) {
-    const timeoutError = `GetUsersWithoutPermissions isteği ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
+    const abortError = "GetUsersWithoutPermissions isteği iptal edildi.";
     const requestTrace = buildObusServiceTraceEntry({
       service: "Membership GetUsersWithoutPermissions",
       url: requestUrl,
       requestBody: requestBodyObject,
       responseBody: "",
-      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     });
     const failure = buildFailure(
-      err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     );
     failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
     failure.failedRequestPreview = buildPreview(requestTrace, {
-      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     });
     return failure;
   } finally {
-    clearTimeout(timeout);
     if (signal && typeof signal.removeEventListener === "function") {
       signal.removeEventListener("abort", abortFromOuterSignal);
     }
@@ -17267,7 +17376,7 @@ async function deactivateObusUsersForCompany({
     loginBranchId: branchId,
     sessionClusterLabel: clusterLabel,
     authorization: OBUS_USER_DEACTIVATE_API_AUTH,
-    timeoutMs: OBUS_USER_DEACTIVATE_TIMEOUT_MS,
+    timeoutMs: 0,
     sessionCache,
     signal
   });
@@ -17338,8 +17447,6 @@ async function deactivateObusUsersForCompany({
       signal.addEventListener("abort", abortFromOuterSignal, { once: true });
     }
   }
-  const timeout = setTimeout(() => controller.abort(), OBUS_USER_DEACTIVATE_TIMEOUT_MS);
-
   try {
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -17418,24 +17525,23 @@ async function deactivateObusUsersForCompany({
         `${normalizedUserMeta.length} kullanıcı pasife alındı.`
     };
   } catch (err) {
-    const timeoutError = `DeleteUser isteği ${OBUS_USER_DEACTIVATE_TIMEOUT_SECONDS} saniyede yanıt vermedi; sonraki firmaya geçildi.`;
+    const abortError = "DeleteUser isteği iptal edildi.";
     const requestTrace = buildObusServiceTraceEntry({
       service: "Membership DeleteUser",
       url: requestUrl,
       requestBody: requestBodyObject,
       responseBody: "",
-      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     });
     const failure = buildFailure(
-      err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     );
     failure.firstRequestPreview = firstRequestPreview || buildPreview(requestTrace);
     failure.failedRequestPreview = buildPreview(requestTrace, {
-      error: err?.name === "AbortError" ? timeoutError : err?.message || "İstek gönderilemedi."
+      error: err?.name === "AbortError" ? abortError : err?.message || "İstek gönderilemedi."
     });
     return failure;
   } finally {
-    clearTimeout(timeout);
     if (signal && typeof signal.removeEventListener === "function") {
       signal.removeEventListener("abort", abortFromOuterSignal);
     }
@@ -17462,7 +17568,7 @@ async function fetchObusUserDeactivateSearchReport({ partnerItems = [] }) {
     partnerItems,
     OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY,
     async (company) =>
-      runObusUserDeactivateCompanyWithDeadline({
+      runObusUserDeactivateCompanyRequest({
         company,
         service: "Firma sorgusu",
         worker: (signal) =>
@@ -17721,7 +17827,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         }
       });
 
-      const result = await runObusUserDeactivateCompanyWithDeadline({
+      const result = await runObusUserDeactivateCompanyRequest({
         company,
         service: "Firma sorgusu",
         worker: (signal) =>
@@ -18041,9 +18147,15 @@ async function fetchAuthorizedLinesLoginInfo({
       signal.addEventListener("abort", abortFromOuterSignal, { once: true });
     }
   }
-  const boundedTimeoutMs = toBoundedInt(timeoutMs, 90000, 5000, 180000);
-  const timeoutSeconds = Math.max(1, Math.round(boundedTimeoutMs / 1000));
-  const timeout = setTimeout(() => controller.abort(), boundedTimeoutMs);
+  const parsedTimeoutMs = Number.parseInt(String(timeoutMs || ""), 10);
+  const hasRequestTimeout = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0;
+  const boundedTimeoutMs = hasRequestTimeout ? toBoundedInt(parsedTimeoutMs, 90000, 5000, 180000) : 0;
+  const timeoutSeconds = Math.max(1, Math.round((boundedTimeoutMs || 90000) / 1000));
+  const timeout = hasRequestTimeout ? setTimeout(() => controller.abort(), boundedTimeoutMs) : null;
+  const buildAbortError = (serviceName) =>
+    hasRequestTimeout
+      ? `${serviceName} isteği ${timeoutSeconds} saniyede yanıt vermedi.`
+      : `${serviceName} isteği iptal edildi.`;
   try {
     const allServiceLogs = [];
     let lastError = "UserLogin çağrısı başarısız.";
@@ -18086,9 +18198,7 @@ async function fetchAuthorizedLinesLoginInfo({
         allServiceLogs.push(sessionResult.debug);
       }
       if (sessionResult.error) {
-        const sessionError = controller.signal.aborted
-          ? `GetSession isteği ${timeoutSeconds} saniyede yanıt vermedi.`
-          : sessionResult.error;
+        const sessionError = controller.signal.aborted ? buildAbortError("GetSession") : sessionResult.error;
         lastError = `${sessionError} (Session URL: ${sessionUrl})`;
         lastErrorDetail = "";
         lastFailedServiceLog = sessionResult?.debug || lastFailedServiceLog;
@@ -18241,7 +18351,7 @@ async function fetchAuthorizedLinesLoginInfo({
         };
       } catch (err) {
         const loginError = err?.name === "AbortError"
-          ? `Membership UserLogin isteği ${timeoutSeconds} saniyede yanıt vermedi.`
+          ? buildAbortError("Membership UserLogin")
           : err?.message || "Membership UserLogin isteği başarısız.";
         const loginTrace = buildObusServiceTraceEntry({
           service: "Membership UserLogin",
@@ -18273,7 +18383,7 @@ async function fetchAuthorizedLinesLoginInfo({
       failedServiceLog: lastFailedServiceLog
     };
   } catch (err) {
-    const timeoutError = `UserLogin isteği ${timeoutSeconds} saniyede yanıt vermedi.`;
+    const timeoutError = buildAbortError("UserLogin");
     return {
       ok: false,
       error: err?.name === "AbortError" ? timeoutError : err?.message || "UserLogin isteği gönderilemedi.",
@@ -18290,7 +18400,9 @@ async function fetchAuthorizedLinesLoginInfo({
       failedServiceLog: null
     };
   } finally {
-    clearTimeout(timeout);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
     if (signal && typeof signal.removeEventListener === "function") {
       signal.removeEventListener("abort", abortFromOuterSignal);
     }
@@ -21958,12 +22070,13 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
   const cursor = Number.isFinite(parsedCursor) ? Math.max(0, parsedCursor) : 0;
   const job = readObusLiveJob(jobId, Number(req.session?.user?.id || 0));
   if (!job) {
-    return res.status(404).json({ ok: false, error: "İşlem bulunamadı veya süresi doldu." });
+    return res.status(404).json({ ok: false, error: "İşlem bulunamadı. Sayfa yenilenmiş veya sunucu yeniden başlamış olabilir." });
   }
   return res.json(readObusLiveJobSnapshot(job, cursor));
 });
 
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
+  keepHttpRequestOpenUntilServiceResponse(req, res);
   try {
     const companies = Array.isArray(req.body?.companies) ? req.body.companies : [];
     const usernameFilter = String(req.body?.usernameFilter || "").trim();
@@ -21996,6 +22109,7 @@ app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-u
 });
 
 app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
+  keepHttpRequestOpenUntilServiceResponse(req, res);
   try {
     const usernameFilter = String(req.body?.usernameFilter || "").trim();
     const selectedUsers = Array.isArray(req.body?.users) ? req.body.users : [];
@@ -22051,7 +22165,7 @@ app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess(
       groupedTargets,
       OBUS_USER_DELETE_COMPANY_CONCURRENCY,
       async (group) =>
-        runObusUserDeactivateCompanyWithDeadline({
+        runObusUserDeactivateCompanyRequest({
           company: group.company,
           selectedUsers: group.users,
           service: "DeleteUser",
