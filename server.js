@@ -23517,28 +23517,19 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
 
   if (obusJobId) {
     if (!obusJob) {
-      errorParts.push("ObusMerkezSubeID güncelleme işi bulunamadı veya süresi doldu.");
+      obusMessage = "";
     } else if (obusJob.done) {
       if (obusJob.error) {
-        obusMessage = String(obusJob.statusMessage || obusJob.error || "").trim();
+        obusMessage = "";
         obusMessageKind = "error";
       } else {
-        obusMessage = `ObusMerkezSubeID güncelleme tamamlandı. Kontrol: ${obusJobSummary?.scanned || 0} | Doluya dönen: ${
-          obusJobSummary?.filled || 0
-        } | Hâlâ boş: ${obusJobSummary?.remaining || 0}`;
+        obusMessage = "";
         if (obusJobSummary?.partial) {
           obusMessageKind = "warning";
-          if (obusJobSummary.notice) {
-            errorParts.push(obusJobSummary.notice);
-          } else {
-            errorParts.push("ObusMerkezSubeID güncellemesi kısmi tamamlandı.");
-          }
         }
       }
     } else {
-      obusMessage =
-        String(obusJob.statusMessage || "").trim() ||
-        "ObusMerkezSubeID güncellemesi sürüyor. Sayfa otomatik yenilenecek...";
+      obusMessage = "";
       obusMessageKind = "progress";
     }
   }
@@ -23552,7 +23543,7 @@ app.get("/reports/all-companies", requireAuth, requireMenuAccess("all-companies"
   }
 
   if (obusUpdatePartial) {
-    errorParts.push("ObusMerkezSubeID güncellemesi kısmi tamamlandı.");
+    obusMessageKind = "warning";
   }
 
   const emptyCacheMessage =
