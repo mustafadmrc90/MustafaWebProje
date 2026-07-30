@@ -503,8 +503,8 @@ const ALL_COMPANIES_OBUS_ENRICH_CONCURRENCY =
     10
   ) || Math.max(1, Number(INVENTORY_BRANCHES_CLUSTER_CONCURRENCY || 4));
 const ALL_COMPANIES_OBUS_UPDATE_TIMEOUT_MS = Math.min(
-  180000,
-  Math.max(30000, Number.parseInt(process.env.ALL_COMPANIES_OBUS_UPDATE_TIMEOUT_MS || "180000", 10) || 180000)
+  3600000,
+  Math.max(60000, Number.parseInt(process.env.ALL_COMPANIES_OBUS_UPDATE_TIMEOUT_MS || "1800000", 10) || 1800000)
 );
 const ALL_COMPANIES_OBUS_REQUEST_TIMEOUT_MS = Math.min(
   60000,
@@ -9980,7 +9980,9 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
-    timeoutAllCompaniesObusUpdateJob(job);
+    const timeoutMessage = buildAllCompaniesObusUpdateTimeoutMessage(job.activeStep || null, job.summary || {});
+    job.statusMessage = timeoutMessage;
+    job.updatedAt = Date.now();
   }, ALL_COMPANIES_OBUS_UPDATE_TIMEOUT_MS);
 
   try {
@@ -10012,19 +10014,10 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
           })
         : { rows: normalizedTargetRows, notice: null };
 
-    if (timedOut || Boolean(controller.signal.aborted) || job.done) {
-      timeoutAllCompaniesObusUpdateJob(job);
-      return;
-    }
-
     const missingBranchDetails = buildAllCompaniesObusUpdateMissingBranchDetails(enriched.rows || normalizedTargetRows);
     const finalRows = normalizeAllCompaniesCacheRows(enriched.rows || normalizedTargetRows);
     const saveResult = await upsertAllCompaniesCacheRows(finalRows);
     if (saveResult.error) {
-      if (timedOut || Boolean(controller.signal.aborted) || job.done) {
-        timeoutAllCompaniesObusUpdateJob(job);
-        return;
-      }
       console.error("All companies ObusMerkezSubeID background save error:", saveResult.error);
       finishObusLiveJob(job, `ObusMerkezSubeID güncellemesi kaydedilemedi: ${saveResult.error}`);
       return;
@@ -10054,7 +10047,8 @@ async function runAllCompaniesObusMerkezUpdateJob(job, targetRows) {
       missingBranchDetails
     };
     if (wasAborted) {
-      timeoutAllCompaniesObusUpdateJob(job);
+      job.statusMessage = timeoutMessage;
+      finishObusLiveJob(job, null);
       return;
     }
     finishObusLiveJob(job, null);
