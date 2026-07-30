@@ -3187,6 +3187,28 @@ function buildObusMerkezPartnerClusterKey(partnerId = "", clusterLabel = "") {
   return `${normalizedClusterLabel}|||${normalizedPartnerId}`;
 }
 
+function buildAllCompaniesObusPartnerIdCandidates(row) {
+  const values = [
+    row?.id,
+    row?.["partner-id"],
+    row?.partner_id,
+    row?.partnerId,
+    row?.["obilet-partner-id"],
+    row?.obilet_partner_id,
+    row?.obiletPartnerId,
+    row?.["biletall-partner-id"],
+    row?.biletall_partner_id,
+    row?.biletallPartnerId
+  ];
+  const candidates = [];
+  values.forEach((value) => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue || candidates.includes(normalizedValue)) return;
+    candidates.push(normalizedValue);
+  });
+  return candidates;
+}
+
 function extractMembershipTokenDataFromPayload(payload) {
   if (!payload || typeof payload !== "object") return "";
 
@@ -8373,8 +8395,44 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     "displayName",
     "value"
   ];
+  const preferredBranchNameAliases = branchNameAliases.filter((alias) => normalizeTokenName(alias) !== "value");
+  const branchValueAliases = ["value"];
   const nestedPartnerAliases = ["partner", "company", "provider", "firm", "operator"];
   const normalizeBranchText = (value) => String(value === undefined || value === null ? "" : value).trim();
+  const rowKeySet = new Set();
+  const readValueByAliasPriority = (node, aliases = []) => {
+    for (const alias of Array.isArray(aliases) ? aliases : []) {
+      const value = readPartnerRawValueByAliases(node, [alias]);
+      if (value !== undefined && value !== null && String(value).trim()) return value;
+    }
+    return undefined;
+  };
+  const readBranchName = (node) => {
+    const preferredName = formatPartnerCellValue(readValueByAliasPriority(node, preferredBranchNameAliases));
+    if (isObusMerkezBranchName(preferredName)) return preferredName;
+    const valueName = formatPartnerCellValue(readValueByAliasPriority(node, branchValueAliases));
+    return isObusMerkezBranchName(valueName) ? valueName : "";
+  };
+  const readBranchId = (node) => {
+    const directBranchId = formatPartnerCellValue(readValueByAliasPriority(node, branchIdAliases));
+    if (directBranchId) return directBranchId;
+    const valueBranchId = formatPartnerCellValue(readValueByAliasPriority(node, branchValueAliases));
+    return valueBranchId && !isObusMerkezBranchName(valueBranchId) ? valueBranchId : "";
+  };
+  const pushBranchRow = (partnerIdValue, branchIdValue) => {
+    const partnerId = normalizeBranchText(partnerIdValue);
+    const branchId = normalizeBranchText(branchIdValue);
+    if (!partnerId || !branchId) return;
+    const rowKey = `${normalizedClusterLabel}|||${partnerId}|||${branchId}`;
+    if (rowKeySet.has(rowKey)) return;
+    rowKeySet.add(rowKey);
+    rows.push({
+      partnerId,
+      name: "OBUSMERKEZ",
+      branchId,
+      cluster: normalizedClusterLabel
+    });
+  };
   const readExplicitPartnerId = (node) => {
     const directPartnerId = formatPartnerCellValue(readPartnerRawValueByAliases(node, partnerIdAliases));
     if (directPartnerId) return directPartnerId;
@@ -8415,26 +8473,25 @@ function extractObusMerkezBranchRowsFromPayload(payload, fallbackPartnerId = "",
     }
     if (typeof node !== "object") return;
 
-    const branchName = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchNameAliases));
+    const branchName = readBranchName(node);
     const directPartnerId = readExplicitPartnerId(node);
     const containerPartnerId = readContainerPartnerId(node, branchName);
     const nextPartnerId = directPartnerId || containerPartnerId || normalizeBranchText(inheritedPartnerId);
     if (isObusMerkezBranchName(branchName)) {
       const partnerId = directPartnerId || normalizeBranchText(inheritedPartnerId) || normalizedFallbackPartnerId;
-      const branchId = formatPartnerCellValue(readPartnerRawValueByAliases(node, branchIdAliases));
-      if (partnerId && branchId) {
-        rows.push({
-          partnerId,
-          name: "OBUSMERKEZ",
-          branchId,
-          cluster: normalizedClusterLabel
-        });
-      }
+      pushBranchRow(partnerId, readBranchId(node));
     }
 
     Object.entries(node).forEach(([key, value]) => {
       const keyPartnerId =
         !nextPartnerId && /^\d+$/.test(String(key || "").trim()) ? String(key || "").trim() : nextPartnerId;
+      if (isObusMerkezBranchName(key)) {
+        const branchId =
+          value && typeof value === "object"
+            ? readBranchId(value)
+            : formatPartnerCellValue(value);
+        pushBranchRow(keyPartnerId || normalizedFallbackPartnerId, branchId);
+      }
       walk(value, keyPartnerId);
     });
   };
@@ -8811,6 +8868,7 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
       }
 
       const partnerId = String(row?.id || "").trim();
+      const partnerIdCandidates = buildAllCompaniesObusPartnerIdCandidates(row);
       const partnerCode = String(row?.code || "").trim();
       const clusterLabel = extractClusterLabel(row?.source);
       const partnerClusterKey = buildObusMerkezPartnerClusterKey(partnerId, clusterLabel);
@@ -8968,7 +9026,13 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
       }
 
       const mapBranchId =
-        result.map instanceof Map ? String(result.map.get(partnerClusterKey) || "").trim() : "";
+        result.map instanceof Map
+          ? partnerIdCandidates
+              .map((candidatePartnerId) =>
+                String(result.map.get(buildObusMerkezPartnerClusterKey(candidatePartnerId, clusterLabel)) || "").trim()
+              )
+              .find(Boolean) || ""
+          : "";
       if (mapBranchId) {
         if (isDebugTarget) {
           logAllCompaniesObusMerkezDebug("resolved-from-map", { rowRef, branchId: mapBranchId });
@@ -8981,7 +9045,11 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
 
       const rowBranchId = Array.isArray(result.rows)
         ? String(
-            (result.rows.find((item) => String(item?.partnerId || "").trim() === partnerId) || {}).branchId || ""
+            (
+              result.rows.find((item) =>
+                partnerIdCandidates.includes(String(item?.partnerId || "").trim())
+              ) || {}
+            ).branchId || ""
           ).trim()
         : "";
       if (rowBranchId) {
@@ -8990,6 +9058,26 @@ async function enrichAllCompaniesRowsWithObusMerkezSubeId(rows, signal, options 
         }
         return {
           branchId: rowBranchId,
+          errorMessage: null
+        };
+      }
+
+      const singleObusMerkezBranchIds = Array.isArray(result.rows)
+        ? Array.from(
+            new Set(
+              result.rows
+                .map((item) => String(item?.branchId || "").trim())
+                .filter(Boolean)
+            )
+          )
+        : [];
+      if (singleObusMerkezBranchIds.length === 1) {
+        const branchId = singleObusMerkezBranchIds[0];
+        if (isDebugTarget) {
+          logAllCompaniesObusMerkezDebug("resolved-from-single-getbranches-row", { rowRef, branchId });
+        }
+        return {
+          branchId,
           errorMessage: null
         };
       }
