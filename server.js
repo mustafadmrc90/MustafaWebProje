@@ -16815,9 +16815,11 @@ function buildObusUserDeactivateReportModel() {
     scannedCompanyCount: 0,
     successCompanyCount: 0,
     failureCompanyCount: 0,
+    rawUserCount: 0,
     totalUserCount: 0,
     activeUserCount: 0,
     listedUserCount: 0,
+    filteredOutUserCount: 0,
     matchedUserCount: 0
   };
 }
@@ -16979,6 +16981,46 @@ function buildObusUserDeleteRequestBody({
 
 function normalizeObusUserDeactivateUsername(value) {
   return String(value || "").trim().toLocaleLowerCase("tr");
+}
+
+function normalizeObusUserDeactivatePartnerId(value) {
+  const normalizedValue = normalizeObusPartnerIdValue(value);
+  return Number.isInteger(normalizedValue) && normalizedValue > 0 ? String(normalizedValue) : "";
+}
+
+function getObusUserDeactivateRowPartnerId(row = {}) {
+  return normalizeObusUserDeactivatePartnerId(row?.partnerId);
+}
+
+function filterObusUserDeactivateRowsByCompany(allRows = [], companyPartnerId = "") {
+  const rows = Array.isArray(allRows) ? allRows : [];
+  const normalizedCompanyPartnerId = normalizeObusUserDeactivatePartnerId(companyPartnerId);
+  if (!normalizedCompanyPartnerId) {
+    return {
+      rows: [],
+      hasServicePartnerIds: false,
+      filteredOutCount: rows.length
+    };
+  }
+
+  const rowsWithServicePartnerId = rows.filter((row) => getObusUserDeactivateRowPartnerId(row));
+  if (rowsWithServicePartnerId.length === 0) {
+    return {
+      rows,
+      hasServicePartnerIds: false,
+      filteredOutCount: 0
+    };
+  }
+
+  const matchedRows = rows.filter(
+    (row) => getObusUserDeactivateRowPartnerId(row) === normalizedCompanyPartnerId
+  );
+
+  return {
+    rows: matchedRows,
+    hasServicePartnerIds: true,
+    filteredOutCount: rows.length - matchedRows.length
+  };
 }
 
 function isObusUserDeactivateCandidateNode(node) {
@@ -17304,7 +17346,9 @@ async function fetchObusUserDeactivateCompanyResult({
     }
 
     const allRows = extractObusUserDeactivateRows(parsed);
-    const activeRows = allRows.filter((row) => row.isActive !== false);
+    const companyRowFilter = filterObusUserDeactivateRowsByCompany(allRows, partnerId);
+    const companyRows = companyRowFilter.rows;
+    const activeRows = companyRows.filter((row) => row.isActive !== false);
     const matchedRows = normalizedUsernameFilter
       ? activeRows.filter((row) =>
           normalizeObusUserDeactivateUsername(row?.username || "").includes(normalizedUsernameFilter)
@@ -17335,9 +17379,12 @@ async function fetchObusUserDeactivateCompanyResult({
       clusterLabel,
       requestUrl,
       status: response.status,
-      totalUserCount: allRows.length,
+      rawUserCount: allRows.length,
+      totalUserCount: companyRows.length,
       activeUserCount: activeRows.length,
       listedUserCount: listedRows.length,
+      filteredOutUserCount: companyRowFilter.filteredOutCount,
+      usedServicePartnerFilter: companyRowFilter.hasServicePartnerIds,
       listedRows,
       responseBody,
       firstRequestPreview: firstRequestPreview || buildPreview(requestTrace),
@@ -17678,9 +17725,17 @@ async function fetchObusUserDeactivateSearchReport({ partnerItems = [] }) {
   report.scannedCompanyCount = normalizedResults.length;
   report.successCompanyCount = successResults.length;
   report.failureCompanyCount = failureResults.length;
+  report.rawUserCount = successResults.reduce(
+    (sum, item) => sum + Number(item.rawUserCount ?? item.totalUserCount ?? 0),
+    0
+  );
   report.totalUserCount = successResults.reduce((sum, item) => sum + Number(item.totalUserCount || 0), 0);
   report.activeUserCount = successResults.reduce((sum, item) => sum + Number(item.activeUserCount || 0), 0);
   report.listedUserCount = listedRows.length;
+  report.filteredOutUserCount = successResults.reduce(
+    (sum, item) => sum + Number(item.filteredOutUserCount || 0),
+    0
+  );
   report.matchedUserCount = listedRows.length;
   report.rows = listedRows;
   report.requestUrl = normalizeTargetUrl(OBUS_USER_DEACTIVATE_API_URL);
@@ -17690,7 +17745,11 @@ async function fetchObusUserDeactivateSearchReport({ partnerItems = [] }) {
       scannedCompanyCount: report.scannedCompanyCount,
       successCompanyCount: report.successCompanyCount,
       failureCompanyCount: report.failureCompanyCount,
+      rawUserCount: report.rawUserCount,
+      totalUserCount: report.totalUserCount,
+      activeUserCount: report.activeUserCount,
       listedUserCount: report.listedUserCount,
+      filteredOutUserCount: report.filteredOutUserCount,
       failures: failureResults.slice(0, 20).map((item) => ({
         code: item.code,
         "partner-id": item.partnerId,
@@ -17836,8 +17895,10 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
 
   const sessionCache = new Map();
   let listedUserCount = 0;
+  let rawUserCount = 0;
   let totalUserCount = 0;
   let activeUserCount = 0;
+  let filteredOutUserCount = 0;
   const failureSamples = [];
   let firstRequestPreview = null;
   let latestFailedRequestPreview = null;
@@ -17850,8 +17911,10 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
     listedUserCount: 0,
     matchedUserCount: 0,
     usernameFilter: normalizedUsernameFilter,
+    rawUserCount: 0,
     totalUserCount: 0,
     activeUserCount: 0,
+    filteredOutUserCount: 0,
     requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
     debugPreview: {
       firstRequest: null,
@@ -17923,8 +17986,10 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
       }
 
       if (result.ok) {
+        rawUserCount += Number(result.rawUserCount ?? result.totalUserCount ?? 0);
         totalUserCount += Number(result.totalUserCount || 0);
         activeUserCount += Number(result.activeUserCount || 0);
+        filteredOutUserCount += Number(result.filteredOutUserCount || 0);
 
         const listedRows = Array.isArray(result.listedRows) ? result.listedRows : [];
         listedUserCount += listedRows.length;
@@ -17948,6 +18013,10 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
           detailText: [
             `cluster=${clusterLabel}`,
             Number.isFinite(Number(result?.status)) ? `status=${Number(result.status)}` : "",
+            Number.isFinite(Number(result?.rawUserCount)) ? `ham=${Number(result.rawUserCount || 0)}` : "",
+            Number(result?.filteredOutUserCount || 0) > 0
+              ? `firma-dışı=${Number(result.filteredOutUserCount || 0)}`
+              : "",
             `kullanıcı=${Number(result.totalUserCount || 0)}`,
             `aktif=${Number(result.activeUserCount || 0)}`
           ]
@@ -17959,8 +18028,11 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
             partnerId: String(result?.partnerId || "").trim(),
             clusterLabel,
             listedUserCount: listedRows.length,
+            rawUserCount: Number(result.rawUserCount ?? result.totalUserCount ?? 0),
             totalUserCount: Number(result.totalUserCount || 0),
-            activeUserCount: Number(result.activeUserCount || 0)
+            activeUserCount: Number(result.activeUserCount || 0),
+            filteredOutUserCount: Number(result.filteredOutUserCount || 0),
+            usedServicePartnerFilter: result.usedServicePartnerFilter === true
           }
         });
       } else {
@@ -18004,8 +18076,10 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         listedUserCount,
         matchedUserCount: listedUserCount,
         usernameFilter: normalizedUsernameFilter,
+        rawUserCount,
         totalUserCount,
         activeUserCount,
+        filteredOutUserCount,
         failureSamples,
         requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
         debugPreview: {
@@ -18452,7 +18526,14 @@ async function fetchAuthorizedLinesLoginInfo({
       }
       lastLoginUrl = loginUrl;
 
-      const sessionCacheKey = `${String(sessionUrl || "").trim()}|||${String(authorization || "").trim()}`;
+      const sessionCacheKey = [
+        String(sessionUrl || "").trim(),
+        String(authorization || "").trim(),
+        normalizedPartnerCode.toLocaleLowerCase("tr"),
+        String(partnerId || "").trim(),
+        normalizedLoginBranchId,
+        normalizedUsername.toLocaleLowerCase("tr")
+      ].join("|||");
       let sessionResult =
         sessionCache instanceof Map && sessionCache.has(sessionCacheKey) ? sessionCache.get(sessionCacheKey) : null;
       if (!sessionResult) {
@@ -19496,6 +19577,8 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
     const username = String(item?.username || "").trim();
     const normalizedUsername = normalizeObusUserDeactivateUsername(username);
     const userIdValue = normalizeObusPartnerIdValue(item?.userId);
+    const selectedPartnerId = normalizeObusUserDeactivatePartnerId(partnerId);
+    const servicePartnerId = normalizeObusUserDeactivatePartnerId(item?.servicePartnerId);
     const key =
       String(item?.key || "").trim() ||
       buildObusUserDeactivateSelectedUserKey({
@@ -19506,10 +19589,17 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
         username
       });
 
-    if (!code || !partnerId || !clusterLabel || !Number.isInteger(userIdValue) || userIdValue <= 0) {
+    if (!code || !selectedPartnerId || !clusterLabel || !Number.isInteger(userIdValue) || userIdValue <= 0) {
       return {
         targets: [],
         error: "Pasife alınacak kullanıcı bilgisi eksik veya geçersiz."
+      };
+    }
+
+    if (servicePartnerId && servicePartnerId !== selectedPartnerId) {
+      return {
+        targets: [],
+        error: `Kullanıcı firma eşleşmesi geçersiz: ${username || userIdValue} servis partner-id=${servicePartnerId}, seçili firma partner-id=${selectedPartnerId}. Kullanıcıları yeniden listeleyin.`
       };
     }
 
@@ -19523,7 +19613,7 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
     const matchedCompanyExact = normalizedItems.find(
       (partnerItem) =>
         String(partnerItem?.code || "").trim() === code &&
-        String(partnerItem?.id || "").trim() === partnerId &&
+        normalizeObusUserDeactivatePartnerId(partnerItem?.id) === selectedPartnerId &&
         normalizeObusClusterLabel(partnerItem?.cluster || "") === clusterLabel
     );
     const sameCodeClusterMatches = matchedCompanyExact
@@ -19541,7 +19631,7 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
         error:
           sameCodeClusterMatches.length > 1
             ? `Kullanıcı için firma kaydı netleşmedi: ${code} / ${partnerId} / ${clusterLabel}. Aynı code ve cluster için birden fazla firma var.`
-            : `Kullanıcı için firma kaydı bulunamadı: ${code} / ${partnerId} / ${clusterLabel}. Listeleme servisindeki partner-id SQL firma id ile eşleşmiyor olabilir; kullanıcıları yeniden listeleyin.`
+            : `Kullanıcı için firma kaydı bulunamadı: ${code} / ${selectedPartnerId} / ${clusterLabel}. Listeleme servisindeki partner-id SQL firma id ile eşleşmiyor olabilir; kullanıcıları yeniden listeleyin.`
       };
     }
 
@@ -19550,7 +19640,7 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
     targets.push({
       key,
       code: String(matchedCompany?.code || code).trim(),
-      partnerId: String(matchedCompany?.id || partnerId).trim(),
+      partnerId: String(matchedCompany?.id || selectedPartnerId).trim(),
       clusterLabel: normalizeObusClusterLabel(matchedCompany?.cluster || "") || clusterLabel,
       username,
       userIdValue,
