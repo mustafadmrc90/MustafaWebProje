@@ -1824,6 +1824,7 @@
           key: normalizedKey,
           userId: String(meta?.userId || "").trim(),
           partnerId: String(meta?.partnerId || "").trim(),
+          servicePartnerId: String(meta?.servicePartnerId || "").trim(),
           username: String(meta?.username || "").trim(),
           fullName: String(meta?.fullName || "").trim(),
           isActive: meta?.isActive === true,
@@ -2065,6 +2066,7 @@
                 username: String(row?.username || "").trim(),
                 code: String(row?.code || "").trim(),
                 partnerId: String(row?.partnerId || "").trim(),
+                servicePartnerId: String(row?.servicePartnerId || "").trim(),
                 clusterLabel: String(row?.clusterLabel || "").trim(),
                 clusterUrl: String(row?.clusterUrl || "").trim()
               }))

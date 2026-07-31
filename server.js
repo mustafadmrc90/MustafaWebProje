@@ -17271,7 +17271,8 @@ async function fetchObusUserDeactivateCompanyResult({
     const listedRows = matchedRows
       .map((row) => ({
         userId: String(row.userId || "").trim(),
-        partnerId: String(row.partnerId || "").trim() || partnerId,
+        partnerId,
+        servicePartnerId: String(row.partnerId || "").trim(),
         code: companyCode,
         username: String(row.username || "").trim(),
         fullName: String(row.fullName || "").trim(),
@@ -17744,6 +17745,7 @@ function pushObusUserDeactivateListedRowBatches(job, {
       key: buildObusUserDeactivateMatchEventKey(row),
       userId: String(row?.userId || "").trim(),
       partnerId: String(row?.partnerId || "").trim(),
+      servicePartnerId: String(row?.servicePartnerId || "").trim(),
       code: String(row?.code || "").trim(),
       username: String(row?.username || "").trim(),
       fullName: String(row?.fullName || "").trim(),
@@ -19476,17 +19478,28 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
       };
     }
 
-    const matchedCompany = normalizedItems.find(
+    const matchedCompanyExact = normalizedItems.find(
       (partnerItem) =>
         String(partnerItem?.code || "").trim() === code &&
         String(partnerItem?.id || "").trim() === partnerId &&
         normalizeObusClusterLabel(partnerItem?.cluster || "") === clusterLabel
     );
+    const sameCodeClusterMatches = matchedCompanyExact
+      ? []
+      : normalizedItems.filter(
+          (partnerItem) =>
+            String(partnerItem?.code || "").trim() === code &&
+            normalizeObusClusterLabel(partnerItem?.cluster || "") === clusterLabel
+        );
+    const matchedCompany = matchedCompanyExact || (sameCodeClusterMatches.length === 1 ? sameCodeClusterMatches[0] : null);
 
     if (!matchedCompany) {
       return {
         targets: [],
-        error: `Kullanıcı için firma kaydı bulunamadı: ${code} / ${partnerId} / ${clusterLabel}`
+        error:
+          sameCodeClusterMatches.length > 1
+            ? `Kullanıcı için firma kaydı netleşmedi: ${code} / ${partnerId} / ${clusterLabel}. Aynı code ve cluster için birden fazla firma var.`
+            : `Kullanıcı için firma kaydı bulunamadı: ${code} / ${partnerId} / ${clusterLabel}. Listeleme servisindeki partner-id SQL firma id ile eşleşmiyor olabilir; kullanıcıları yeniden listeleyin.`
       };
     }
 
@@ -19494,9 +19507,9 @@ function resolveObusUserDeactivateDeleteTargets(partnerItems = [], selectedUsers
     seenKeys.add(key);
     targets.push({
       key,
-      code,
-      partnerId,
-      clusterLabel,
+      code: String(matchedCompany?.code || code).trim(),
+      partnerId: String(matchedCompany?.id || partnerId).trim(),
+      clusterLabel: normalizeObusClusterLabel(matchedCompany?.cluster || "") || clusterLabel,
       username,
       userIdValue,
       company: matchedCompany
