@@ -1173,13 +1173,22 @@
       return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
     };
 
+    const DEBUG_PAYLOAD_PREVIEW_MAX = 6000;
+    const truncateDebugPayload = (value, maxLength = DEBUG_PAYLOAD_PREVIEW_MAX) => {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      const limit = Math.max(500, Number(maxLength) || DEBUG_PAYLOAD_PREVIEW_MAX);
+      if (text.length <= limit) return text;
+      return `${text.slice(0, limit)}\n\n[Yanıt ${text.length} karakter olduğu için kısaltıldı.]`;
+    };
+
     const formatDebugPayload = (value, fallback = "-") => {
       if (value === undefined || value === null) return fallback;
       if (typeof value === "object") {
         try {
-          return JSON.stringify(value, null, 2);
+          return truncateDebugPayload(JSON.stringify(value, null, 2)) || fallback;
         } catch (err) {
-          return String(value || "").trim() || fallback;
+          return truncateDebugPayload(value) || fallback;
         }
       }
 
@@ -1187,9 +1196,9 @@
       if (!text) return fallback;
 
       try {
-        return JSON.stringify(JSON.parse(text), null, 2);
+        return truncateDebugPayload(JSON.stringify(JSON.parse(text), null, 2)) || fallback;
       } catch (err) {
-        return text;
+        return truncateDebugPayload(text) || fallback;
       }
     };
 
@@ -1643,7 +1652,9 @@
       }
 
       debugPanel.hidden = false;
-      debugCompanyPill.textContent = String(preview.companyLabel || "").trim() || "Firma bilinmiyor";
+      debugCompanyPill.textContent =
+        String(preview.companyLabel || "").trim() ||
+        (String(preview.service || "").trim() === "Canlı İş Durumu" ? "Canlı durum" : "Firma bilinmiyor");
       debugServicePill.textContent = String(preview.service || "").trim() || "Servis bilinmiyor";
       debugStatusPill.textContent = Number.isFinite(Number(preview.status)) ? `HTTP ${Number(preview.status)}` : "HTTP -";
       debugUrlEl.textContent = String(preview.requestUrl || "").trim() || "-";
@@ -1907,11 +1918,12 @@
             }
           }
           snapshot.failedRequestPreview = {
+            companyLabel: "Canlı durum",
             service: "Canlı İş Durumu",
             status: Number.isFinite(Number(response.status)) ? Number(response.status) : null,
             requestUrl: statusUrl.replace(/([?&]token=)[^&]+/i, "$1***"),
             requestBody: "{}",
-            responseBody: responseBody || response.statusText || errorMessage,
+            responseBody: truncateDebugPayload(responseBody || response.statusText || errorMessage),
             error: errorMessage
           };
           throw new Error(errorMessage);
@@ -1919,11 +1931,15 @@
 
         activeJobFailureCount = 0;
         activeJobCursor = Number.isFinite(Number(data.cursor)) ? Number(data.cursor) : activeJobCursor;
+        const hasMoreEvents = data?.hasMore === true;
         applySnapshot(data);
         applyEvents(data.events);
         finalizeRender();
+        if (hasMoreEvents && snapshot.done) {
+          setStatus("Canlı iş sonuçları ekrana aktarılıyor.", "muted");
+        }
 
-        if (snapshot.done) {
+        if (snapshot.done && !hasMoreEvents) {
           deleteInProgress = false;
           setBusy(false);
           stopTimers();
@@ -1934,7 +1950,7 @@
 
         setBusy(true);
         startStatusTimer();
-        scheduleJobPoll(900);
+        scheduleJobPoll(hasMoreEvents ? 120 : 900);
       } catch (err) {
         activeJobFailureCount += 1;
         if (activeJobFailureCount >= 3) {

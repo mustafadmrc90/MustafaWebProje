@@ -441,11 +441,17 @@ const OBUS_USER_DELETE_REQUEST_DATE =
 const OBUS_USER_DELETE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DELETE_COMPANY_CONCURRENCY || "4", 10) || 4;
 const OBUS_USER_DEACTIVATE_USER_EVENT_BATCH_SIZE =
-  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_USER_EVENT_BATCH_SIZE || "250", 10) || 250;
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_USER_EVENT_BATCH_SIZE || "100", 10) || 100;
 const OBUS_PARTNER_RULE_DEFAULT_RULE_ID =
   Number.parseInt(process.env.OBUS_PARTNER_RULE_DEFAULT_RULE_ID || "2", 10) || 2;
 const OBUS_LIVE_JOB_TTL_MS = Number.parseInt(process.env.OBUS_LIVE_JOB_TTL_MS || "1800000", 10) || 1800000;
 const OBUS_LIVE_JOB_MAX_EVENTS = Number.parseInt(process.env.OBUS_LIVE_JOB_MAX_EVENTS || "10000", 10) || 10000;
+const OBUS_LIVE_JOB_SNAPSHOT_MAX_EVENTS =
+  Number.parseInt(process.env.OBUS_LIVE_JOB_SNAPSHOT_MAX_EVENTS || "120", 10) || 120;
+const OBUS_LIVE_JOB_SNAPSHOT_MAX_USER_ROWS =
+  Number.parseInt(process.env.OBUS_LIVE_JOB_SNAPSHOT_MAX_USER_ROWS || "1200", 10) || 1200;
+const OBUS_DEBUG_PAYLOAD_PREVIEW_LIMIT =
+  Number.parseInt(process.env.OBUS_DEBUG_PAYLOAD_PREVIEW_LIMIT || "4000", 10) || 4000;
 const INVENTORY_BRANCHES_API_URL =
   process.env.INVENTORY_BRANCHES_API_URL ||
   "https://api-coreprod-cluster4.obus.com.tr/api/inventory/getbranches";
@@ -3556,6 +3562,7 @@ function maskSensitiveObusDebugText(value) {
 
 function normalizeObusDebugPayload(value) {
   if (value === null || value === undefined) return "";
+  const previewLimit = toBoundedInt(OBUS_DEBUG_PAYLOAD_PREVIEW_LIMIT, 4000, 400, 20000);
 
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -3563,23 +3570,29 @@ function normalizeObusDebugPayload(value) {
     const parsed = parseJsonSafe(trimmed);
     if (parsed !== null && typeof parsed === "object") {
       try {
-        return JSON.stringify(sanitizeObusDebugStructure(parsed));
+        return truncateObusDebugText(
+          maskSensitiveObusDebugText(JSON.stringify(sanitizeObusDebugStructure(parsed))),
+          previewLimit
+        );
       } catch (err) {
-        return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), 1200);
+        return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), previewLimit);
       }
     }
-    return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), 1200);
+    return truncateObusDebugText(maskSensitiveObusDebugText(trimmed), previewLimit);
   }
 
   if (typeof value === "object") {
     try {
-      return JSON.stringify(sanitizeObusDebugStructure(value));
+      return truncateObusDebugText(
+        maskSensitiveObusDebugText(JSON.stringify(sanitizeObusDebugStructure(value))),
+        previewLimit
+      );
     } catch (err) {
-      return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), 1200);
+      return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), previewLimit);
     }
   }
 
-  return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), 1200);
+  return truncateObusDebugText(maskSensitiveObusDebugText(String(value || "")), previewLimit);
 }
 
 function buildObusServiceTraceEntry({
@@ -3623,13 +3636,20 @@ function getFirstObusServiceTrace(serviceLogs) {
 function buildObusRequestPreviewFromTrace(trace, fallback = {}) {
   const entry = trace && typeof trace === "object" ? trace : null;
   const fallbackValue = fallback && typeof fallback === "object" ? fallback : {};
+  const previewLimit = toBoundedInt(OBUS_DEBUG_PAYLOAD_PREVIEW_LIMIT, 4000, 400, 20000);
   const statusValue = entry?.status ?? fallbackValue.status;
   const parsedStatus =
     typeof statusValue === "number" ? statusValue : Number.parseInt(String(statusValue ?? "").trim(), 10);
   const service = String(entry?.service || fallbackValue.service || "").trim();
   const requestUrl = String(entry?.url || fallbackValue.requestUrl || "").trim();
-  const requestBody = String(entry?.requestBody || fallbackValue.requestBody || "").trim();
-  const responseBody = String(entry?.responseBody || entry?.error || fallbackValue.responseBody || fallbackValue.error || "").trim();
+  const requestBody = truncateObusDebugText(
+    maskSensitiveObusDebugText(entry?.requestBody || fallbackValue.requestBody || ""),
+    previewLimit
+  );
+  const responseBody = truncateObusDebugText(
+    maskSensitiveObusDebugText(entry?.responseBody || entry?.error || fallbackValue.responseBody || fallbackValue.error || ""),
+    previewLimit
+  );
   if (!service && !requestUrl && !requestBody && !responseBody) {
     return null;
   }
@@ -12229,6 +12249,11 @@ function readObusLiveJob(jobId, ownerUserId, accessToken = "") {
   return null;
 }
 
+function countObusLiveJobEventUserRows(event) {
+  const rows = event?.meta && typeof event.meta === "object" ? event.meta.rows : null;
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
 function readObusLiveJobSnapshot(job, cursor = 0) {
   const safeCursor = Number.isFinite(Number(cursor)) ? Math.max(0, Number(cursor)) : 0;
   const sourceEvents = Array.isArray(job?.events) ? job.events : [];
@@ -12245,7 +12270,23 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
       low = mid + 1;
     }
   }
-  const events = startIndex < sourceEvents.length ? sourceEvents.slice(startIndex) : [];
+  const maxEvents = toBoundedInt(OBUS_LIVE_JOB_SNAPSHOT_MAX_EVENTS, 120, 1, 1000);
+  const maxUserRows = toBoundedInt(OBUS_LIVE_JOB_SNAPSHOT_MAX_USER_ROWS, 1200, 100, 20000);
+  const events = [];
+  let includedUserRows = 0;
+  if (startIndex < sourceEvents.length) {
+    for (let index = startIndex; index < sourceEvents.length; index += 1) {
+      const event = sourceEvents[index];
+      const eventUserRows = countObusLiveJobEventUserRows(event);
+      const wouldExceedEventLimit = events.length >= maxEvents;
+      const wouldExceedRowLimit =
+        events.length > 0 && eventUserRows > 0 && includedUserRows + eventUserRows > maxUserRows;
+      if (wouldExceedEventLimit || wouldExceedRowLimit) break;
+      events.push(event);
+      includedUserRows += eventUserRows;
+    }
+  }
+  const hasMore = startIndex + events.length < sourceEvents.length;
   const lastSeq = events.length > 0 ? Number(events[events.length - 1]?.seq || safeCursor) : safeCursor;
   return {
     ok: true,
@@ -12264,6 +12305,7 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
     failureCount: Number.isFinite(Number(job?.failureCount)) ? Number(job.failureCount) : 0,
     summary: job?.summary && typeof job.summary === "object" ? job.summary : null,
     events,
+    hasMore,
     cursor: lastSeq
   };
 }
@@ -17739,7 +17781,7 @@ function pushObusUserDeactivateListedRowBatches(job, {
   const rows = Array.isArray(listedRows) ? listedRows : [];
   if (!rows.length) return;
 
-  const batchSize = toBoundedInt(OBUS_USER_DEACTIVATE_USER_EVENT_BATCH_SIZE, 250, 50, 1000);
+  const batchSize = toBoundedInt(OBUS_USER_DEACTIVATE_USER_EVENT_BATCH_SIZE, 100, 25, 250);
   for (let index = 0; index < rows.length; index += batchSize) {
     const batchRows = rows.slice(index, index + batchSize).map((row) => ({
       key: buildObusUserDeactivateMatchEventKey(row),
@@ -22321,7 +22363,16 @@ app.get("/api/obus-live/:jobId", async (req, res) => {
   if (!job) {
     return res.status(404).json({ ok: false, error: "İşlem bulunamadı. Sayfa yenilenmiş veya sunucu yeniden başlamış olabilir." });
   }
-  return res.json(readObusLiveJobSnapshot(job, cursor));
+  try {
+    return res.json(readObusLiveJobSnapshot(job, cursor));
+  } catch (err) {
+    console.error("Obus live job snapshot error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Canlı iş durumu hazırlanamadı.",
+      detail: truncateObusDebugText(err?.message || err, 320)
+    });
+  }
 });
 
 app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-user-deactivate"), async (req, res) => {
