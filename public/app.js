@@ -1338,6 +1338,8 @@
       scannedCompanyCount: 0,
       successCompanyCount: 0,
       failureCompanyCount: 0,
+      pendingCompanyCount: 0,
+      pendingCompanySamples: [],
       totalUserCount: 0,
       activeUserCount: 0,
       listedUserCount: 0,
@@ -1400,8 +1402,31 @@
 
     const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
     const isDeactivateJob = () => String(snapshot.actionType || "").trim() === "obus-user-deactivate-delete";
+    const getPendingCompanyCount = () => {
+      const summaryPendingCount = Number(snapshot.pendingCompanyCount || 0);
+      if (summaryPendingCount > 0) return summaryPendingCount;
+      if (snapshot.done) return 0;
+      return Math.max(0, Number(snapshot.totalCount || 0) - Number(snapshot.processedCount || 0));
+    };
 
     const getSelectableVisibleRows = () => getVisibleListedRows().filter((row) => isListedRowActive(row));
+
+    const formatPendingCompanySummary = (item) => {
+      const label = String(item?.label || item?.code || "").trim() || "Firma";
+      const partnerId = String(item?.partnerId || "").trim();
+      const clusterLabel = String(item?.clusterLabel || "").trim();
+      const elapsedText = Number(item?.elapsedMs || 0) > 0 ? formatElapsedTime(Number(item.elapsedMs || 0)) : "-";
+      const requestUrl = String(item?.requestUrl || "").trim();
+      return [
+        label,
+        partnerId ? `partner=${partnerId}` : "",
+        clusterLabel ? `cluster=${clusterLabel}` : "",
+        `bekleme=${elapsedText}`,
+        requestUrl ? `url=${truncateDebugPayload(requestUrl, 120)}` : ""
+      ]
+        .filter(Boolean)
+        .join(" | ");
+    };
 
     const isUsernameFilterAppliedForDeactivate = () => {
       const currentInputValue = String(usernameFilterInput?.value || "").trim();
@@ -1534,6 +1559,21 @@
 
       if (activeJobCreatedAt > 0) {
         appendLine(`Çalışma süresi: ${formatElapsedTime((activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now()) - activeJobCreatedAt)}`);
+      }
+
+      const pendingCompanyCount = getPendingCompanyCount();
+      if (!snapshot.done && pendingCompanyCount > 0) {
+        appendLine(`Bekleyen firma: ${pendingCompanyCount}`);
+        const pendingCompanyDetails = (Array.isArray(snapshot.pendingCompanySamples) ? snapshot.pendingCompanySamples : [])
+          .slice(0, 25)
+          .map(formatPendingCompanySummary)
+          .filter(Boolean);
+        if (pendingCompanyDetails.length > 0) {
+          appendLine("Bekleyen detaylar:");
+          pendingCompanyDetails.forEach((text) => {
+            appendLine(`- ${text}`);
+          });
+        }
       }
 
       if (snapshot.error) {
@@ -1675,6 +1715,8 @@
 
       const endTime = activeJobFinishedAt > 0 ? activeJobFinishedAt : Date.now();
       const elapsedText = formatElapsedTime(endTime - activeJobCreatedAt);
+      const pendingCompanyCount = getPendingCompanyCount();
+      const pendingStatusText = pendingCompanyCount > 0 ? ` | Bekleyen: ${pendingCompanyCount}` : "";
       renderPills();
 
       if (snapshot.done) {
@@ -1695,14 +1737,14 @@
         setStatus(
           `Kullanıcılar pasife alınıyor. Süre: ${elapsedText} | İşlenen firma: ${Number(
             snapshot.processedCount || 0
-          )}/${Number(snapshot.totalCount || 0)} | Pasife alınan: ${Number(snapshot.deactivatedUserCount || 0)}`,
+          )}/${Number(snapshot.totalCount || 0)}${pendingStatusText} | Pasife alınan: ${Number(snapshot.deactivatedUserCount || 0)}`,
           "muted"
         );
       } else {
         setStatus(
           `Kullanıcılar listeleniyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
             snapshot.totalCount || 0
-          )} | Listelenen: ${getTotalListedRowCount()}`,
+          )}${pendingStatusText} | Listelenen: ${getTotalListedRowCount()}`,
           "muted"
         );
       }
@@ -1752,6 +1794,8 @@
         scannedCompanyCount: 0,
         successCompanyCount: 0,
         failureCompanyCount: 0,
+        pendingCompanyCount: 0,
+        pendingCompanySamples: [],
         totalUserCount: 0,
         activeUserCount: 0,
         listedUserCount: 0,
@@ -1823,6 +1867,10 @@
         snapshot.scannedCompanyCount = Number(data.summary.scannedCompanyCount || snapshot.totalCount || 0);
         snapshot.successCompanyCount = Number(data.summary.successCompanyCount || snapshot.successCount || 0);
         snapshot.failureCompanyCount = Number(data.summary.failureCompanyCount || snapshot.failureCount || 0);
+        snapshot.pendingCompanyCount = Number(data.summary.pendingCompanyCount || 0);
+        snapshot.pendingCompanySamples = Array.isArray(data.summary.pendingCompanySamples)
+          ? data.summary.pendingCompanySamples
+          : [];
         if (Object.prototype.hasOwnProperty.call(data.summary, "totalUserCount")) {
           snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
         }

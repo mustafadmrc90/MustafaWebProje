@@ -434,6 +434,8 @@ const OBUS_USER_DEACTIVATE_API_AUTH =
   process.env.OBUS_USER_DEACTIVATE_API_AUTH || "Basic MTIzNDU2MHg2NTUwR21STG5QYXJ5bnVt";
 const OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY =
   Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_CONCURRENCY || "16", 10) || 16;
+const OBUS_USER_DEACTIVATE_COMPANY_TIMEOUT_MS =
+  Number.parseInt(process.env.OBUS_USER_DEACTIVATE_COMPANY_TIMEOUT_MS || "180000", 10) || 180000;
 const OBUS_USER_DEACTIVATE_REQUEST_DATE =
   String(process.env.OBUS_USER_DEACTIVATE_REQUEST_DATE || "2026-05-13 08:30:02").trim() || "2026-05-13 08:30:02";
 const OBUS_USER_DELETE_REQUEST_DATE =
@@ -12254,6 +12256,56 @@ function countObusLiveJobEventUserRows(event) {
   return Array.isArray(rows) ? rows.length : 0;
 }
 
+function readObusLiveJobEventDetailValue(detailText = "", key = "") {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) return "";
+  const prefix = `${normalizedKey}=`;
+  return String(detailText || "")
+    .split("|")
+    .map((item) => String(item || "").trim())
+    .find((item) => item.startsWith(prefix))
+    ?.slice(prefix.length)
+    .trim() || "";
+}
+
+function deriveObusLiveJobPendingCompanySamples(job) {
+  const sourceEvents = Array.isArray(job?.events) ? job.events : [];
+  const pendingCompanies = new Map();
+
+  sourceEvents.forEach((event) => {
+    const key = String(event?.key || "").trim();
+    if (!key) return;
+    const meta = event?.meta && typeof event.meta === "object" ? event.meta : null;
+    if (!meta || meta.type !== "company") return;
+
+    const statusKind = String(event?.statusKind || "").trim().toLowerCase();
+    if (statusKind === "pending" && event?.finalize !== true) {
+      pendingCompanies.set(key, {
+        code: String(meta?.code || "").trim(),
+        partnerId: String(meta?.partnerId || "").trim(),
+        clusterLabel: String(meta?.clusterLabel || readObusLiveJobEventDetailValue(event?.detailText, "cluster")).trim(),
+        label: String(event?.label || "").trim(),
+        requestUrl: readObusLiveJobEventDetailValue(event?.detailText, "url"),
+        startedAt: Number.isFinite(Number(event?.updatedAt)) ? Number(event.updatedAt) : 0
+      });
+      return;
+    }
+
+    if (event?.finalize === true || ["success", "failure", "missing", "existing"].includes(statusKind)) {
+      pendingCompanies.delete(key);
+    }
+  });
+
+  const now = Date.now();
+  return Array.from(pendingCompanies.values())
+    .sort((a, b) => Number(a?.startedAt || 0) - Number(b?.startedAt || 0))
+    .slice(0, 25)
+    .map((item) => ({
+      ...item,
+      elapsedMs: Math.max(0, now - (Number.isFinite(Number(item?.startedAt)) ? Number(item.startedAt) : now))
+    }));
+}
+
 function readObusLiveJobSnapshot(job, cursor = 0) {
   const safeCursor = Number.isFinite(Number(cursor)) ? Math.max(0, Number(cursor)) : 0;
   const sourceEvents = Array.isArray(job?.events) ? job.events : [];
@@ -12288,6 +12340,20 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
   }
   const hasMore = startIndex + events.length < sourceEvents.length;
   const lastSeq = events.length > 0 ? Number(events[events.length - 1]?.seq || safeCursor) : safeCursor;
+  const derivedPendingCompanySamples = deriveObusLiveJobPendingCompanySamples(job);
+  const summary =
+    job?.summary && typeof job.summary === "object"
+      ? {
+          ...job.summary,
+          pendingCompanyCount: derivedPendingCompanySamples.length,
+          pendingCompanySamples: derivedPendingCompanySamples
+        }
+      : derivedPendingCompanySamples.length > 0
+        ? {
+            pendingCompanyCount: derivedPendingCompanySamples.length,
+            pendingCompanySamples: derivedPendingCompanySamples
+          }
+        : null;
   return {
     ok: true,
     jobId: String(job?.id || "").trim(),
@@ -12303,7 +12369,7 @@ function readObusLiveJobSnapshot(job, cursor = 0) {
     processedCount: Number.isFinite(Number(job?.processedCount)) ? Number(job.processedCount) : 0,
     successCount: Number.isFinite(Number(job?.successCount)) ? Number(job.successCount) : 0,
     failureCount: Number.isFinite(Number(job?.failureCount)) ? Number(job.failureCount) : 0,
-    summary: job?.summary && typeof job.summary === "object" ? job.summary : null,
+    summary,
     events,
     hasMore,
     cursor: lastSeq
@@ -16939,20 +17005,42 @@ async function runObusUserDeactivateCompanyRequest({
   worker
 } = {}) {
   const controller = new AbortController();
+  const timeoutMs = toBoundedInt(OBUS_USER_DEACTIVATE_COMPANY_TIMEOUT_MS, 180000, 10000, 600000);
+  const timeoutSeconds = Math.max(1, Math.round(timeoutMs / 1000));
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const failureResult = buildObusUserDeactivateCompanyFailureResult({
     company,
     service,
     selectedUsers
   });
+  const timeoutError = `${service} isteği ${timeoutSeconds} saniyede tamamlanmadı.`;
 
   try {
-    return await Promise.resolve().then(() => worker(controller.signal));
+    const result = await Promise.resolve().then(() => worker(controller.signal));
+    if (timedOut && result && typeof result === "object" && result.ok === false) {
+      return {
+        ...result,
+        error: timeoutError,
+        errorDetail: String(result?.errorDetail || result?.error || "").trim()
+      };
+    }
+    return result;
   } catch (err) {
     return {
       ...failureResult,
-      error: controller.signal.aborted ? `${service} isteği iptal edildi.` : err?.message || "Firma sorgusu başarısız.",
+      error: timedOut
+        ? timeoutError
+        : controller.signal.aborted
+          ? `${service} isteği iptal edildi.`
+          : err?.message || "Firma sorgusu başarısız.",
       failedRequestPreview: null
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -17902,25 +17990,49 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
   const failureSamples = [];
   let firstRequestPreview = null;
   let latestFailedRequestPreview = null;
+  const pendingCompanyMap = new Map();
   job.totalCount = normalizedCompanies.length;
 
-  setObusLiveJobSummary(job, {
-    scannedCompanyCount: normalizedCompanies.length,
-    successCompanyCount: 0,
-    failureCompanyCount: 0,
-    listedUserCount: 0,
-    matchedUserCount: 0,
-    usernameFilter: normalizedUsernameFilter,
-    rawUserCount: 0,
-    totalUserCount: 0,
-    activeUserCount: 0,
-    filteredOutUserCount: 0,
-    requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
-    debugPreview: {
-      firstRequest: null,
-      failedRequest: null
-    }
-  });
+  const buildPendingCompanySamples = () => {
+    const now = Date.now();
+    return Array.from(pendingCompanyMap.values())
+      .sort((a, b) => Number(a?.startedAt || 0) - Number(b?.startedAt || 0))
+      .slice(0, 25)
+      .map((item) => ({
+        code: String(item?.code || "").trim(),
+        partnerId: String(item?.partnerId || "").trim(),
+        clusterLabel: String(item?.clusterLabel || "").trim(),
+        label: String(item?.label || "").trim(),
+        requestUrl: String(item?.requestUrl || "").trim(),
+        startedAt: Number.isFinite(Number(item?.startedAt)) ? Number(item.startedAt) : 0,
+        elapsedMs: Math.max(0, now - (Number.isFinite(Number(item?.startedAt)) ? Number(item.startedAt) : now))
+      }));
+  };
+
+  const updateSummary = () => {
+    setObusLiveJobSummary(job, {
+      scannedCompanyCount: normalizedCompanies.length,
+      successCompanyCount: Number(job.successCount || 0),
+      failureCompanyCount: Number(job.failureCount || 0),
+      pendingCompanyCount: pendingCompanyMap.size,
+      pendingCompanySamples: buildPendingCompanySamples(),
+      listedUserCount,
+      matchedUserCount: listedUserCount,
+      usernameFilter: normalizedUsernameFilter,
+      rawUserCount,
+      totalUserCount,
+      activeUserCount,
+      filteredOutUserCount,
+      failureSamples,
+      requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
+      debugPreview: {
+        firstRequest: firstRequestPreview,
+        failedRequest: latestFailedRequestPreview
+      }
+    });
+  };
+
+  updateSummary();
 
   await runWithConcurrency(
     normalizedCompanies,
@@ -17936,6 +18048,15 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         buildObusUserDeactivateCompanyBaseUrl(company, clusterLabel) || OBUS_USER_DEACTIVATE_API_URL,
         clusterLabel
       );
+      pendingCompanyMap.set(eventKey, {
+        code: String(company?.code || "").trim(),
+        partnerId: String(company?.id || "").trim(),
+        clusterLabel,
+        label: eventLabel,
+        requestUrl: String(requestUrl || "").trim(),
+        startedAt: Date.now()
+      });
+      updateSummary();
 
       pushObusLiveJobEvent(job, {
         key: eventKey,
@@ -17956,18 +18077,43 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         }
       });
 
-      const result = await runObusUserDeactivateCompanyRequest({
-        company,
-        service: "Firma sorgusu",
-        worker: (signal) =>
-          fetchObusUserDeactivateCompanyResult({
+      let result = null;
+      try {
+        result = await runObusUserDeactivateCompanyRequest({
+          company,
+          service: "Firma sorgusu",
+          worker: (signal) =>
+            fetchObusUserDeactivateCompanyResult({
+              company,
+              loginCredentials,
+              sessionCache,
+              usernameFilter: normalizedUsernameFilter,
+              signal
+            })
+        });
+      } catch (err) {
+        result = {
+          ...buildObusUserDeactivateCompanyFailureResult({
             company,
-            loginCredentials,
-            sessionCache,
-            usernameFilter: normalizedUsernameFilter,
-            signal
-          })
-      });
+            service: "Firma sorgusu"
+          }),
+          error: err?.message || "Firma sorgusu başarısız."
+        };
+      } finally {
+        pendingCompanyMap.delete(eventKey);
+        updateSummary();
+      }
+
+      if (!result || typeof result !== "object") {
+        result = {
+          ...buildObusUserDeactivateCompanyFailureResult({
+            company,
+            service: "Firma sorgusu"
+          }),
+          error: "Firma sorgusu sonucu alınamadı."
+        };
+      }
+
       if (!firstRequestPreview && result?.firstRequestPreview) {
         firstRequestPreview = result.firstRequestPreview;
       }
@@ -18069,24 +18215,7 @@ async function runObusUserDeactivateSearchJob(job, { partnerItems = [], username
         });
       }
 
-      setObusLiveJobSummary(job, {
-        scannedCompanyCount: normalizedCompanies.length,
-        successCompanyCount: Number(job.successCount || 0),
-        failureCompanyCount: Number(job.failureCount || 0),
-        listedUserCount,
-        matchedUserCount: listedUserCount,
-        usernameFilter: normalizedUsernameFilter,
-        rawUserCount,
-        totalUserCount,
-        activeUserCount,
-        filteredOutUserCount,
-        failureSamples,
-        requestBody: JSON.stringify(buildObusUserDeactivateRequestBody({ usePlaceholders: true }), null, 2),
-        debugPreview: {
-          firstRequest: firstRequestPreview,
-          failedRequest: latestFailedRequestPreview
-        }
-      });
+      updateSummary();
     }
   );
 
