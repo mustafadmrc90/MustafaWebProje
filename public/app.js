@@ -1316,6 +1316,7 @@
     const selectedUserKeys = new Set();
     let snapshot = {
       done: String(root.getAttribute("data-obus-user-deactivate-initial-done") || "").trim() === "1",
+      actionType: "",
       error: "",
       totalCount: Number.parseInt(String(root.getAttribute("data-obus-user-deactivate-initial-total-count") || "0"), 10) || 0,
       processedCount:
@@ -1330,6 +1331,9 @@
       totalUserCount: 0,
       activeUserCount: 0,
       listedUserCount: 0,
+      selectedUserCount: 0,
+      deactivatedUserCount: 0,
+      failedUserCount: 0,
       failureSamples: [],
       failedRequestPreview: null
     };
@@ -1385,6 +1389,7 @@
     };
 
     const isListedRowActive = (row) => row?.isActive === true || String(row?.isActiveText || "").trim().toLowerCase() === "true";
+    const isDeactivateJob = () => String(snapshot.actionType || "").trim() === "obus-user-deactivate-delete";
 
     const getSelectableVisibleRows = () => getVisibleListedRows().filter((row) => isListedRowActive(row));
 
@@ -1417,8 +1422,7 @@
         .map((key) => listedRowsByKey.get(String(key || "").trim()))
         .filter((row) => row && isListedRowActive(row));
 
-    const applyDeactivateResults = (data) => {
-      const updatedRows = Array.isArray(data?.updatedRows) ? data.updatedRows : [];
+    const markRowsAsDeactivated = (updatedRows) => {
       updatedRows.forEach((item) => {
         const key = String(item?.key || "").trim();
         if (!key || !listedRowsByKey.has(key)) return;
@@ -1436,6 +1440,10 @@
         snapshot.activeUserCount = Math.max(0, Number(snapshot.activeUserCount || 0) - updatedCount);
         markListedRowsDirty();
       }
+    };
+
+    const applyDeactivateResults = (data) => {
+      markRowsAsDeactivated(Array.isArray(data?.updatedRows) ? data.updatedRows : []);
       snapshot.failedRequestPreview =
         data?.failedRequestPreview && typeof data.failedRequestPreview === "object" ? data.failedRequestPreview : null;
     };
@@ -1459,7 +1467,9 @@
       if (failurePill) failurePill.textContent = `${Number(snapshot.failureCompanyCount || snapshot.failureCount || 0)} Hatalı`;
       if (totalUsersPill) totalUsersPill.textContent = `${Number(snapshot.totalUserCount || 0)} Kullanıcı`;
       if (activeUsersPill) activeUsersPill.textContent = `${Number(snapshot.activeUserCount || 0)} Aktif`;
-      if (matchedPill) {
+      if (matchedPill && isDeactivateJob()) {
+        matchedPill.textContent = `${Number(snapshot.deactivatedUserCount || 0)} Pasife Alındı`;
+      } else if (matchedPill) {
         matchedPill.textContent = appliedUsernameFilter
           ? `${visibleListedCount} / ${totalListedCount} Listelendi`
           : `${totalListedCount} Listelendi`;
@@ -1490,11 +1500,19 @@
           snapshot.successCount || 0
         )} | Hatalı: ${Number(snapshot.failureCount || 0)}`
       );
-      appendLine(
-        `Listelenen kullanıcı: ${getTotalListedRowCount()} | Taranan kullanıcı: ${Number(
-          snapshot.totalUserCount || 0
-        )} | Aktif kullanıcı: ${Number(snapshot.activeUserCount || 0)}`
-      );
+      if (isDeactivateJob()) {
+        appendLine(
+          `Seçili kullanıcı: ${Number(snapshot.selectedUserCount || 0)} | Pasife alınan: ${Number(
+            snapshot.deactivatedUserCount || 0
+          )} | Hatalı kullanıcı: ${Number(snapshot.failedUserCount || 0)}`
+        );
+      } else {
+        appendLine(
+          `Listelenen kullanıcı: ${getTotalListedRowCount()} | Taranan kullanıcı: ${Number(
+            snapshot.totalUserCount || 0
+          )} | Aktif kullanıcı: ${Number(snapshot.activeUserCount || 0)}`
+        );
+      }
 
       if (appliedUsernameFilter) {
         appendLine(`Username filtresi: ${appliedUsernameFilter} | Eşleşen: ${getVisibleListedRows().length}`);
@@ -1523,9 +1541,9 @@
             .join(" | ")}`
         );
       } else if (snapshot.done) {
-        appendLine("Listeleme tamamlandı.");
+        appendLine(isDeactivateJob() ? "Pasife alma tamamlandı." : "Listeleme tamamlandı.");
       } else {
-        appendLine("Canlı listeleme devam ediyor.");
+        appendLine(isDeactivateJob() ? "Pasife alma devam ediyor." : "Canlı listeleme devam ediyor.");
       }
     };
 
@@ -1650,19 +1668,32 @@
       if (snapshot.done) {
         const finalText = snapshot.error
           ? `${snapshot.error} | Süre: ${elapsedText}`
-          : `Listeleme tamamlandı. Başarılı firma: ${Number(snapshot.successCount || 0)}/${Number(
-              snapshot.totalCount || 0
-            )} | Hatalı: ${Number(snapshot.failureCount || 0)} | Süre: ${elapsedText}`;
+          : isDeactivateJob()
+            ? `Pasife alma tamamlandı. Pasife alınan: ${Number(snapshot.deactivatedUserCount || 0)}/${Number(
+                snapshot.selectedUserCount || 0
+              )} | Hatalı firma: ${Number(snapshot.failureCount || 0)} | Süre: ${elapsedText}`
+            : `Listeleme tamamlandı. Başarılı firma: ${Number(snapshot.successCount || 0)}/${Number(
+                snapshot.totalCount || 0
+              )} | Hatalı: ${Number(snapshot.failureCount || 0)} | Süre: ${elapsedText}`;
         setStatus(finalText, snapshot.error || Number(snapshot.failureCount || 0) > 0 ? "error" : "success");
         return;
       }
 
-      setStatus(
-        `Kullanıcılar listeleniyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
-          snapshot.totalCount || 0
-        )} | Listelenen: ${getTotalListedRowCount()}`,
-        "muted"
-      );
+      if (isDeactivateJob()) {
+        setStatus(
+          `Kullanıcılar pasife alınıyor. Süre: ${elapsedText} | İşlenen firma: ${Number(
+            snapshot.processedCount || 0
+          )}/${Number(snapshot.totalCount || 0)} | Pasife alınan: ${Number(snapshot.deactivatedUserCount || 0)}`,
+          "muted"
+        );
+      } else {
+        setStatus(
+          `Kullanıcılar listeleniyor. Süre: ${elapsedText} | İşlenen: ${Number(snapshot.processedCount || 0)}/${Number(
+            snapshot.totalCount || 0
+          )} | Listelenen: ${getTotalListedRowCount()}`,
+          "muted"
+        );
+      }
     };
 
     const stopTimers = () => {
@@ -1699,6 +1730,7 @@
       listedRowsByKey.clear();
       snapshot = {
         done: false,
+        actionType: "",
         error: "",
         totalCount: 0,
         processedCount: 0,
@@ -1710,6 +1742,9 @@
         totalUserCount: 0,
         activeUserCount: 0,
         listedUserCount: 0,
+        selectedUserCount: 0,
+        deactivatedUserCount: 0,
+        failedUserCount: 0,
         failureSamples: [],
         failedRequestPreview: null
       };
@@ -1731,6 +1766,7 @@
       activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : activeJobCreatedAt;
       activeJobFinishedAt = Number.isFinite(Number(data.finishedAt)) ? Number(data.finishedAt) : 0;
       snapshot.done = data.done === true;
+      snapshot.actionType = String(data.type || snapshot.actionType || "").trim();
       snapshot.error = String(data.error || "").trim();
       snapshot.totalCount = Number.isFinite(Number(data.totalCount)) ? Number(data.totalCount) : snapshot.totalCount;
       snapshot.processedCount = Number.isFinite(Number(data.processedCount))
@@ -1744,9 +1780,18 @@
         snapshot.scannedCompanyCount = Number(data.summary.scannedCompanyCount || snapshot.totalCount || 0);
         snapshot.successCompanyCount = Number(data.summary.successCompanyCount || snapshot.successCount || 0);
         snapshot.failureCompanyCount = Number(data.summary.failureCompanyCount || snapshot.failureCount || 0);
-        snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
-        snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
-        snapshot.listedUserCount = Number(data.summary.listedUserCount || listedRowsByKey.size || 0);
+        if (Object.prototype.hasOwnProperty.call(data.summary, "totalUserCount")) {
+          snapshot.totalUserCount = Number(data.summary.totalUserCount || 0);
+        }
+        if (Object.prototype.hasOwnProperty.call(data.summary, "activeUserCount")) {
+          snapshot.activeUserCount = Number(data.summary.activeUserCount || 0);
+        }
+        if (Object.prototype.hasOwnProperty.call(data.summary, "listedUserCount") && !isDeactivateJob()) {
+          snapshot.listedUserCount = Number(data.summary.listedUserCount || listedRowsByKey.size || 0);
+        }
+        snapshot.selectedUserCount = Number(data.summary.selectedUserCount || snapshot.selectedUserCount || 0);
+        snapshot.deactivatedUserCount = Number(data.summary.deactivatedUserCount || snapshot.deactivatedUserCount || 0);
+        snapshot.failedUserCount = Number(data.summary.failedUserCount || snapshot.failedUserCount || 0);
         snapshot.failureSamples = Array.isArray(data.summary.failureSamples) ? data.summary.failureSamples : [];
         snapshot.failedRequestPreview =
           data.summary.debugPreview &&
@@ -1799,6 +1844,11 @@
           return;
         }
 
+        if (meta.type === "deactivated-users") {
+          markRowsAsDeactivated(Array.isArray(meta.rows) ? meta.rows : []);
+          return;
+        }
+
         if (meta.type === "user") {
           addListedRow(String(event?.key || "").trim(), meta);
         }
@@ -1839,7 +1889,7 @@
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "Kullanıcı listeleme durumu okunamadı"));
+          throw new Error(getApiErrorMessage(response, data, "İş durumu okunamadı"));
         }
 
         activeJobFailureCount = 0;
@@ -1849,8 +1899,11 @@
         finalizeRender();
 
         if (snapshot.done) {
+          deleteInProgress = false;
           setBusy(false);
           stopTimers();
+          tableRenderDirty = true;
+          finalizeRender({ preserveStatus: true });
           return;
         }
 
@@ -1861,7 +1914,8 @@
         activeJobFailureCount += 1;
         if (activeJobFailureCount >= 3) {
           snapshot.done = true;
-          snapshot.error = err?.message || "Kullanıcı listeleme durumu okunamadı.";
+          snapshot.error = err?.message || "İş durumu okunamadı.";
+          deleteInProgress = false;
           setBusy(false);
           stopTimers();
           finalizeRender();
@@ -2001,6 +2055,46 @@
             throw new Error(getApiErrorMessage(response, responseData, "Kullanıcılar pasife alınamadı"));
           }
 
+          const deactivateJobId = String(responseData.jobId || "").trim();
+          if (deactivateJobId) {
+            stopTimers();
+            activeJobId = deactivateJobId;
+            activeJobCursor = 0;
+            activeJobCreatedAt = Number.isFinite(Number(responseData.createdAt)) ? Number(responseData.createdAt) : Date.now();
+            activeJobFinishedAt = 0;
+            activeJobFailureCount = 0;
+            snapshot.done = false;
+            snapshot.actionType = String(responseData.type || "obus-user-deactivate-delete").trim();
+            snapshot.error = "";
+            snapshot.totalCount = Number.isFinite(Number(responseData.companyCount))
+              ? Number(responseData.companyCount)
+              : selectedRows.length;
+            snapshot.processedCount = 0;
+            snapshot.successCount = 0;
+            snapshot.failureCount = 0;
+            snapshot.scannedCompanyCount = snapshot.totalCount;
+            snapshot.successCompanyCount = 0;
+            snapshot.failureCompanyCount = 0;
+            snapshot.selectedUserCount = Number.isFinite(Number(responseData.selectedUserCount))
+              ? Number(responseData.selectedUserCount)
+              : selectedRows.length;
+            snapshot.deactivatedUserCount = 0;
+            snapshot.failedUserCount = 0;
+            snapshot.failureSamples = [];
+            snapshot.failedRequestPreview = null;
+            updatePageUrl();
+            setBusy(true);
+            tableRenderDirty = true;
+            finalizeRender({ preserveStatus: true });
+            setStatus(
+              String(responseData.userMessage || "").trim() || `${selectedRows.length} kullanıcı için pasife alma başlatıldı.`,
+              "muted"
+            );
+            startStatusTimer();
+            void pollActiveJob();
+            return;
+          }
+
           applyDeactivateResults(responseData);
           finalizeRender({ preserveStatus: true });
           setStatus(
@@ -2014,7 +2108,9 @@
           finalizeRender({ preserveStatus: true });
           setStatus(err?.message || "Kullanıcılar pasife alınamadı.", "error");
         } finally {
-          deleteInProgress = false;
+          if (!(activeJobId && snapshot.done !== true && isDeactivateJob())) {
+            deleteInProgress = false;
+          }
           tableRenderDirty = true;
           finalizeRender({ preserveStatus: true });
         }
