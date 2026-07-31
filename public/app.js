@@ -1776,9 +1776,32 @@
 
     const isTransientLiveJobStatusResponse = (response) => [502, 503, 504].includes(Number(response?.status || 0));
 
+    const isStaleLiveJobStatusResponse = (response, data) => {
+      return Number(response?.status || 0) === 404 && data?.ok === false;
+    };
+
     const isTransientLiveJobStatusError = (err) => {
       const message = String(err?.message || "").trim();
       return message === "__OBUS_LIVE_TRANSIENT__" || /Failed to fetch|Load failed|NetworkError/i.test(message);
+    };
+
+    const isStaleLiveJobStatusError = (err) => String(err?.message || "").trim() === "__OBUS_LIVE_STALE__";
+
+    const clearStaleActiveJob = () => {
+      stopTimers();
+      activeJobId = "";
+      activeJobToken = "";
+      activeJobCursor = 0;
+      activeJobCreatedAt = 0;
+      activeJobFinishedAt = 0;
+      activeJobFailureCount = 0;
+      deleteInProgress = false;
+      snapshot.done = false;
+      snapshot.error = "";
+      snapshot.failedRequestPreview = null;
+      updatePageUrl();
+      setBusy(false);
+      finalizeRender();
     };
 
     const applySnapshot = (data) => {
@@ -1914,6 +1937,9 @@
           credentials: "same-origin"
         });
         const data = await parseJsonResponse(response);
+        if (isStaleLiveJobStatusResponse(response, data)) {
+          throw new Error("__OBUS_LIVE_STALE__");
+        }
         if (isTransientLiveJobStatusResponse(response)) {
           throw new Error("__OBUS_LIVE_TRANSIENT__");
         }
@@ -1962,6 +1988,11 @@
         startStatusTimer();
         scheduleJobPoll(hasMoreEvents ? 120 : 900);
       } catch (err) {
+        if (isStaleLiveJobStatusError(err)) {
+          clearStaleActiveJob();
+          return;
+        }
+
         if (isTransientLiveJobStatusError(err)) {
           activeJobFailureCount += 1;
           setBusy(true);
