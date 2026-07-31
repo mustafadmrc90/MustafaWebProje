@@ -1774,6 +1774,13 @@
       }, delayMs);
     };
 
+    const isTransientLiveJobStatusResponse = (response) => [502, 503, 504].includes(Number(response?.status || 0));
+
+    const isTransientLiveJobStatusError = (err) => {
+      const message = String(err?.message || "").trim();
+      return message === "__OBUS_LIVE_TRANSIENT__" || /Failed to fetch|Load failed|NetworkError/i.test(message);
+    };
+
     const applySnapshot = (data) => {
       const wasDone = snapshot.done === true;
       activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : activeJobCreatedAt;
@@ -1907,6 +1914,9 @@
           credentials: "same-origin"
         });
         const data = await parseJsonResponse(response);
+        if (isTransientLiveJobStatusResponse(response)) {
+          throw new Error("__OBUS_LIVE_TRANSIENT__");
+        }
         if (!response.ok || !data?.ok) {
           const errorMessage = getApiErrorMessage(response, data, "İş durumu okunamadı");
           let responseBody = data ? JSON.stringify(data, null, 2) : "";
@@ -1952,6 +1962,15 @@
         startStatusTimer();
         scheduleJobPoll(hasMoreEvents ? 120 : 900);
       } catch (err) {
+        if (isTransientLiveJobStatusError(err)) {
+          activeJobFailureCount += 1;
+          setBusy(true);
+          startStatusTimer();
+          finalizeRender({ preserveStatus: true });
+          scheduleJobPoll(activeJobFailureCount >= 3 ? 5000 : 1400);
+          return;
+        }
+
         activeJobFailureCount += 1;
         if (activeJobFailureCount >= 3) {
           snapshot.done = true;
