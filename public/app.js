@@ -1293,6 +1293,7 @@
     };
 
     let activeJobId = String(root.getAttribute("data-obus-user-deactivate-initial-job-id") || "").trim();
+    let activeJobToken = "";
     let activeJobCursor = 0;
     let activeJobCreatedAt = Number.parseInt(
       String(root.getAttribute("data-obus-user-deactivate-initial-created-at") || "0"),
@@ -1723,6 +1724,7 @@
     const resetJobState = () => {
       stopTimers();
       activeJobCursor = 0;
+      activeJobToken = "";
       activeJobCreatedAt = 0;
       activeJobFinishedAt = 0;
       activeJobFailureCount = 0;
@@ -1882,14 +1884,36 @@
     const pollActiveJob = async () => {
       if (!activeJobId) return;
       try {
-        const response = await fetch(`/api/obus-live/${encodeURIComponent(activeJobId)}?cursor=${activeJobCursor}`, {
+        const pollParams = new URLSearchParams({ cursor: String(activeJobCursor) });
+        if (activeJobToken) {
+          pollParams.set("token", activeJobToken);
+        }
+        const statusUrl = `/api/obus-live/${encodeURIComponent(activeJobId)}?${pollParams.toString()}`;
+        const response = await fetch(statusUrl, {
           headers: { Accept: "application/json" },
           cache: "no-store",
           credentials: "same-origin"
         });
         const data = await parseJsonResponse(response);
         if (!response.ok || !data?.ok) {
-          throw new Error(getApiErrorMessage(response, data, "İş durumu okunamadı"));
+          const errorMessage = getApiErrorMessage(response, data, "İş durumu okunamadı");
+          let responseBody = data ? JSON.stringify(data, null, 2) : "";
+          if (!responseBody) {
+            try {
+              responseBody = await response.text();
+            } catch (_) {
+              responseBody = "";
+            }
+          }
+          snapshot.failedRequestPreview = {
+            service: "Canlı İş Durumu",
+            status: Number.isFinite(Number(response.status)) ? Number(response.status) : null,
+            requestUrl: statusUrl.replace(/([?&]token=)[^&]+/i, "$1***"),
+            requestBody: "{}",
+            responseBody: responseBody || response.statusText || errorMessage,
+            error: errorMessage
+          };
+          throw new Error(errorMessage);
         }
 
         activeJobFailureCount = 0;
@@ -2059,6 +2083,7 @@
           if (deactivateJobId) {
             stopTimers();
             activeJobId = deactivateJobId;
+            activeJobToken = String(responseData.jobToken || "").trim();
             activeJobCursor = 0;
             activeJobCreatedAt = Number.isFinite(Number(responseData.createdAt)) ? Number(responseData.createdAt) : Date.now();
             activeJobFinishedAt = 0;
@@ -2153,6 +2178,7 @@
         }
 
         activeJobId = String(data.jobId || "").trim();
+        activeJobToken = String(data.jobToken || "").trim();
         activeJobCreatedAt = Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : Date.now();
         snapshot.totalCount = Number.isFinite(Number(data.companyCount)) ? Number(data.companyCount) : companies.length;
         snapshot.scannedCompanyCount = snapshot.totalCount;

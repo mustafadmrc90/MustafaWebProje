@@ -1,6 +1,7 @@
 const path = require("path");
 const os = require("os");
 const net = require("net");
+const crypto = require("crypto");
 const fsSync = require("fs");
 const fs = require("fs/promises");
 const { execFileSync } = require("child_process");
@@ -1085,19 +1086,31 @@ app.use(
     parameterLimit: REQUEST_BODY_PARAMETER_LIMIT
   })
 );
-app.use(
-  session({
-    store: new DatabaseSessionStore({ pool }),
-    secret: process.env.SESSION_SECRET || "dev-secret-change-me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: isProd
-    }
-  })
-);
+const appSessionMiddleware = session({
+  store: new DatabaseSessionStore({ pool }),
+  secret: process.env.SESSION_SECRET || "dev-secret-change-me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd
+  }
+});
+
+function shouldSkipSessionMiddleware(req) {
+  const pathname = String(req.path || req.originalUrl || "").trim();
+  if (pathname.startsWith("/public/")) return true;
+  if (pathname.startsWith("/api/obus-live/") && String(req.query?.token || "").trim()) return true;
+  return false;
+}
+
+app.use((req, res, next) => {
+  if (shouldSkipSessionMiddleware(req)) {
+    return next();
+  }
+  return appSessionMiddleware(req, res, next);
+});
 
 app.use("/public", express.static(path.join(__dirname, "public")));
 
@@ -12079,6 +12092,7 @@ function createObusLiveJob({ type, ownerUserId, totalCount = 0 }) {
   const jobId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   const job = {
     id: jobId,
+    accessToken: crypto.randomBytes(24).toString("hex"),
     type: String(type || "").trim() || "obus-action",
     ownerUserId: Number(ownerUserId) || 0,
     totalCount: safeTotalCount,
@@ -12199,12 +12213,20 @@ function finalizeObusLiveJobSingleResult(job, ok = true) {
   job.updatedAt = Date.now();
 }
 
-function readObusLiveJob(jobId, ownerUserId) {
+function isObusLiveJobTokenMatch(job, accessToken = "") {
+  const expected = String(job?.accessToken || "").trim();
+  const actual = String(accessToken || "").trim();
+  if (!expected || !actual) return false;
+  return expected === actual;
+}
+
+function readObusLiveJob(jobId, ownerUserId, accessToken = "") {
   cleanupObusLiveJobs();
   const job = obusLiveJobs.get(String(jobId || "").trim());
   if (!job) return null;
-  if (Number(job.ownerUserId || 0) !== Number(ownerUserId || 0)) return null;
-  return job;
+  if (Number(job.ownerUserId || 0) === Number(ownerUserId || 0) && Number(ownerUserId || 0) > 0) return job;
+  if (isObusLiveJobTokenMatch(job, accessToken)) return job;
+  return null;
 }
 
 function readObusLiveJobSnapshot(job, cursor = 0) {
@@ -22269,7 +22291,7 @@ app.post("/general/journey-update", requireAuth, requireMenuAccess("journey-upda
   });
 });
 
-app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
+app.get("/api/obus-live/:jobId", async (req, res) => {
   const jobId = String(req.params.jobId || "").trim();
   if (!jobId) {
     return res.status(400).json({ ok: false, error: "jobId zorunludur." });
@@ -22278,7 +22300,11 @@ app.get("/api/obus-live/:jobId", requireAuth, async (req, res) => {
   const cursorRaw = String(req.query.cursor || "0").trim();
   const parsedCursor = Number.parseInt(cursorRaw, 10);
   const cursor = Number.isFinite(parsedCursor) ? Math.max(0, parsedCursor) : 0;
-  const job = readObusLiveJob(jobId, Number(req.session?.user?.id || 0));
+  const token = String(req.query?.token || "").trim();
+  if (!token && !req.session?.user) {
+    return res.status(401).json({ ok: false, error: "Oturum süresi doldu." });
+  }
+  const job = readObusLiveJob(jobId, Number(req.session?.user?.id || 0), token);
   if (!job) {
     return res.status(404).json({ ok: false, error: "İşlem bulunamadı. Sayfa yenilenmiş veya sunucu yeniden başlamış olabilir." });
   }
@@ -22306,6 +22332,7 @@ app.post("/api/obus-user-deactivate/run", requireAuth, requireMenuAccess("obus-u
     return res.json({
       ok: true,
       jobId: String(startResult.job.id || "").trim(),
+      jobToken: String(startResult.job.accessToken || "").trim(),
       totalCount: Number(startResult.job.totalCount || 0),
       createdAt: Number(startResult.job.createdAt || 0),
       companyCount: Number(startResult.companyCount || 0)
@@ -22405,6 +22432,7 @@ app.post("/api/obus-user-deactivate/deactivate", requireAuth, requireMenuAccess(
     return res.json({
       ok: true,
       jobId: String(job.id || "").trim(),
+      jobToken: String(job.accessToken || "").trim(),
       type: String(job.type || "").trim(),
       totalCount: Number(job.totalCount || 0),
       createdAt: Number(job.createdAt || 0),
