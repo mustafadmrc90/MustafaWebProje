@@ -4857,13 +4857,43 @@ button.ghost {
   align-items: start;
 }
 
+.obus-user-deactivate-layout > * {
+  min-width: 0;
+}
+
 .obus-user-deactivate-controls {
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .obus-user-deactivate-controls-body {
   display: grid;
   gap: 14px;
+  min-width: 0;
+}
+
+.obus-user-deactivate-controls-body > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.obus-user-deactivate-controls-body .allowed-lines-actions button {
+  min-width: 0;
+}
+
+.obus-user-deactivate-controls .obus-user-create-live-summary {
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.obus-user-deactivate-controls .obus-user-create-live-summary > div {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .obus-user-deactivate-controls-body .obus-user-deactivate-list-button {
